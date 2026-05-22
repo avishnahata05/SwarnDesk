@@ -1,22 +1,41 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: HiraNXT Jewellery ERP API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: rates
+    description: Gold and silver rate operations
+  - name: inventory
+    description: Inventory management
+  - name: customers
+    description: Customer management
+  - name: sales
+    description: Sales and billing
+  - name: karigars
+    description: Karigar (artisan) management
+  - name: repairs
+    description: Repair order management
+  - name: purchases
+    description: Purchase management
+  - name: suppliers
+    description: Supplier management
+  - name: dashboard
+    description: Dashboard summary data
+  - name: settings
+    description: Business settings
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,13 +43,1550 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # ---------- RATES ----------
+  /rates/current:
+    get:
+      operationId: getCurrentRates
+      tags: [rates]
+      summary: Get current gold and silver rates
+      responses:
+        "200":
+          description: Current metal rates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetalRates"
+    put:
+      operationId: updateRates
+      tags: [rates]
+      summary: Manually update gold and silver rates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MetalRatesInput"
+      responses:
+        "200":
+          description: Updated rates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetalRates"
+
+  /rates/history:
+    get:
+      operationId: getRatesHistory
+      tags: [rates]
+      summary: Get rate history for charts
+      responses:
+        "200":
+          description: Rate history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RateHistoryEntry"
+
+  # ---------- DASHBOARD ----------
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Get dashboard summary stats
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  /dashboard/recent-sales:
+    get:
+      operationId: getRecentSales
+      tags: [dashboard]
+      summary: Get recent sales transactions
+      responses:
+        "200":
+          description: Recent sales
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Sale"
+
+  /dashboard/low-stock:
+    get:
+      operationId: getLowStockItems
+      tags: [dashboard]
+      summary: Get low stock inventory items
+      responses:
+        "200":
+          description: Low stock items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/InventoryItem"
+
+  # ---------- INVENTORY ----------
+  /inventory:
+    get:
+      operationId: listInventoryItems
+      tags: [inventory]
+      summary: List all inventory items
+      parameters:
+        - in: query
+          name: category
+          schema:
+            type: string
+        - in: query
+          name: search
+          schema:
+            type: string
+        - in: query
+          name: branch
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Inventory items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/InventoryItem"
+    post:
+      operationId: createInventoryItem
+      tags: [inventory]
+      summary: Add a new inventory item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventoryItemInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryItem"
+
+  /inventory/{id}:
+    get:
+      operationId: getInventoryItem
+      tags: [inventory]
+      summary: Get a single inventory item
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Inventory item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryItem"
+    patch:
+      operationId: updateInventoryItem
+      tags: [inventory]
+      summary: Update an inventory item
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventoryItemUpdate"
+      responses:
+        "200":
+          description: Updated item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryItem"
+    delete:
+      operationId: deleteInventoryItem
+      tags: [inventory]
+      summary: Delete an inventory item
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /inventory/stats/by-category:
+    get:
+      operationId: getInventoryStatsByCategory
+      tags: [inventory]
+      summary: Get inventory grouped by category with value
+      responses:
+        "200":
+          description: Category stats
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CategoryStat"
+
+  # ---------- CUSTOMERS ----------
+  /customers:
+    get:
+      operationId: listCustomers
+      tags: [customers]
+      summary: List all customers
+      parameters:
+        - in: query
+          name: search
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Customers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Customer"
+    post:
+      operationId: createCustomer
+      tags: [customers]
+      summary: Create a new customer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerInput"
+      responses:
+        "201":
+          description: Created customer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+
+  /customers/{id}:
+    get:
+      operationId: getCustomer
+      tags: [customers]
+      summary: Get a customer with purchase history
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Customer detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerDetail"
+    patch:
+      operationId: updateCustomer
+      tags: [customers]
+      summary: Update a customer
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerUpdate"
+      responses:
+        "200":
+          description: Updated customer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+    delete:
+      operationId: deleteCustomer
+      tags: [customers]
+      summary: Delete a customer
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /customers/upcoming-occasions:
+    get:
+      operationId: getUpcomingOccasions
+      tags: [customers]
+      summary: Get customers with upcoming birthdays or anniversaries
+      responses:
+        "200":
+          description: Upcoming occasions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UpcomingOccasion"
+
+  # ---------- SALES ----------
+  /sales:
+    get:
+      operationId: listSales
+      tags: [sales]
+      summary: List all sales
+      parameters:
+        - in: query
+          name: startDate
+          schema:
+            type: string
+        - in: query
+          name: endDate
+          schema:
+            type: string
+        - in: query
+          name: customerId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Sales
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Sale"
+    post:
+      operationId: createSale
+      tags: [sales]
+      summary: Create a new sale
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaleInput"
+      responses:
+        "201":
+          description: Created sale
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Sale"
+
+  /sales/{id}:
+    get:
+      operationId: getSale
+      tags: [sales]
+      summary: Get a sale with line items
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Sale detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SaleDetail"
+    patch:
+      operationId: updateSale
+      tags: [sales]
+      summary: Update a sale
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaleUpdate"
+      responses:
+        "200":
+          description: Updated sale
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Sale"
+
+  /sales/stats/by-category:
+    get:
+      operationId: getSalesByCategory
+      tags: [sales]
+      summary: Best selling categories this month
+      responses:
+        "200":
+          description: Sales by category
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CategoryStat"
+
+  /sales/stats/daily:
+    get:
+      operationId: getDailySalesStats
+      tags: [sales]
+      summary: Daily sales stats for the last 30 days
+      responses:
+        "200":
+          description: Daily stats
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DailyStat"
+
+  # ---------- KARIGARS ----------
+  /karigars:
+    get:
+      operationId: listKarigars
+      tags: [karigars]
+      summary: List all karigars
+      responses:
+        "200":
+          description: Karigars
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Karigar"
+    post:
+      operationId: createKarigar
+      tags: [karigars]
+      summary: Add a karigar
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KarigarInput"
+      responses:
+        "201":
+          description: Created karigar
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Karigar"
+
+  /karigars/{id}:
+    get:
+      operationId: getKarigar
+      tags: [karigars]
+      summary: Get karigar with orders and pending metal
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Karigar detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KarigarDetail"
+    patch:
+      operationId: updateKarigar
+      tags: [karigars]
+      summary: Update a karigar
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KarigarUpdate"
+      responses:
+        "200":
+          description: Updated karigar
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Karigar"
+
+  /karigars/{id}/issue-metal:
+    post:
+      operationId: issueMetalToKarigar
+      tags: [karigars]
+      summary: Issue gold/silver to a karigar
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MetalIssueInput"
+      responses:
+        "201":
+          description: Metal issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetalIssue"
+
+  /karigars/{id}/return-metal:
+    post:
+      operationId: returnMetalFromKarigar
+      tags: [karigars]
+      summary: Record metal return from karigar
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MetalReturnInput"
+      responses:
+        "201":
+          description: Metal returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetalReturn"
+
+  # ---------- REPAIRS ----------
+  /repairs:
+    get:
+      operationId: listRepairs
+      tags: [repairs]
+      summary: List all repair jobs
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Repair jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RepairJob"
+    post:
+      operationId: createRepair
+      tags: [repairs]
+      summary: Log a new repair job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RepairJobInput"
+      responses:
+        "201":
+          description: Created repair job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepairJob"
+
+  /repairs/{id}:
+    get:
+      operationId: getRepair
+      tags: [repairs]
+      summary: Get a repair job
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Repair job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepairJob"
+    patch:
+      operationId: updateRepair
+      tags: [repairs]
+      summary: Update a repair job
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RepairJobUpdate"
+      responses:
+        "200":
+          description: Updated repair job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepairJob"
+
+  # ---------- PURCHASES ----------
+  /purchases:
+    get:
+      operationId: listPurchases
+      tags: [purchases]
+      summary: List all purchases
+      responses:
+        "200":
+          description: Purchases
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Purchase"
+    post:
+      operationId: createPurchase
+      tags: [purchases]
+      summary: Create a purchase entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PurchaseInput"
+      responses:
+        "201":
+          description: Created purchase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Purchase"
+
+  /purchases/{id}:
+    get:
+      operationId: getPurchase
+      tags: [purchases]
+      summary: Get a purchase
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Purchase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Purchase"
+
+  # ---------- SUPPLIERS ----------
+  /suppliers:
+    get:
+      operationId: listSuppliers
+      tags: [suppliers]
+      summary: List all suppliers
+      responses:
+        "200":
+          description: Suppliers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Supplier"
+    post:
+      operationId: createSupplier
+      tags: [suppliers]
+      summary: Create a supplier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupplierInput"
+      responses:
+        "201":
+          description: Created supplier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Supplier"
+
+  # ---------- SETTINGS ----------
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get business settings
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BusinessSettings"
+    put:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update business settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BusinessSettingsInput"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BusinessSettings"
+
 components:
   schemas:
     HealthStatus:
       type: object
+      required: [status]
       properties:
         status:
           type: string
-      required:
-        - status
 
+    MetalRates:
+      type: object
+      required: [gold22k, gold24k, gold18k, silver, updatedAt]
+      properties:
+        gold22k:
+          type: number
+          description: Price per gram in INR
+        gold24k:
+          type: number
+        gold18k:
+          type: number
+        silver:
+          type: number
+        updatedAt:
+          type: string
+
+    MetalRatesInput:
+      type: object
+      properties:
+        gold22k:
+          type: number
+        gold24k:
+          type: number
+        gold18k:
+          type: number
+        silver:
+          type: number
+
+    RateHistoryEntry:
+      type: object
+      required: [timestamp, gold22k, silver]
+      properties:
+        timestamp:
+          type: string
+        gold22k:
+          type: number
+        silver:
+          type: number
+
+    DashboardSummary:
+      type: object
+      required: [todaySales, todayPurchases, todayProfit, pendingOrders, totalCustomers, totalInventoryItems, totalInventoryValue, pendingRepairs]
+      properties:
+        todaySales:
+          type: number
+        todayPurchases:
+          type: number
+        todayProfit:
+          type: number
+        pendingOrders:
+          type: integer
+        totalCustomers:
+          type: integer
+        totalInventoryItems:
+          type: integer
+        totalInventoryValue:
+          type: number
+        pendingRepairs:
+          type: integer
+
+    InventoryItem:
+      type: object
+      required: [id, name, category, purity, grossWeight, netWeight, stoneWeight, makingCharges, metalRate, totalValue, quantity, branch, huid, barcode, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        category:
+          type: string
+          description: gold, silver, diamond, kundan, platinum
+        purity:
+          type: string
+          description: 24K, 22K, 18K, 14K, 925, etc.
+        grossWeight:
+          type: number
+        netWeight:
+          type: number
+        stoneWeight:
+          type: number
+        stoneValue:
+          type: ["number", "null"]
+        makingCharges:
+          type: number
+        metalRate:
+          type: number
+        totalValue:
+          type: number
+        quantity:
+          type: integer
+        branch:
+          type: string
+        huid:
+          type: ["string", "null"]
+        barcode:
+          type: ["string", "null"]
+        karigarId:
+          type: ["integer", "null"]
+        karigarName:
+          type: ["string", "null"]
+        lowStockThreshold:
+          type: integer
+        createdAt:
+          type: string
+
+    InventoryItemInput:
+      type: object
+      required: [name, category, purity, grossWeight, netWeight, stoneWeight, makingCharges, metalRate, totalValue, quantity, branch]
+      properties:
+        name:
+          type: string
+        category:
+          type: string
+        purity:
+          type: string
+        grossWeight:
+          type: number
+        netWeight:
+          type: number
+        stoneWeight:
+          type: number
+        stoneValue:
+          type: ["number", "null"]
+        makingCharges:
+          type: number
+        metalRate:
+          type: number
+        totalValue:
+          type: number
+        quantity:
+          type: integer
+        branch:
+          type: string
+        huid:
+          type: ["string", "null"]
+        barcode:
+          type: ["string", "null"]
+        karigarId:
+          type: ["integer", "null"]
+        lowStockThreshold:
+          type: integer
+
+    InventoryItemUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        category:
+          type: string
+        purity:
+          type: string
+        grossWeight:
+          type: number
+        netWeight:
+          type: number
+        stoneWeight:
+          type: number
+        stoneValue:
+          type: ["number", "null"]
+        makingCharges:
+          type: number
+        metalRate:
+          type: number
+        totalValue:
+          type: number
+        quantity:
+          type: integer
+        branch:
+          type: string
+        huid:
+          type: ["string", "null"]
+        barcode:
+          type: ["string", "null"]
+        karigarId:
+          type: ["integer", "null"]
+        lowStockThreshold:
+          type: integer
+
+    CategoryStat:
+      type: object
+      required: [category, count, value]
+      properties:
+        category:
+          type: string
+        count:
+          type: integer
+        value:
+          type: number
+
+    Customer:
+      type: object
+      required: [id, name, mobile, totalPurchases, balance, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        mobile:
+          type: string
+        email:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        birthday:
+          type: ["string", "null"]
+        anniversary:
+          type: ["string", "null"]
+        totalPurchases:
+          type: number
+        balance:
+          type: number
+          description: positive = credit, negative = debit
+        loyaltyPoints:
+          type: integer
+        gstin:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    CustomerInput:
+      type: object
+      required: [name, mobile]
+      properties:
+        name:
+          type: string
+        mobile:
+          type: string
+        email:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        birthday:
+          type: ["string", "null"]
+        anniversary:
+          type: ["string", "null"]
+        gstin:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+
+    CustomerUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        mobile:
+          type: string
+        email:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        birthday:
+          type: ["string", "null"]
+        anniversary:
+          type: ["string", "null"]
+        gstin:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+
+    CustomerDetail:
+      type: object
+      required: [customer, recentSales, pendingRepairs]
+      properties:
+        customer:
+          $ref: "#/components/schemas/Customer"
+        recentSales:
+          type: array
+          items:
+            $ref: "#/components/schemas/Sale"
+        pendingRepairs:
+          type: array
+          items:
+            $ref: "#/components/schemas/RepairJob"
+
+    UpcomingOccasion:
+      type: object
+      required: [customerId, customerName, mobile, occasionType, occasionDate, daysUntil]
+      properties:
+        customerId:
+          type: integer
+        customerName:
+          type: string
+        mobile:
+          type: string
+        occasionType:
+          type: string
+        occasionDate:
+          type: string
+        daysUntil:
+          type: integer
+
+    Sale:
+      type: object
+      required: [id, customerId, customerName, totalAmount, gstAmount, discountAmount, exchangeGoldWeight, exchangeGoldValue, paymentMode, paymentStatus, invoiceNumber, saleDate, createdAt]
+      properties:
+        id:
+          type: integer
+        customerId:
+          type: ["integer", "null"]
+        customerName:
+          type: string
+        totalAmount:
+          type: number
+        gstAmount:
+          type: number
+        discountAmount:
+          type: number
+        exchangeGoldWeight:
+          type: number
+        exchangeGoldValue:
+          type: number
+        paymentMode:
+          type: string
+          description: cash, upi, card, credit, partial
+        paymentStatus:
+          type: string
+          description: paid, partial, pending
+        invoiceNumber:
+          type: string
+        saleDate:
+          type: string
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    SaleInput:
+      type: object
+      required: [customerName, totalAmount, gstAmount, discountAmount, exchangeGoldWeight, exchangeGoldValue, paymentMode, paymentStatus, items]
+      properties:
+        customerId:
+          type: ["integer", "null"]
+        customerName:
+          type: string
+        totalAmount:
+          type: number
+        gstAmount:
+          type: number
+        discountAmount:
+          type: number
+        exchangeGoldWeight:
+          type: number
+        exchangeGoldValue:
+          type: number
+        paymentMode:
+          type: string
+        paymentStatus:
+          type: string
+        notes:
+          type: ["string", "null"]
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SaleItemInput"
+
+    SaleUpdate:
+      type: object
+      properties:
+        paymentMode:
+          type: string
+        paymentStatus:
+          type: string
+        notes:
+          type: ["string", "null"]
+
+    SaleItemInput:
+      type: object
+      required: [inventoryItemId, quantity, unitPrice, metalRate, goldWeight]
+      properties:
+        inventoryItemId:
+          type: integer
+        quantity:
+          type: integer
+        unitPrice:
+          type: number
+        metalRate:
+          type: number
+        goldWeight:
+          type: number
+        makingCharges:
+          type: number
+        discount:
+          type: number
+
+    SaleDetail:
+      type: object
+      required: [sale, items]
+      properties:
+        sale:
+          $ref: "#/components/schemas/Sale"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SaleLineItem"
+
+    SaleLineItem:
+      type: object
+      required: [id, saleId, inventoryItemId, itemName, quantity, unitPrice, metalRate, goldWeight, makingCharges, discount, lineTotal]
+      properties:
+        id:
+          type: integer
+        saleId:
+          type: integer
+        inventoryItemId:
+          type: integer
+        itemName:
+          type: string
+        quantity:
+          type: integer
+        unitPrice:
+          type: number
+        metalRate:
+          type: number
+        goldWeight:
+          type: number
+        makingCharges:
+          type: number
+        discount:
+          type: number
+        lineTotal:
+          type: number
+
+    DailyStat:
+      type: object
+      required: [date, sales, purchases, profit]
+      properties:
+        date:
+          type: string
+        sales:
+          type: number
+        purchases:
+          type: number
+        profit:
+          type: number
+
+    Karigar:
+      type: object
+      required: [id, name, mobile, specialization, pendingGoldWeight, pendingSilverWeight, pendingOrders, totalWagesPaid, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        mobile:
+          type: string
+        specialization:
+          type: string
+        address:
+          type: ["string", "null"]
+        pendingGoldWeight:
+          type: number
+        pendingSilverWeight:
+          type: number
+        pendingOrders:
+          type: integer
+        totalWagesPaid:
+          type: number
+        createdAt:
+          type: string
+
+    KarigarInput:
+      type: object
+      required: [name, mobile, specialization]
+      properties:
+        name:
+          type: string
+        mobile:
+          type: string
+        specialization:
+          type: string
+        address:
+          type: ["string", "null"]
+
+    KarigarUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        mobile:
+          type: string
+        specialization:
+          type: string
+        address:
+          type: ["string", "null"]
+
+    KarigarDetail:
+      type: object
+      required: [karigar, metalIssues, metalReturns]
+      properties:
+        karigar:
+          $ref: "#/components/schemas/Karigar"
+        metalIssues:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetalIssue"
+        metalReturns:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetalReturn"
+
+    MetalIssue:
+      type: object
+      required: [id, karigarId, metalType, weight, purity, issueDate, notes]
+      properties:
+        id:
+          type: integer
+        karigarId:
+          type: integer
+        metalType:
+          type: string
+        weight:
+          type: number
+        purity:
+          type: string
+        issueDate:
+          type: string
+        notes:
+          type: ["string", "null"]
+
+    MetalIssueInput:
+      type: object
+      required: [metalType, weight, purity]
+      properties:
+        metalType:
+          type: string
+        weight:
+          type: number
+        purity:
+          type: string
+        notes:
+          type: ["string", "null"]
+
+    MetalReturn:
+      type: object
+      required: [id, karigarId, metalType, issuedWeight, returnedWeight, wastagePercent, returnDate, notes]
+      properties:
+        id:
+          type: integer
+        karigarId:
+          type: integer
+        metalType:
+          type: string
+        issuedWeight:
+          type: number
+        returnedWeight:
+          type: number
+        wastagePercent:
+          type: number
+        returnDate:
+          type: string
+        notes:
+          type: ["string", "null"]
+
+    MetalReturnInput:
+      type: object
+      required: [metalType, issuedWeight, returnedWeight, wastagePercent]
+      properties:
+        metalType:
+          type: string
+        issuedWeight:
+          type: number
+        returnedWeight:
+          type: number
+        wastagePercent:
+          type: number
+        notes:
+          type: ["string", "null"]
+
+    RepairJob:
+      type: object
+      required: [id, customerId, customerName, customerMobile, itemDescription, issue, estimatedCost, status, receivedDate, promisedDate, createdAt]
+      properties:
+        id:
+          type: integer
+        customerId:
+          type: ["integer", "null"]
+        customerName:
+          type: string
+        customerMobile:
+          type: string
+        itemDescription:
+          type: string
+        issue:
+          type: string
+        estimatedCost:
+          type: number
+        actualCost:
+          type: ["number", "null"]
+        status:
+          type: string
+          description: received, in_progress, ready, delivered
+        receivedDate:
+          type: string
+        promisedDate:
+          type: string
+        deliveredDate:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    RepairJobInput:
+      type: object
+      required: [customerName, customerMobile, itemDescription, issue, estimatedCost, promisedDate]
+      properties:
+        customerId:
+          type: ["integer", "null"]
+        customerName:
+          type: string
+        customerMobile:
+          type: string
+        itemDescription:
+          type: string
+        issue:
+          type: string
+        estimatedCost:
+          type: number
+        promisedDate:
+          type: string
+        notes:
+          type: ["string", "null"]
+
+    RepairJobUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+        actualCost:
+          type: ["number", "null"]
+        deliveredDate:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+
+    Purchase:
+      type: object
+      required: [id, supplierId, supplierName, metalType, purity, grossWeight, netWeight, fineWeight, ratePerGram, totalAmount, invoiceNumber, purchaseDate, createdAt]
+      properties:
+        id:
+          type: integer
+        supplierId:
+          type: ["integer", "null"]
+        supplierName:
+          type: string
+        metalType:
+          type: string
+        purity:
+          type: string
+        grossWeight:
+          type: number
+        netWeight:
+          type: number
+        fineWeight:
+          type: number
+        ratePerGram:
+          type: number
+        totalAmount:
+          type: number
+        invoiceNumber:
+          type: string
+        purchaseDate:
+          type: string
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    PurchaseInput:
+      type: object
+      required: [supplierName, metalType, purity, grossWeight, netWeight, fineWeight, ratePerGram, totalAmount, purchaseDate]
+      properties:
+        supplierId:
+          type: ["integer", "null"]
+        supplierName:
+          type: string
+        metalType:
+          type: string
+        purity:
+          type: string
+        grossWeight:
+          type: number
+        netWeight:
+          type: number
+        fineWeight:
+          type: number
+        ratePerGram:
+          type: number
+        totalAmount:
+          type: number
+        purchaseDate:
+          type: string
+        notes:
+          type: ["string", "null"]
+
+    Supplier:
+      type: object
+      required: [id, name, mobile, address, gstin, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        mobile:
+          type: string
+        address:
+          type: ["string", "null"]
+        gstin:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    SupplierInput:
+      type: object
+      required: [name, mobile]
+      properties:
+        name:
+          type: string
+        mobile:
+          type: string
+        address:
+          type: ["string", "null"]
+        gstin:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+
+    BusinessSettings:
+      type: object
+      required: [id, businessName, gstin, address, mobile, email, logo, gstRate, defaultBranch, branches, updatedAt]
+      properties:
+        id:
+          type: integer
+        businessName:
+          type: string
+        gstin:
+          type: string
+        address:
+          type: string
+        mobile:
+          type: string
+        email:
+          type: ["string", "null"]
+        logo:
+          type: ["string", "null"]
+        gstRate:
+          type: number
+        defaultBranch:
+          type: string
+        branches:
+          type: array
+          items:
+            type: string
+        updatedAt:
+          type: string
+
+    BusinessSettingsInput:
+      type: object
+      properties:
+        businessName:
+          type: string
+        gstin:
+          type: string
+        address:
+          type: string
+        mobile:
+          type: string
+        email:
+          type: ["string", "null"]
+        logo:
+          type: ["string", "null"]
+        gstRate:
+          type: number
+        defaultBranch:
+          type: string
+        branches:
+          type: array
+          items:
+            type: string

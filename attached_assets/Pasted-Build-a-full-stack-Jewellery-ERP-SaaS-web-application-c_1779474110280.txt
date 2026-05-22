@@ -1,0 +1,105 @@
+Build a full-stack Jewellery ERP SaaS web application called "HiraNXT" — 
+a modern, AI-powered jewellery business management platform targeting 
+Indian jewellers (retail, wholesale, manufacturing). 
+
+Tech stack: React (frontend), Node.js + Express (backend), PostgreSQL 
+(database), Tailwind CSS for styling. Use a clean, premium dark-gold 
+color theme (#1a1a2e background, #f4c542 gold accent).
+
+--- CORE MODULES TO BUILD ---
+
+1. DASHBOARD
+   - Live gold & silver rate ticker (mock live data, update every 30 sec)
+   - Daily sales summary cards (sales, purchases, profit, pending orders)
+   - Low stock alerts
+   - Quick action buttons: New Sale, New Purchase, Add Item, New Customer
+
+2. INVENTORY MANAGEMENT
+   - Add items: name, category (gold/silver/diamond/kundan), purity 
+     (24K/22K/18K/etc.), weight (gross/net/stone), making charges, HUID 
+     hallmark number, barcode
+   - Stock in/out with karigar (artisan) assignment
+   - Multi-location support (branch-wise stock)
+   - Export inventory to Excel/PDF
+
+3. BILLING & POS (Point of Sale)
+   - One-screen billing: customer search, item barcode scan, metal rate 
+     auto-fill from live rates, GST auto-calculate (3% on jewellery), 
+     discount, exchange old gold
+   - Print GST invoice (A4 and thermal 80mm)
+   - Payment modes: cash, UPI, card, credit, partial payment
+   - WhatsApp invoice send button (generate shareable link)
+
+4. CUSTOMER MANAGEMENT (CRM)
+   - Customer profile: name, mobile, anniversary/birthday, purchase history
+   - Loyalty/scheme tracking (monthly gold saving scheme)
+   - Birthday/anniversary auto-reminder
+   - Customer ledger (credit/debit balance)
+
+5. KARIGAR (Artisan) MANAGEMENT
+   - Issue gold/silver to karigar by weight
+   - Track return with wastage % 
+   - Karigar-wise pending orders and delivery status
+   - Karigar payment/wages tracker
+
+6. REPAIR & ORDER MANAGEMENT
+   - Log repair jobs: customer, item description, issue, estimated cost, 
+     promised delivery date
+   - Status pipeline: Received → In Progress → Ready → Delivered
+   - WhatsApp status update button
+
+7. PURCHASE MANAGEMENT
+   - Supplier-wise purchase entry
+   - Metal receipt: fine gold/silver calculation
+   - Bullion trade entry
+
+8. ACCOUNTING & REPORTS
+   - Daily cash book, ledger
+   - GST reports: GSTR-1, GSTR-3B summary
+   - P&L statement, balance sheet (simple)
+   - Stock valuation report (at current gold rate)
+   - Export all reports to PDF and Excel
+
+9. AI ASSISTANT (differentiator — use OpenAI API or mock it)
+   - Chat widget in dashboard: "Ask HiraNXT anything"
+   - Answers: "Which items are low stock?", "Show today's sales", 
+     "What is my best selling category this month?"
+   - Voice input button (Web Speech API)
+
+10. SETTINGS
+    - Business profile (name, GSTIN, address, logo)
+    - Gold/silver rate manual override
+    - User roles: Admin, Salesperson, Accountant
+    - Branch management
+
+--- ADDITIONAL IMPROVEMENTS OVER JWELLY ---
+- Hindi/English language toggle on every screen
+- WhatsApp-native: every bill, repair update, reminder has a 
+  "Send on WhatsApp" button (opens wa.me link with pre-filled message)
+- Mobile-first responsive design (jewellers use phones/tablets at counter)
+- Onboarding wizard for first-time setup (business name, GSTIN, 
+  gold rate, first item)
+- Public reviews/testimonial section on landing page
+
+--- LANDING PAGE (marketing site, separate route /) ---
+Build a beautiful landing page with:
+- Hero: "India's Smartest Jewellery ERP" with gold animated text
+- Feature highlights (6 cards with icons)
+- Pricing section: Starter ₹999/mo, Pro ₹2499/mo, Enterprise custom
+- Testimonials section (3 mock reviews)
+- Free trial CTA button
+- WhatsApp support button (floating)
+
+--- MOCK DATA ---
+Pre-populate with realistic demo data:
+- 20 inventory items (gold bangles, chains, rings, diamond sets)
+- 5 customers
+- 10 sales transactions
+- 3 repair jobs
+- Live gold rate: ₹7,250/gram (22K), update mock every 30 sec ±₹5
+
+Start by building the landing page and dashboard first, then implement 
+each module. Use localStorage for now as the data store so it works 
+without a backend setup. Make sure the UI looks premium, not like a 
+generic form app — use cards, shadows, smooth transitions, and a 
+sidebar navigation with icons.

@@ -1,10 +1,11 @@
-# [Project name]
+# HiraNXT — Jewellery ERP
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+India's smartest Jewellery ERP SaaS built for Indian jewellers — manages inventory, billing/POS, karigars, repairs, purchases, customers, and GST compliance.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/api-server run dev` — run the API server (port 8080)
+- `pnpm --filter @workspace/hiranxt run dev` — run the frontend (port 21261)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
@@ -14,31 +15,61 @@ _Replace the heading above with the project's name, and this line with one sente
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
+- API: Express 5 (port 8080, path prefix `/api`)
+- Frontend: React + Vite (port 21261, path prefix `/`)
 - DB: PostgreSQL + Drizzle ORM
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - API codegen: Orval (from OpenAPI spec)
 - Build: esbuild (CJS bundle)
+- Router: wouter v3 (Link renders `<a>` — never wrap children in `<a>`)
+- Charts: Recharts
+- UI: shadcn/ui components
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `lib/db/src/schema/` — DB schema files (rates, inventory, customers, sales, karigars, repairs, purchases)
+- `lib/api-spec/openapi.yaml` — OpenAPI contract (source of truth for API)
+- `lib/api-client-react/src/generated/api.ts` — generated React Query hooks
+- `artifacts/api-server/src/routes/` — Express route handlers
+- `artifacts/hiranxt/src/pages/` — Frontend pages (landing + app/*)
+- `artifacts/hiranxt/src/components/AppLayout.tsx` — sidebar + topbar shell
+- `artifacts/hiranxt/src/index.css` — CSS theme (#1a1a2e bg, #f4c542 gold)
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Contract-first API: OpenAPI spec → Orval codegen → React Query hooks; never write fetch calls manually
+- Wouter v3 routing: `<Link href="...">` renders as `<a>`; never nest `<a>` inside `<Link>`
+- All monetary values stored as `numeric` strings in DB, parsed to float in API mappers
+- Sales line items saved to `saleLineItemsTable` with key `items` (not `lineItems`) in POST body
+- Global reverse proxy routes `/api` → port 8080, `/` → port 21261
 
-## Product
+## Product modules
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- **Landing page** — marketing page with pricing, testimonials, live gold rate ticker
+- **Dashboard** — summary cards (sales, profit, inventory value, customers, stock, repairs), 30-day chart, category pie, low stock alerts, recent sales, AI chat widget
+- **Inventory** — category summary cards, searchable/filterable table with low stock badges
+- **Billing & POS** — one-screen POS with item search, cart, GST auto-calc, exchange gold, customer lookup
+- **Customers** — CRM table with upcoming occasions banner, loyalty points, total purchases, WhatsApp links
+- **Karigars** — artisan cards with gold/silver balance tracking, issue metal & return metal dialogs
+- **Repairs** — Kanban board (Received → In Progress → Ready → Delivered) with status progression
+- **Purchases** — metal receipt table (gold/silver from suppliers)
+- **Reports** — daily sales chart with profit overlay, revenue by category, inventory valuation
+- **Settings** — business profile (name, GSTIN, address, GST rate), metal rates update
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Color theme: `#1a1a2e` dark background, `#f4c542` gold accent
+- Language toggle (English / Hindi) in topbar
+- Indian number formatting throughout (₹ symbol, `en-IN` locale)
+- WhatsApp integration links on customers and karigar cards
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Always rebuild API server after route changes: restart the `artifacts/api-server: API Server` workflow
+- Sales POST body must use `items` array key (not `lineItems`) for line items to be saved
+- `pnpm --filter @workspace/db run push` must be run after any schema changes before the API will work
+- Do NOT run `pnpm dev` at workspace root; use workflow restarts instead
+- Purchases table has no `paymentStatus` column (only suppliers + weight/rate/total fields)
 
 ## Pointers
 
