@@ -6,12 +6,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboard, Package, ShoppingCart, Users, Hammer, Wrench,
   TruckIcon, BarChart3, Settings, Menu, X, MessageCircle, Globe, Banknote,
-  ChevronRight, Pencil,
+  ChevronRight, Pencil, LogOut, ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 
 const navItems = [
   { href: "/app/dashboard", label: "Dashboard", labelHi: "डैशबोर्ड", icon: LayoutDashboard },
@@ -33,6 +34,7 @@ interface AppLayoutProps {
 export default function AppLayout({ children }: AppLayoutProps) {
   const [location] = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { user, logout } = useAuth();
   const [goldRate, setGoldRate] = useState(7250);
   const [lang, setLang] = useState<"en" | "hi">("en");
   const [rateDialogOpen, setRateDialogOpen] = useState(false);
@@ -173,6 +175,26 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
         {/* Bottom */}
         <div className="p-3 border-t border-white/10 space-y-1">
+          {/* User info */}
+          {user && (
+            <div className="px-3 py-2 mb-1">
+              <div className="text-[12px] font-semibold text-white truncate">{user.shopName}</div>
+              <div className="text-[11px] text-white/50 truncate">{user.email}</div>
+            </div>
+          )}
+
+          {/* Admin Panel link */}
+          {user?.role === "admin" && (
+            <Link
+              href="/admin"
+              className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-white/60 hover:bg-white/10 hover:text-white transition-all"
+              onClick={() => setSidebarOpen(false)}
+            >
+              <ShieldCheck className="w-4 h-4 flex-shrink-0" />
+              Admin Panel
+            </Link>
+          )}
+
           <a
             href="https://wa.me/919999999999?text=Hello+SwarnDesk+Support"
             target="_blank"
@@ -182,6 +204,15 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <MessageCircle className="w-4 h-4 flex-shrink-0" />
             WhatsApp Support
           </a>
+
+          {/* Logout */}
+          <button
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-white/60 hover:bg-white/10 hover:text-white transition-all text-left"
+            onClick={logout}
+          >
+            <LogOut className="w-4 h-4 flex-shrink-0" />
+            Sign Out
+          </button>
         </div>
       </aside>
 
@@ -228,6 +259,26 @@ export default function AppLayout({ children }: AppLayoutProps) {
             {lang === "en" ? "हिंदी" : "English"}
           </Button>
         </header>
+
+        {/* Trial banner */}
+        {user && user.plan === "trial" && (() => {
+          const daysLeft = Math.ceil((new Date(user.trialEndsAt).getTime() - Date.now()) / 86400000);
+          return (
+            <div className={cn(
+              "flex items-center justify-between px-4 py-2 text-xs font-medium flex-shrink-0",
+              daysLeft <= 1 ? "bg-red-600 text-white" : "bg-amber-500 text-white"
+            )}>
+              <span>
+                {daysLeft > 0
+                  ? `Trial ends in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}. Upgrade to continue after trial.`
+                  : "Your trial has ended."}
+              </span>
+              <Link href="/payment" className="underline font-semibold whitespace-nowrap ml-3 hover:opacity-80">
+                Upgrade now →
+              </Link>
+            </div>
+          );
+        })()}
 
         {/* Page content */}
         <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">

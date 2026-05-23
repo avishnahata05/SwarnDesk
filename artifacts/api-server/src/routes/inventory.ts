@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { inventoryItemsTable } from "@workspace/db";
-import { eq, ilike, and, or, lte, sql } from "drizzle-orm";
+import { eq, ilike, and, or, sql } from "drizzle-orm";
 
 const router = Router();
 
@@ -31,18 +31,17 @@ function mapItem(item: typeof inventoryItemsTable.$inferSelect) {
 
 router.get("/", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const { category, search, branch } = req.query as Record<string, string>;
-    const conditions = [];
+    const conditions = [eq(inventoryItemsTable.userId, userId)];
     if (category) conditions.push(eq(inventoryItemsTable.category, category));
     if (branch) conditions.push(eq(inventoryItemsTable.branch, branch));
     if (search) conditions.push(or(
       ilike(inventoryItemsTable.name, `%${search}%`),
       ilike(inventoryItemsTable.huid, `%${search}%`),
       ilike(inventoryItemsTable.barcode, `%${search}%`)
-    ));
-    const items = conditions.length > 0
-      ? await db.select().from(inventoryItemsTable).where(and(...conditions))
-      : await db.select().from(inventoryItemsTable);
+    )!);
+    const items = await db.select().from(inventoryItemsTable).where(conditions.length === 1 ? conditions[0] : and(...conditions));
     res.json(items.map(mapItem));
   } catch (err) {
     req.log.error({ err }, "Failed to list inventory");
@@ -52,8 +51,10 @@ router.get("/", async (req, res) => {
 
 router.post("/", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const data = req.body;
     const [item] = await db.insert(inventoryItemsTable).values({
+      userId,
       name: data.name,
       category: data.category,
       purity: data.purity,
@@ -81,6 +82,7 @@ router.post("/", async (req, res) => {
 
 router.get("/stats/by-category", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const stats = await db
       .select({
         category: inventoryItemsTable.category,
@@ -88,6 +90,7 @@ router.get("/stats/by-category", async (req, res) => {
         value: sql<number>`sum(${inventoryItemsTable.totalValue})::numeric`,
       })
       .from(inventoryItemsTable)
+      .where(eq(inventoryItemsTable.userId, userId))
       .groupBy(inventoryItemsTable.category);
     res.json(stats.map(s => ({
       category: s.category,
@@ -102,7 +105,8 @@ router.get("/stats/by-category", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
-    const [item] = await db.select().from(inventoryItemsTable).where(eq(inventoryItemsTable.id, parseInt(req.params.id)));
+    const userId = req.user!.userId;
+    const [item] = await db.select().from(inventoryItemsTable).where(and(eq(inventoryItemsTable.id, parseInt(req.params.id)), eq(inventoryItemsTable.userId, userId)));
     if (!item) return res.status(404).json({ error: "Not found" });
     res.json(mapItem(item));
   } catch (err) {
@@ -113,6 +117,7 @@ router.get("/:id", async (req, res) => {
 
 router.patch("/:id", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const data = req.body;
     const updateData: Record<string, unknown> = {};
     if (data.name !== undefined) updateData.name = data.name;
@@ -131,7 +136,7 @@ router.patch("/:id", async (req, res) => {
     if (data.barcode !== undefined) updateData.barcode = data.barcode;
     if (data.karigarId !== undefined) updateData.karigarId = data.karigarId;
     if (data.lowStockThreshold !== undefined) updateData.lowStockThreshold = data.lowStockThreshold;
-    const [item] = await db.update(inventoryItemsTable).set(updateData).where(eq(inventoryItemsTable.id, parseInt(req.params.id))).returning();
+    const [item] = await db.update(inventoryItemsTable).set(updateData).where(and(eq(inventoryItemsTable.id, parseInt(req.params.id)), eq(inventoryItemsTable.userId, userId))).returning();
     if (!item) return res.status(404).json({ error: "Not found" });
     res.json(mapItem(item));
   } catch (err) {
@@ -142,7 +147,8 @@ router.patch("/:id", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   try {
-    await db.delete(inventoryItemsTable).where(eq(inventoryItemsTable.id, parseInt(req.params.id)));
+    const userId = req.user!.userId;
+    await db.delete(inventoryItemsTable).where(and(eq(inventoryItemsTable.id, parseInt(req.params.id)), eq(inventoryItemsTable.userId, userId)));
     res.status(204).send();
   } catch (err) {
     req.log.error({ err }, "Failed to delete inventory item");

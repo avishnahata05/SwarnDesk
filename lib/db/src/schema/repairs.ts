@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 
 export const repairJobsTable = pgTable("repair_jobs", {
   id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(0),
   customerId: integer("customer_id"),
   customerName: text("customer_name").notNull(),
   customerMobile: text("customer_mobile").notNull(),

@@ -1,4 +1,4 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -15,6 +15,11 @@ import Purchases from "@/pages/app/purchases";
 import Reports from "@/pages/app/reports";
 import Settings from "@/pages/app/settings";
 import Girvi from "@/pages/app/girvi";
+import LoginPage from "@/pages/auth/login";
+import RegisterPage from "@/pages/auth/register";
+import PaymentPage from "@/pages/auth/payment";
+import AdminPage from "@/pages/admin/index";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,26 +30,56 @@ const queryClient = new QueryClient({
   },
 });
 
+/** Wraps a component — redirects to /login if not authenticated, /payment if trial expired */
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+
+  if (!user) return <Redirect to="/login" />;
+  if (user.plan === "expired") return <Redirect to="/payment" />;
+
+  return <>{children}</>;
+}
+
+/** Admin-only route */
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+
+  if (!user) return <Redirect to="/login" />;
+  if (user.role !== "admin") return <Redirect to="/app/dashboard" />;
+
+  return <>{children}</>;
+}
+
 function Router() {
   return (
     <Switch>
       <Route path="/" component={LandingPage} />
+      <Route path="/login" component={LoginPage} />
+      <Route path="/register" component={RegisterPage} />
+      <Route path="/payment" component={PaymentPage} />
+      <Route path="/admin">
+        <AdminRoute>
+          <AdminPage />
+        </AdminRoute>
+      </Route>
       <Route path="/app/:rest*">
-        <AppLayout>
-          <Switch>
-            <Route path="/app/dashboard" component={Dashboard} />
-            <Route path="/app/inventory" component={Inventory} />
-            <Route path="/app/billing" component={Billing} />
-            <Route path="/app/customers" component={Customers} />
-            <Route path="/app/karigars" component={Karigars} />
-            <Route path="/app/repairs" component={Repairs} />
-            <Route path="/app/purchases" component={Purchases} />
-            <Route path="/app/reports" component={Reports} />
-            <Route path="/app/settings" component={Settings} />
-            <Route path="/app/girvi" component={Girvi} />
-            <Route component={Dashboard} />
-          </Switch>
-        </AppLayout>
+        <ProtectedRoute>
+          <AppLayout>
+            <Switch>
+              <Route path="/app/dashboard" component={Dashboard} />
+              <Route path="/app/inventory" component={Inventory} />
+              <Route path="/app/billing" component={Billing} />
+              <Route path="/app/customers" component={Customers} />
+              <Route path="/app/karigars" component={Karigars} />
+              <Route path="/app/repairs" component={Repairs} />
+              <Route path="/app/purchases" component={Purchases} />
+              <Route path="/app/reports" component={Reports} />
+              <Route path="/app/settings" component={Settings} />
+              <Route path="/app/girvi" component={Girvi} />
+              <Route component={Dashboard} />
+            </Switch>
+          </AppLayout>
+        </ProtectedRoute>
       </Route>
       <Route component={NotFound} />
     </Switch>
@@ -56,7 +91,9 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Router />
+          <AuthProvider>
+            <Router />
+          </AuthProvider>
         </WouterRouter>
         <Toaster />
       </TooltipProvider>

@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 
 export const inventoryItemsTable = pgTable("inventory_items", {
   id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(0),
   name: text("name").notNull(),
   category: text("category").notNull(), // gold, silver, diamond, kundan, platinum
   purity: text("purity").notNull(), // 24K, 22K, 18K, 925, etc.

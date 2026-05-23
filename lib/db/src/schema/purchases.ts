@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 
 export const suppliersTable = pgTable("suppliers", {
   id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(0),
   name: text("name").notNull(),
   mobile: text("mobile").notNull(),
   address: text("address"),
@@ -14,6 +15,7 @@ export const suppliersTable = pgTable("suppliers", {
 
 export const purchasesTable = pgTable("purchases", {
   id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(0),
   supplierId: integer("supplier_id"),
   supplierName: text("supplier_name").notNull(),
   metalType: text("metal_type").notNull(), // gold, silver, bullion

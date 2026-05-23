@@ -1,18 +1,19 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { businessSettingsTable } from "@workspace/db";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 
 const router = Router();
 
 router.post("/send-bulk", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const { recipients } = req.body as { recipients: { mobile: string; name: string; message: string }[] };
     if (!Array.isArray(recipients) || recipients.length === 0) {
       return res.status(400).json({ error: "No recipients provided" });
     }
 
-    const [settings] = await db.select().from(businessSettingsTable).orderBy(desc(businessSettingsTable.id)).limit(1);
+    const [settings] = await db.select().from(businessSettingsTable).where(eq(businessSettingsTable.userId, userId)).orderBy(desc(businessSettingsTable.id)).limit(1);
 
     if (!settings?.whatsappApiEnabled || !settings?.whatsappPhoneNumberId || !settings?.whatsappAccessToken) {
       return res.status(400).json({ error: "WhatsApp Business API not configured. Enable it in Settings." });
@@ -59,7 +60,8 @@ router.post("/send-bulk", async (req, res) => {
 
 router.get("/config", async (req, res) => {
   try {
-    const [settings] = await db.select().from(businessSettingsTable).orderBy(desc(businessSettingsTable.id)).limit(1);
+    const userId = req.user!.userId;
+    const [settings] = await db.select().from(businessSettingsTable).where(eq(businessSettingsTable.userId, userId)).orderBy(desc(businessSettingsTable.id)).limit(1);
     res.json({
       whatsappApiEnabled: settings?.whatsappApiEnabled ?? false,
       whatsappPhoneNumberId: settings?.whatsappPhoneNumberId ?? "",

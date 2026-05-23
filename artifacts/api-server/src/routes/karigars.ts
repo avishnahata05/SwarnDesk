@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { karigarsTable, metalIssuesTable, metalReturnsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 const router = Router();
 
@@ -47,7 +47,8 @@ function mapReturn(r: typeof metalReturnsTable.$inferSelect) {
 
 router.get("/", async (req, res) => {
   try {
-    const karigars = await db.select().from(karigarsTable);
+    const userId = req.user!.userId;
+    const karigars = await db.select().from(karigarsTable).where(eq(karigarsTable.userId, userId));
     res.json(karigars.map(mapKarigar));
   } catch (err) {
     req.log.error({ err }, "Failed to list karigars");
@@ -57,8 +58,10 @@ router.get("/", async (req, res) => {
 
 router.post("/", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const data = req.body;
     const [karigar] = await db.insert(karigarsTable).values({
+      userId,
       name: data.name,
       mobile: data.mobile,
       specialization: data.specialization,
@@ -73,11 +76,12 @@ router.post("/", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const id = parseInt(req.params.id);
-    const [karigar] = await db.select().from(karigarsTable).where(eq(karigarsTable.id, id));
+    const [karigar] = await db.select().from(karigarsTable).where(and(eq(karigarsTable.id, id), eq(karigarsTable.userId, userId)));
     if (!karigar) return res.status(404).json({ error: "Not found" });
-    const issues = await db.select().from(metalIssuesTable).where(eq(metalIssuesTable.karigarId, id));
-    const returns = await db.select().from(metalReturnsTable).where(eq(metalReturnsTable.karigarId, id));
+    const issues = await db.select().from(metalIssuesTable).where(and(eq(metalIssuesTable.karigarId, id), eq(metalIssuesTable.userId, userId)));
+    const returns = await db.select().from(metalReturnsTable).where(and(eq(metalReturnsTable.karigarId, id), eq(metalReturnsTable.userId, userId)));
     res.json({
       karigar: mapKarigar(karigar),
       metalIssues: issues.map(mapIssue),
@@ -91,13 +95,14 @@ router.get("/:id", async (req, res) => {
 
 router.patch("/:id", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const data = req.body;
     const updateData: Record<string, unknown> = {};
     if (data.name !== undefined) updateData.name = data.name;
     if (data.mobile !== undefined) updateData.mobile = data.mobile;
     if (data.specialization !== undefined) updateData.specialization = data.specialization;
     if (data.address !== undefined) updateData.address = data.address;
-    const [karigar] = await db.update(karigarsTable).set(updateData).where(eq(karigarsTable.id, parseInt(req.params.id))).returning();
+    const [karigar] = await db.update(karigarsTable).set(updateData).where(and(eq(karigarsTable.id, parseInt(req.params.id)), eq(karigarsTable.userId, userId))).returning();
     if (!karigar) return res.status(404).json({ error: "Not found" });
     res.json(mapKarigar(karigar));
   } catch (err) {
@@ -108,9 +113,11 @@ router.patch("/:id", async (req, res) => {
 
 router.post("/:id/issue-metal", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const karigarId = parseInt(req.params.id);
     const data = req.body;
     const [issue] = await db.insert(metalIssuesTable).values({
+      userId,
       karigarId,
       metalType: data.metalType,
       weight: data.weight.toString(),
@@ -119,7 +126,7 @@ router.post("/:id/issue-metal", async (req, res) => {
     }).returning();
 
     // Update pending weight
-    const [karigar] = await db.select().from(karigarsTable).where(eq(karigarsTable.id, karigarId));
+    const [karigar] = await db.select().from(karigarsTable).where(and(eq(karigarsTable.id, karigarId), eq(karigarsTable.userId, userId)));
     if (karigar) {
       const updateData: Record<string, unknown> = {};
       if (data.metalType === "gold") {
@@ -127,7 +134,7 @@ router.post("/:id/issue-metal", async (req, res) => {
       } else {
         updateData.pendingSilverWeight = (parseFloat(karigar.pendingSilverWeight) + data.weight).toString();
       }
-      await db.update(karigarsTable).set(updateData).where(eq(karigarsTable.id, karigarId));
+      await db.update(karigarsTable).set(updateData).where(and(eq(karigarsTable.id, karigarId), eq(karigarsTable.userId, userId)));
     }
 
     res.status(201).json(mapIssue(issue));
@@ -139,9 +146,11 @@ router.post("/:id/issue-metal", async (req, res) => {
 
 router.post("/:id/return-metal", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const karigarId = parseInt(req.params.id);
     const data = req.body;
     const [ret] = await db.insert(metalReturnsTable).values({
+      userId,
       karigarId,
       metalType: data.metalType,
       issuedWeight: data.issuedWeight.toString(),
@@ -151,7 +160,7 @@ router.post("/:id/return-metal", async (req, res) => {
     }).returning();
 
     // Update pending weight
-    const [karigar] = await db.select().from(karigarsTable).where(eq(karigarsTable.id, karigarId));
+    const [karigar] = await db.select().from(karigarsTable).where(and(eq(karigarsTable.id, karigarId), eq(karigarsTable.userId, userId)));
     if (karigar) {
       const updateData: Record<string, unknown> = {};
       if (data.metalType === "gold") {
@@ -159,7 +168,7 @@ router.post("/:id/return-metal", async (req, res) => {
       } else {
         updateData.pendingSilverWeight = Math.max(0, parseFloat(karigar.pendingSilverWeight) - data.issuedWeight).toString();
       }
-      await db.update(karigarsTable).set(updateData).where(eq(karigarsTable.id, karigarId));
+      await db.update(karigarsTable).set(updateData).where(and(eq(karigarsTable.id, karigarId), eq(karigarsTable.userId, userId)));
     }
 
     res.status(201).json(mapReturn(ret));

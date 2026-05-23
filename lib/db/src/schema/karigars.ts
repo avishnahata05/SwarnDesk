@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 
 export const karigarsTable = pgTable("karigars", {
   id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(0),
   name: text("name").notNull(),
   mobile: text("mobile").notNull(),
   specialization: text("specialization").notNull(),
@@ -17,6 +18,7 @@ export const karigarsTable = pgTable("karigars", {
 
 export const metalIssuesTable = pgTable("metal_issues", {
   id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(0),
   karigarId: integer("karigar_id").notNull(),
   metalType: text("metal_type").notNull(), // gold, silver
   weight: numeric("weight", { precision: 10, scale: 3 }).notNull(),
@@ -27,6 +29,7 @@ export const metalIssuesTable = pgTable("metal_issues", {
 
 export const metalReturnsTable = pgTable("metal_returns", {
   id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(0),
   karigarId: integer("karigar_id").notNull(),
   metalType: text("metal_type").notNull(),
   issuedWeight: numeric("issued_weight", { precision: 10, scale: 3 }).notNull(),

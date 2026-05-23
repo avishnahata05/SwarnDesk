@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { repairJobsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 const router = Router();
 
@@ -26,10 +26,11 @@ function mapRepair(r: typeof repairJobsTable.$inferSelect) {
 
 router.get("/", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const { status } = req.query as Record<string, string>;
     const repairs = status
-      ? await db.select().from(repairJobsTable).where(eq(repairJobsTable.status, status))
-      : await db.select().from(repairJobsTable);
+      ? await db.select().from(repairJobsTable).where(and(eq(repairJobsTable.userId, userId), eq(repairJobsTable.status, status)))
+      : await db.select().from(repairJobsTable).where(eq(repairJobsTable.userId, userId));
     res.json(repairs.map(mapRepair));
   } catch (err) {
     req.log.error({ err }, "Failed to list repairs");
@@ -39,8 +40,10 @@ router.get("/", async (req, res) => {
 
 router.post("/", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const data = req.body;
     const [repair] = await db.insert(repairJobsTable).values({
+      userId,
       customerId: data.customerId,
       customerName: data.customerName,
       customerMobile: data.customerMobile,
@@ -59,7 +62,8 @@ router.post("/", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
-    const [repair] = await db.select().from(repairJobsTable).where(eq(repairJobsTable.id, parseInt(req.params.id)));
+    const userId = req.user!.userId;
+    const [repair] = await db.select().from(repairJobsTable).where(and(eq(repairJobsTable.id, parseInt(req.params.id)), eq(repairJobsTable.userId, userId)));
     if (!repair) return res.status(404).json({ error: "Not found" });
     res.json(mapRepair(repair));
   } catch (err) {
@@ -70,13 +74,14 @@ router.get("/:id", async (req, res) => {
 
 router.patch("/:id", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const data = req.body;
     const updateData: Record<string, unknown> = {};
     if (data.status !== undefined) updateData.status = data.status;
     if (data.actualCost !== undefined) updateData.actualCost = data.actualCost?.toString();
     if (data.deliveredDate !== undefined) updateData.deliveredDate = data.deliveredDate ? new Date(data.deliveredDate) : null;
     if (data.notes !== undefined) updateData.notes = data.notes;
-    const [repair] = await db.update(repairJobsTable).set(updateData).where(eq(repairJobsTable.id, parseInt(req.params.id))).returning();
+    const [repair] = await db.update(repairJobsTable).set(updateData).where(and(eq(repairJobsTable.id, parseInt(req.params.id)), eq(repairJobsTable.userId, userId))).returning();
     if (!repair) return res.status(404).json({ error: "Not found" });
     res.json(mapRepair(repair));
   } catch (err) {

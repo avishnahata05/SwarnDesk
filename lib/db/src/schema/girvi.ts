@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 
 export const girviLoansTable = pgTable("girvi_loans", {
   id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(0),
   loanNumber: text("loan_number").notNull().unique(),
   customerId: integer("customer_id"),
   customerName: text("customer_name").notNull(),

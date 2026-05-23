@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 
 export const salesTable = pgTable("sales", {
   id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(0),
   customerId: integer("customer_id"),
   customerName: text("customer_name").notNull(),
   totalAmount: numeric("total_amount", { precision: 12, scale: 2 }).notNull(),
@@ -21,6 +22,7 @@ export const salesTable = pgTable("sales", {
 
 export const saleLineItemsTable = pgTable("sale_line_items", {
   id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(0),
   saleId: integer("sale_id").notNull(),
   inventoryItemId: integer("inventory_item_id").notNull(),
   itemName: text("item_name").notNull(),

@@ -1,9 +1,10 @@
-import { pgTable, serial, text, numeric, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, numeric, timestamp, boolean, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
 export const businessSettingsTable = pgTable("business_settings", {
   id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(0),
   businessName: text("business_name").notNull().default("My Jewellery Store"),
   gstin: text("gstin").notNull().default(""),
   address: text("address").notNull().default(""),

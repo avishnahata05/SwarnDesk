@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { salesTable, inventoryItemsTable, customersTable, repairJobsTable } from "@workspace/db";
-import { sql, gte, lte, eq, lte as ltEq, and } from "drizzle-orm";
+import { sql, gte, lte, eq, and } from "drizzle-orm";
 
 const router = Router();
 
 router.get("/summary", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -15,11 +16,11 @@ router.get("/summary", async (req, res) => {
     const [todaySalesResult] = await db
       .select({ total: sql<number>`coalesce(sum(${salesTable.totalAmount}), 0)::numeric` })
       .from(salesTable)
-      .where(and(gte(salesTable.saleDate, today), lte(salesTable.saleDate, tomorrow)));
+      .where(and(eq(salesTable.userId, userId), gte(salesTable.saleDate, today), lte(salesTable.saleDate, tomorrow)));
 
-    const [totalCustomers] = await db.select({ count: sql<number>`count(*)::int` }).from(customersTable);
-    const [totalInventory] = await db.select({ count: sql<number>`count(*)::int`, value: sql<number>`coalesce(sum(${inventoryItemsTable.totalValue}), 0)::numeric` }).from(inventoryItemsTable);
-    const [pendingRepairs] = await db.select({ count: sql<number>`count(*)::int` }).from(repairJobsTable).where(sql`${repairJobsTable.status} != 'delivered'`);
+    const [totalCustomers] = await db.select({ count: sql<number>`count(*)::int` }).from(customersTable).where(eq(customersTable.userId, userId));
+    const [totalInventory] = await db.select({ count: sql<number>`count(*)::int`, value: sql<number>`coalesce(sum(${inventoryItemsTable.totalValue}), 0)::numeric` }).from(inventoryItemsTable).where(eq(inventoryItemsTable.userId, userId));
+    const [pendingRepairs] = await db.select({ count: sql<number>`count(*)::int` }).from(repairJobsTable).where(and(eq(repairJobsTable.userId, userId), sql`${repairJobsTable.status} != 'delivered'`));
 
     const todaySales = parseFloat(String(todaySalesResult.total)) || 0;
 
@@ -41,7 +42,8 @@ router.get("/summary", async (req, res) => {
 
 router.get("/recent-sales", async (req, res) => {
   try {
-    const sales = await db.select().from(salesTable).orderBy(sql`${salesTable.saleDate} desc`).limit(10);
+    const userId = req.user!.userId;
+    const sales = await db.select().from(salesTable).where(eq(salesTable.userId, userId)).orderBy(sql`${salesTable.saleDate} desc`).limit(10);
     res.json(sales.map(s => ({
       id: s.id,
       customerId: s.customerId,
@@ -66,8 +68,9 @@ router.get("/recent-sales", async (req, res) => {
 
 router.get("/low-stock", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const items = await db.select().from(inventoryItemsTable)
-      .where(sql`${inventoryItemsTable.quantity} <= ${inventoryItemsTable.lowStockThreshold}`);
+      .where(and(eq(inventoryItemsTable.userId, userId), sql`${inventoryItemsTable.quantity} <= ${inventoryItemsTable.lowStockThreshold}`));
     res.json(items.map(item => ({
       id: item.id,
       name: item.name,

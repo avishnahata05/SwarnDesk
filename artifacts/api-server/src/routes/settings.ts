@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { businessSettingsTable } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 
 const router = Router();
 
@@ -26,20 +26,24 @@ function mapSettings(s: typeof businessSettingsTable.$inferSelect) {
 
 router.get("/", async (req, res) => {
   try {
-    const [settings] = await db.select().from(businessSettingsTable).orderBy(desc(businessSettingsTable.id)).limit(1);
+    const userId = req.user!.userId;
+    const [settings] = await db.select().from(businessSettingsTable).where(eq(businessSettingsTable.userId, userId)).orderBy(desc(businessSettingsTable.id)).limit(1);
     if (!settings) {
       // Return defaults
       return res.json({
         id: 0,
-        businessName: "HiraNXT Demo Store",
-        gstin: "27AAACR5055K1ZS",
-        address: "123 Jewellers Lane, Mumbai, Maharashtra - 400001",
-        mobile: "+91 98765 43210",
-        email: "demo@hiranxt.com",
+        businessName: "My Jewellery Store",
+        gstin: "",
+        address: "",
+        mobile: "",
+        email: null,
         logo: null,
         gstRate: 3,
         defaultBranch: "Main",
-        branches: ["Main", "Branch 1"],
+        branches: ["Main"],
+        whatsappApiEnabled: false,
+        whatsappPhoneNumberId: "",
+        whatsappAccessToken: "",
         updatedAt: new Date().toISOString(),
       });
     }
@@ -52,8 +56,9 @@ router.get("/", async (req, res) => {
 
 router.put("/", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const data = req.body;
-    const [existing] = await db.select().from(businessSettingsTable).orderBy(desc(businessSettingsTable.id)).limit(1);
+    const [existing] = await db.select().from(businessSettingsTable).where(eq(businessSettingsTable.userId, userId)).orderBy(desc(businessSettingsTable.id)).limit(1);
     let updated;
     const updateData: Record<string, unknown> = {
       updatedAt: new Date(),
@@ -72,9 +77,10 @@ router.put("/", async (req, res) => {
     if (data.whatsappAccessToken !== undefined) updateData.whatsappAccessToken = data.whatsappAccessToken;
 
     if (existing) {
-      [updated] = await db.update(businessSettingsTable).set(updateData).where(eq(businessSettingsTable.id, existing.id)).returning();
+      [updated] = await db.update(businessSettingsTable).set(updateData).where(and(eq(businessSettingsTable.id, existing.id), eq(businessSettingsTable.userId, userId))).returning();
     } else {
       [updated] = await db.insert(businessSettingsTable).values({
+        userId,
         businessName: data.businessName ?? "My Jewellery Store",
         gstin: data.gstin ?? "",
         address: data.address ?? "",

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { suppliersTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 const router = Router();
 
@@ -19,7 +19,8 @@ function mapSupplier(s: typeof suppliersTable.$inferSelect) {
 
 router.get("/", async (req, res) => {
   try {
-    const suppliers = await db.select().from(suppliersTable);
+    const userId = req.user!.userId;
+    const suppliers = await db.select().from(suppliersTable).where(eq(suppliersTable.userId, userId));
     res.json(suppliers.map(mapSupplier));
   } catch (err) {
     req.log.error({ err }, "Failed to list suppliers");
@@ -29,8 +30,10 @@ router.get("/", async (req, res) => {
 
 router.post("/", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const data = req.body;
     const [supplier] = await db.insert(suppliersTable).values({
+      userId,
       name: data.name,
       mobile: data.mobile,
       address: data.address,

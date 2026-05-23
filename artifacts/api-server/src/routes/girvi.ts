@@ -62,7 +62,8 @@ function mapLoan(l: typeof girviLoansTable.$inferSelect, asOf = new Date()) {
 
 router.get("/stats/summary", async (req, res) => {
   try {
-    const loans = await db.select().from(girviLoansTable).orderBy(desc(girviLoansTable.createdAt));
+    const userId = req.user!.userId;
+    const loans = await db.select().from(girviLoansTable).where(eq(girviLoansTable.userId, userId)).orderBy(desc(girviLoansTable.createdAt));
     const now = new Date();
     const active = loans.filter(l => l.status === "active" || l.status === "extended");
     const overdue = active.filter(l => new Date(l.dueDate) < now);
@@ -85,10 +86,11 @@ router.get("/stats/summary", async (req, res) => {
 
 router.get("/", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const { status } = req.query as Record<string, string>;
     const loans = status
-      ? await db.select().from(girviLoansTable).where(eq(girviLoansTable.status, status)).orderBy(desc(girviLoansTable.createdAt))
-      : await db.select().from(girviLoansTable).orderBy(desc(girviLoansTable.createdAt));
+      ? await db.select().from(girviLoansTable).where(and(eq(girviLoansTable.userId, userId), eq(girviLoansTable.status, status))).orderBy(desc(girviLoansTable.createdAt))
+      : await db.select().from(girviLoansTable).where(eq(girviLoansTable.userId, userId)).orderBy(desc(girviLoansTable.createdAt));
     res.json(loans.map(l => mapLoan(l)));
   } catch (err) {
     req.log.error({ err }, "Failed to list girvi loans");
@@ -98,8 +100,10 @@ router.get("/", async (req, res) => {
 
 router.post("/", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const data = req.body;
     const [loan] = await db.insert(girviLoansTable).values({
+      userId,
       loanNumber: generateLoanNumber(),
       customerId: data.customerId ?? null,
       customerName: data.customerName,
@@ -128,7 +132,8 @@ router.post("/", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
-    const [loan] = await db.select().from(girviLoansTable).where(eq(girviLoansTable.id, parseInt(req.params.id)));
+    const userId = req.user!.userId;
+    const [loan] = await db.select().from(girviLoansTable).where(and(eq(girviLoansTable.id, parseInt(req.params.id)), eq(girviLoansTable.userId, userId)));
     if (!loan) return res.status(404).json({ error: "Not found" });
     res.json(mapLoan(loan));
   } catch (err) {
@@ -139,8 +144,9 @@ router.get("/:id", async (req, res) => {
 
 router.patch("/:id", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const id = parseInt(req.params.id);
-    const [loan] = await db.select().from(girviLoansTable).where(eq(girviLoansTable.id, id));
+    const [loan] = await db.select().from(girviLoansTable).where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)));
     if (!loan) return res.status(404).json({ error: "Not found" });
     const data = req.body;
     const now = new Date();
@@ -167,7 +173,7 @@ router.patch("/:id", async (req, res) => {
       updates.notes = data.notes;
     }
 
-    const [updated] = await db.update(girviLoansTable).set(updates).where(eq(girviLoansTable.id, id)).returning();
+    const [updated] = await db.update(girviLoansTable).set(updates).where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId))).returning();
     res.json(mapLoan(updated));
   } catch (err) {
     req.log.error({ err }, "Failed to update girvi loan");

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { purchasesTable, suppliersTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 const router = Router();
 
@@ -42,7 +42,8 @@ function generateInvoice() {
 
 router.get("/", async (req, res) => {
   try {
-    const purchases = await db.select().from(purchasesTable);
+    const userId = req.user!.userId;
+    const purchases = await db.select().from(purchasesTable).where(eq(purchasesTable.userId, userId));
     res.json(purchases.map(mapPurchase));
   } catch (err) {
     req.log.error({ err }, "Failed to list purchases");
@@ -52,8 +53,10 @@ router.get("/", async (req, res) => {
 
 router.post("/", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const data = req.body;
     const [purchase] = await db.insert(purchasesTable).values({
+      userId,
       supplierId: data.supplierId,
       supplierName: data.supplierName,
       metalType: data.metalType,
@@ -76,7 +79,8 @@ router.post("/", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
-    const [purchase] = await db.select().from(purchasesTable).where(eq(purchasesTable.id, parseInt(req.params.id)));
+    const userId = req.user!.userId;
+    const [purchase] = await db.select().from(purchasesTable).where(and(eq(purchasesTable.id, parseInt(req.params.id)), eq(purchasesTable.userId, userId)));
     if (!purchase) return res.status(404).json({ error: "Not found" });
     res.json(mapPurchase(purchase));
   } catch (err) {
@@ -88,7 +92,8 @@ router.get("/:id", async (req, res) => {
 // Suppliers
 router.get("/suppliers/list", async (req, res) => {
   try {
-    const suppliers = await db.select().from(suppliersTable);
+    const userId = req.user!.userId;
+    const suppliers = await db.select().from(suppliersTable).where(eq(suppliersTable.userId, userId));
     res.json(suppliers.map(mapSupplier));
   } catch (err) {
     req.log.error({ err }, "Failed to list suppliers");
@@ -98,8 +103,10 @@ router.get("/suppliers/list", async (req, res) => {
 
 router.post("/suppliers", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const data = req.body;
     const [supplier] = await db.insert(suppliersTable).values({
+      userId,
       name: data.name,
       mobile: data.mobile,
       address: data.address,

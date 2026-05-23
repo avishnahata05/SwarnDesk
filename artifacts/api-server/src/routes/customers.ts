@@ -25,7 +25,8 @@ function mapCustomer(c: typeof customersTable.$inferSelect) {
 
 router.get("/upcoming-occasions", async (req, res) => {
   try {
-    const customers = await db.select().from(customersTable);
+    const userId = req.user!.userId;
+    const customers = await db.select().from(customersTable).where(eq(customersTable.userId, userId));
     const today = new Date();
     const upcoming: unknown[] = [];
 
@@ -62,15 +63,20 @@ router.get("/upcoming-occasions", async (req, res) => {
 
 router.get("/", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const { search } = req.query as Record<string, string>;
+    const baseCondition = eq(customersTable.userId, userId);
     const customers = search
       ? await db.select().from(customersTable).where(
-          or(
-            ilike(customersTable.name, `%${search}%`),
-            ilike(customersTable.mobile, `%${search}%`)
+          and(
+            baseCondition,
+            or(
+              ilike(customersTable.name, `%${search}%`),
+              ilike(customersTable.mobile, `%${search}%`)
+            )
           )
         )
-      : await db.select().from(customersTable);
+      : await db.select().from(customersTable).where(baseCondition);
     res.json(customers.map(mapCustomer));
   } catch (err) {
     req.log.error({ err }, "Failed to list customers");
@@ -80,8 +86,10 @@ router.get("/", async (req, res) => {
 
 router.post("/", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const data = req.body;
     const [customer] = await db.insert(customersTable).values({
+      userId,
       name: data.name,
       mobile: data.mobile,
       email: data.email,
@@ -101,11 +109,12 @@ router.post("/", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const id = parseInt(req.params.id);
-    const [customer] = await db.select().from(customersTable).where(eq(customersTable.id, id));
+    const [customer] = await db.select().from(customersTable).where(and(eq(customersTable.id, id), eq(customersTable.userId, userId)));
     if (!customer) return res.status(404).json({ error: "Not found" });
-    const recentSales = await db.select().from(salesTable).where(eq(salesTable.customerId, id)).orderBy(desc(salesTable.saleDate)).limit(10);
-    const pendingRepairs = await db.select().from(repairJobsTable).where(and(eq(repairJobsTable.customerId, id), eq(repairJobsTable.status, "in_progress")));
+    const recentSales = await db.select().from(salesTable).where(and(eq(salesTable.customerId, id), eq(salesTable.userId, userId))).orderBy(desc(salesTable.saleDate)).limit(10);
+    const pendingRepairs = await db.select().from(repairJobsTable).where(and(eq(repairJobsTable.customerId, id), eq(repairJobsTable.status, "in_progress"), eq(repairJobsTable.userId, userId)));
     res.json({
       customer: mapCustomer(customer),
       recentSales: recentSales.map(mapSale),
@@ -119,6 +128,7 @@ router.get("/:id", async (req, res) => {
 
 router.patch("/:id", async (req, res) => {
   try {
+    const userId = req.user!.userId;
     const data = req.body;
     const updateData: Record<string, unknown> = {};
     if (data.name !== undefined) updateData.name = data.name;
@@ -129,7 +139,7 @@ router.patch("/:id", async (req, res) => {
     if (data.anniversary !== undefined) updateData.anniversary = data.anniversary;
     if (data.gstin !== undefined) updateData.gstin = data.gstin;
     if (data.notes !== undefined) updateData.notes = data.notes;
-    const [customer] = await db.update(customersTable).set(updateData).where(eq(customersTable.id, parseInt(req.params.id))).returning();
+    const [customer] = await db.update(customersTable).set(updateData).where(and(eq(customersTable.id, parseInt(req.params.id)), eq(customersTable.userId, userId))).returning();
     if (!customer) return res.status(404).json({ error: "Not found" });
     res.json(mapCustomer(customer));
   } catch (err) {
@@ -140,7 +150,8 @@ router.patch("/:id", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   try {
-    await db.delete(customersTable).where(eq(customersTable.id, parseInt(req.params.id)));
+    const userId = req.user!.userId;
+    await db.delete(customersTable).where(and(eq(customersTable.id, parseInt(req.params.id)), eq(customersTable.userId, userId)));
     res.status(204).send();
   } catch (err) {
     req.log.error({ err }, "Failed to delete customer");
