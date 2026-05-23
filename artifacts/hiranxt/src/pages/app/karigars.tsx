@@ -35,6 +35,9 @@ export default function Karigars() {
   const issueForm = useForm<MetalIssueForm>({ defaultValues: { metalType: "gold", purity: "22K" } });
   const returnForm = useForm<MetalReturnForm>({ defaultValues: { metalType: "gold" } });
 
+  const issueMetalType = issueForm.watch("metalType") ?? "gold";
+  const returnMetalType = returnForm.watch("metalType") ?? "gold";
+
   const onAdd = (data: KarigarForm) => {
     createKarigar.mutate({ data: { ...data, address: data.address || null } }, {
       onSuccess: () => {
@@ -188,7 +191,7 @@ export default function Karigars() {
           <form onSubmit={issueForm.handleSubmit(onIssue)} className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Metal Type</label>
-              <Select defaultValue="gold" onValueChange={v => issueForm.setValue("metalType", v)}>
+              <Select value={issueMetalType} onValueChange={v => issueForm.setValue("metalType", v)}>
                 <SelectTrigger data-testid="select-issue-metal"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="gold">Gold</SelectItem>
@@ -223,7 +226,7 @@ export default function Karigars() {
           <form onSubmit={returnForm.handleSubmit(onReturn)} className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Metal Type</label>
-              <Select defaultValue="gold" onValueChange={v => returnForm.setValue("metalType", v)}>
+              <Select value={returnMetalType} onValueChange={v => returnForm.setValue("metalType", v)}>
                 <SelectTrigger data-testid="select-return-metal"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="gold">Gold</SelectItem>

@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { useGetSettings, useUpdateSettings, getGetSettingsQueryKey } from "@workspace/api-client-react";
+import { useGetSettings, useUpdateSettings, useGetCurrentRates, useUpdateRates, getGetSettingsQueryKey, getGetCurrentRatesQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useForm } from "react-hook-form";
-import { Settings as SettingsIcon, Building2, Percent, GitBranch, MessageCircle, CheckCircle2, AlertCircle } from "lucide-react";
+import { Settings as SettingsIcon, Building2, Percent, GitBranch, MessageCircle, CheckCircle2, AlertCircle, Coins, Download, FileSpreadsheet } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface SettingsForm {
@@ -26,9 +26,26 @@ export default function Settings() {
   const updateSettings = useUpdateSettings();
   const { register, handleSubmit, reset } = useForm<SettingsForm>();
 
+  const { data: currentRates } = useGetCurrentRates();
+  const updateRates = useUpdateRates();
+  const [rateForm, setRateForm] = useState({ gold22k: "", gold24k: "", gold18k: "", silver: "" });
+  const [ratesSaving, setRatesSaving] = useState(false);
+
   const [waConfig, setWaConfig] = useState<WaConfig>({ enabled: false, phoneNumberId: "", accessToken: "" });
   const [waSaving, setWaSaving] = useState(false);
   const [waTestStatus, setWaTestStatus] = useState<"idle" | "ok" | "fail">("idle");
+  const [exporting, setExporting] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (currentRates) {
+      setRateForm({
+        gold22k: String(Math.round(currentRates.gold22k)),
+        gold24k: String(Math.round(currentRates.gold24k)),
+        gold18k: String(Math.round(currentRates.gold18k)),
+        silver: String(Math.round(currentRates.silver)),
+      });
+    }
+  }, [currentRates]);
 
   useEffect(() => {
     if (settings) {
@@ -48,6 +65,26 @@ export default function Settings() {
       });
     }
   }, [settings, reset]);
+
+  const saveRates = () => {
+    const payload: Record<string, number> = {};
+    if (rateForm.gold22k) payload.gold22k = parseFloat(rateForm.gold22k);
+    if (rateForm.gold24k) payload.gold24k = parseFloat(rateForm.gold24k);
+    if (rateForm.gold18k) payload.gold18k = parseFloat(rateForm.gold18k);
+    if (rateForm.silver) payload.silver = parseFloat(rateForm.silver);
+    setRatesSaving(true);
+    updateRates.mutate({ data: payload }, {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getGetCurrentRatesQueryKey() });
+        toast({ title: "Metal rates updated successfully" });
+        setRatesSaving(false);
+      },
+      onError: () => {
+        toast({ title: "Failed to update rates", variant: "destructive" });
+        setRatesSaving(false);
+      },
+    });
+  };
 
   const onSubmit = (data: SettingsForm) => {
     updateSettings.mutate({
@@ -89,6 +126,42 @@ export default function Settings() {
       toast({ title: "Failed to save WhatsApp settings", variant: "destructive" });
     } finally {
       setWaSaving(false);
+    }
+  };
+
+  const exportToCsv = (filename: string, data: Record<string, unknown>[]) => {
+    if (!data || data.length === 0) {
+      toast({ title: "No data to export", variant: "destructive" }); return;
+    }
+    const headers = Object.keys(data[0]);
+    const escape = (v: unknown) => {
+      if (v === null || v === undefined) return "";
+      const s = String(v).replace(/"/g, '""');
+      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s}"` : s;
+    };
+    const rows = [headers.join(","), ...data.map(r => headers.map(h => escape(r[h])).join(","))];
+    const blob = new Blob(["﻿" + rows.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportModule = async (endpoint: string, label: string) => {
+    setExporting(endpoint);
+    try {
+      const r = await fetch(`/api/${endpoint}`);
+      if (!r.ok) throw new Error();
+      const data = await r.json();
+      const date = new Date().toISOString().split("T")[0];
+      exportToCsv(`swarndesk-${endpoint}-${date}.csv`, Array.isArray(data) ? data : []);
+      toast({ title: `${label} exported` });
+    } catch {
+      toast({ title: `Failed to export ${label}`, variant: "destructive" });
+    } finally {
+      setExporting(null);
     }
   };
 
@@ -149,6 +222,48 @@ export default function Settings() {
               <label className="text-xs text-muted-foreground mb-1 block">Address</label>
               <Input {...register("address")} data-testid="input-address" />
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Metal Rates */}
+        <Card className="border-border border-amber-200 bg-amber-50/30">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <Coins className="w-4 h-4 text-amber-600" />
+              Today's Metal Rates (₹ per gram)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">Update daily gold and silver rates. These rates are used across billing, inventory valuation, and girvi calculations.</p>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: "Gold 22K", key: "gold22k", placeholder: "e.g. 7250" },
+                { label: "Gold 24K", key: "gold24k", placeholder: "e.g. 7950" },
+                { label: "Gold 18K", key: "gold18k", placeholder: "e.g. 5940" },
+                { label: "Silver", key: "silver", placeholder: "e.g. 95" },
+              ].map(({ label, key, placeholder }) => (
+                <div key={key}>
+                  <label className="text-xs text-muted-foreground mb-1 block">{label}</label>
+                  <Input
+                    type="number"
+                    step="1"
+                    value={rateForm[key as keyof typeof rateForm]}
+                    onChange={e => setRateForm(f => ({ ...f, [key]: e.target.value }))}
+                    placeholder={placeholder}
+                    data-testid={`input-rate-${key}`}
+                  />
+                </div>
+              ))}
+            </div>
+            {currentRates && (
+              <p className="text-xs text-muted-foreground">
+                Last updated: {new Date(currentRates.updatedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+              </p>
+            )}
+            <Button type="button" onClick={saveRates} disabled={ratesSaving} className="gap-2" data-testid="button-save-rates">
+              <Coins className="w-4 h-4" />
+              {ratesSaving ? "Saving..." : "Update Metal Rates"}
+            </Button>
           </CardContent>
         </Card>
 
@@ -236,7 +351,7 @@ export default function Settings() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-xs text-muted-foreground">
-            Connect Meta's WhatsApp Business Cloud API to send automated reminders and bulk CRM messages directly from HiraNXT.
+            Connect Meta's WhatsApp Business Cloud API to send automated reminders and bulk CRM messages directly from SwarnDesk.
             Get your credentials from <span className="text-primary">Meta for Developers → WhatsApp → API Setup</span>.
           </p>
 
@@ -307,6 +422,46 @@ export default function Settings() {
             <div>4. Create a <strong>System User</strong> with admin role → Generate permanent token</div>
             <div>5. Paste both above and click Save WhatsApp Config</div>
           </div>
+        </CardContent>
+      </Card>
+      {/* Export Data */}
+      <Card className="border-border">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <FileSpreadsheet className="w-4 h-4 text-primary" />
+            Export Data to Excel / CSV
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Download any module as a CSV file. Open it directly in Microsoft Excel, Google Sheets, or any spreadsheet app.
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {[
+              { key: "inventory", label: "Inventory" },
+              { key: "customers", label: "Customers" },
+              { key: "sales", label: "Sales" },
+              { key: "purchases", label: "Purchases" },
+              { key: "repairs", label: "Repairs" },
+              { key: "karigars", label: "Karigars" },
+              { key: "girvi", label: "Girvi Loans" },
+            ].map(({ key, label }) => (
+              <Button
+                key={key}
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5 justify-start text-xs"
+                disabled={exporting === key}
+                onClick={() => exportModule(key, label)}
+                data-testid={`button-export-${key}`}
+              >
+                <Download className="w-3 h-3 shrink-0" />
+                {exporting === key ? "Exporting..." : label}
+              </Button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">Files are named with today's date, e.g. <span className="font-mono">swarndesk-inventory-2026-05-23.csv</span></p>
         </CardContent>
       </Card>
     </div>

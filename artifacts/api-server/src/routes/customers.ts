@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { customersTable, salesTable, repairJobsTable } from "@workspace/db";
-import { eq, ilike, and, desc } from "drizzle-orm";
+import { eq, ilike, and, or, desc } from "drizzle-orm";
 
 const router = Router();
 
@@ -65,7 +65,10 @@ router.get("/", async (req, res) => {
     const { search } = req.query as Record<string, string>;
     const customers = search
       ? await db.select().from(customersTable).where(
-          ilike(customersTable.name, `%${search}%`)
+          or(
+            ilike(customersTable.name, `%${search}%`),
+            ilike(customersTable.mobile, `%${search}%`)
+          )
         )
       : await db.select().from(customersTable);
     res.json(customers.map(mapCustomer));

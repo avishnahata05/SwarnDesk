@@ -2,6 +2,7 @@ import { useState } from "react";
 import { formatCurrency } from "@/lib/utils";
 import {
   useListCustomers, useCreateCustomer, useDeleteCustomer, useGetUpcomingOccasions,
+  useGetCustomer,
   getListCustomersQueryKey, getGetUpcomingOccasionsQueryKey
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -11,7 +12,10 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useForm } from "react-hook-form";
-import { Plus, Search, Gift, MessageCircle, Star, Send, CheckSquare, Square, Users } from "lucide-react";
+import {
+  Plus, Search, Gift, MessageCircle, Star, Send, CheckSquare, Square, Users,
+  Eye, ShoppingBag, Wrench, X,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface CustomerForm {
@@ -21,9 +25,170 @@ interface CustomerForm {
 
 const DEFAULT_TEMPLATE = "Dear {name}, thank you for being a valued customer at our jewellery store! We'd love to see you again. Visit us for our latest collection and exclusive offers.";
 
+function CustomerLedger({ customerId, onClose }: { customerId: number; onClose: () => void }) {
+  const { data, isLoading } = useGetCustomer(customerId);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-16 text-muted-foreground">Loading...</div>
+    );
+  }
+
+  if (!data) return null;
+
+  const { customer, recentSales, pendingRepairs } = data;
+  const totalPaid = recentSales.filter(s => s.paymentStatus === "paid").reduce((a, s) => a + s.totalAmount, 0);
+  const totalPending = recentSales.filter(s => s.paymentStatus !== "paid").reduce((a, s) => a + s.totalAmount, 0);
+
+  return (
+    <div className="space-y-5">
+      {/* Customer summary */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-bold">{customer.name}</h2>
+          <div className="text-sm text-muted-foreground">{customer.mobile}</div>
+          {customer.email && <div className="text-xs text-muted-foreground">{customer.email}</div>}
+          {customer.address && <div className="text-xs text-muted-foreground mt-0.5">{customer.address}</div>}
+        </div>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1 rounded">
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+
+      {/* Stats row */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="p-3 rounded-xl bg-primary/10 border border-primary/20 text-center">
+          <div className="text-xs text-muted-foreground mb-1">Total Purchases</div>
+          <div className="text-base font-bold text-primary">{formatCurrency(customer.totalPurchases)}</div>
+        </div>
+        <div className={`p-3 rounded-xl border text-center ${customer.balance >= 0 ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
+          <div className="text-xs text-muted-foreground mb-1">Balance</div>
+          <div className={`text-base font-bold ${customer.balance >= 0 ? "text-green-700" : "text-red-600"}`}>
+            {customer.balance >= 0 ? "+" : ""}{formatCurrency(Math.abs(customer.balance))}
+          </div>
+        </div>
+        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-center">
+          <div className="text-xs text-muted-foreground mb-1 flex items-center justify-center gap-1"><Star className="w-3 h-3" />Points</div>
+          <div className="text-base font-bold text-amber-700">{customer.loyaltyPoints ?? 0}</div>
+        </div>
+      </div>
+
+      {/* Occasions */}
+      {(customer.birthday || customer.anniversary) && (
+        <div className="flex gap-2 flex-wrap">
+          {customer.birthday && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-pink-50 border border-pink-200 text-xs text-pink-700">
+              <Gift className="w-3.5 h-3.5" />Birthday: {customer.birthday}
+            </div>
+          )}
+          {customer.anniversary && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-50 border border-violet-200 text-xs text-violet-700">
+              <Gift className="w-3.5 h-3.5" />Anniversary: {customer.anniversary}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Purchase history */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-sm font-semibold flex items-center gap-1.5">
+            <ShoppingBag className="w-4 h-4 text-primary" />
+            Purchase History
+          </div>
+          {totalPending > 0 && (
+            <Badge variant="destructive" className="text-xs">
+              Pending: {formatCurrency(totalPending)}
+            </Badge>
+          )}
+        </div>
+        {recentSales.length === 0 ? (
+          <div className="text-sm text-muted-foreground py-6 text-center border border-dashed border-border rounded-xl">
+            No purchase history yet.
+          </div>
+        ) : (
+          <div className="border border-border rounded-xl overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-muted/50 border-b border-border text-muted-foreground">
+                  <th className="px-3 py-2 text-left font-medium">Invoice</th>
+                  <th className="px-3 py-2 text-left font-medium hidden sm:table-cell">Date</th>
+                  <th className="px-3 py-2 text-right font-medium">Amount</th>
+                  <th className="px-3 py-2 text-center font-medium">Status</th>
+                  <th className="px-3 py-2 text-center font-medium hidden sm:table-cell">Payment</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentSales.map(sale => (
+                  <tr key={sale.id} className="border-b border-border/50 last:border-0 hover:bg-muted/10">
+                    <td className="px-3 py-2 font-mono">{sale.invoiceNumber}</td>
+                    <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">
+                      {new Date(sale.saleDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })}
+                    </td>
+                    <td className="px-3 py-2 text-right font-semibold text-primary">{formatCurrency(sale.totalAmount)}</td>
+                    <td className="px-3 py-2 text-center">
+                      <Badge
+                        className={`text-[10px] h-4 ${sale.paymentStatus === "paid" ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-100" : sale.paymentStatus === "pending" ? "bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-100" : "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-100"}`}
+                        variant="outline"
+                      >
+                        {sale.paymentStatus.charAt(0).toUpperCase() + sale.paymentStatus.slice(1)}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-2 text-center text-muted-foreground capitalize hidden sm:table-cell">{sale.paymentMode}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Pending repairs */}
+      {pendingRepairs.length > 0 && (
+        <div>
+          <div className="text-sm font-semibold flex items-center gap-1.5 mb-2">
+            <Wrench className="w-4 h-4 text-primary" />
+            Active Repairs ({pendingRepairs.length})
+          </div>
+          <div className="space-y-2">
+            {pendingRepairs.map(r => (
+              <div key={r.id} className="flex items-center justify-between p-3 rounded-xl border border-border bg-muted/10 text-xs">
+                <div>
+                  <div className="font-medium">{r.jobDescription}</div>
+                  <div className="text-muted-foreground mt-0.5">
+                    {r.itemType} • Due: {new Date(r.promisedDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                  </div>
+                </div>
+                <Badge variant="outline" className="text-[10px] capitalize">{r.status}</Badge>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Quick actions */}
+      <div className="flex gap-2 pt-2 border-t border-border">
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5 flex-1 border-green-500/40 text-green-600 hover:bg-green-50"
+          onClick={() => {
+            const msg = `Hello ${customer.name}! Thank you for your continued trust in us.`;
+            window.open(`https://wa.me/91${customer.mobile.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`, "_blank");
+          }}
+        >
+          <MessageCircle className="w-3.5 h-3.5" />
+          WhatsApp
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function Customers() {
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [ledgerCustomerId, setLedgerCustomerId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkTemplate, setBulkTemplate] = useState(DEFAULT_TEMPLATE);
@@ -170,7 +335,7 @@ export default function Customers() {
                 <Badge variant="outline" className="text-primary border-primary/40">{o.daysUntil}d</Badge>
                 <button
                   onClick={() => sendWhatsApp(o.mobile, o.customerName)}
-                  className="text-green-400 hover:text-green-300"
+                  className="text-green-600 hover:text-green-700"
                   data-testid={`button-wa-occasion-${o.customerId}`}
                 >
                   <MessageCircle className="w-3.5 h-3.5" />
@@ -185,7 +350,7 @@ export default function Customers() {
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
         <Input
-          placeholder="Search customers by name..."
+          placeholder="Search customers by name or mobile..."
           value={search}
           onChange={e => setSearch(e.target.value)}
           className="pl-9"
@@ -194,9 +359,9 @@ export default function Customers() {
       </div>
 
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-green-500/10 border border-green-500/20 text-sm">
-          <Users className="w-4 h-4 text-green-400" />
-          <span className="text-green-400 font-medium">{selectedIds.size} customer{selectedIds.size > 1 ? "s" : ""} selected</span>
+        <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-green-50 border border-green-200 text-sm">
+          <Users className="w-4 h-4 text-green-600" />
+          <span className="text-green-700 font-medium">{selectedIds.size} customer{selectedIds.size > 1 ? "s" : ""} selected</span>
           <button className="text-xs text-muted-foreground hover:text-foreground ml-auto" onClick={() => setSelectedIds(new Set())}>Clear selection</button>
         </div>
       )}
@@ -209,7 +374,7 @@ export default function Customers() {
               <tr className="border-b border-border text-muted-foreground text-xs">
                 <th className="px-4 py-3 text-left w-10">
                   <button onClick={toggleAll} className="text-muted-foreground hover:text-foreground">
-                    {allSelected ? <CheckSquare className="w-4 h-4 text-green-400" /> : <Square className="w-4 h-4" />}
+                    {allSelected ? <CheckSquare className="w-4 h-4 text-green-600" /> : <Square className="w-4 h-4" />}
                   </button>
                 </th>
                 <th className="px-4 py-3 text-left font-medium">Customer</th>
@@ -223,40 +388,63 @@ export default function Customers() {
             <tbody>
               {isLoading && <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>}
               {!isLoading && (!customers || customers.length === 0) && (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No customers found.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-12 text-center">
+                  <Users className="w-10 h-10 text-muted-foreground/40 mx-auto mb-2" />
+                  <div className="text-muted-foreground">No customers found.</div>
+                </td></tr>
               )}
               {(customers ?? []).map(c => (
-                <tr key={c.id} className={`border-b border-border hover:bg-muted/10 ${selectedIds.has(c.id) ? "bg-green-500/5" : ""}`} data-testid={`row-customer-${c.id}`}>
+                <tr
+                  key={c.id}
+                  className={`border-b border-border hover:bg-muted/10 ${selectedIds.has(c.id) ? "bg-green-50/50" : ""}`}
+                  data-testid={`row-customer-${c.id}`}
+                >
                   <td className="px-4 py-3">
                     <button onClick={() => toggleOne(c.id)} className="text-muted-foreground hover:text-foreground">
-                      {selectedIds.has(c.id) ? <CheckSquare className="w-4 h-4 text-green-400" /> : <Square className="w-4 h-4" />}
+                      {selectedIds.has(c.id) ? <CheckSquare className="w-4 h-4 text-green-600" /> : <Square className="w-4 h-4" />}
                     </button>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="font-medium">{c.name}</div>
-                    {c.email && <div className="text-xs text-muted-foreground">{c.email}</div>}
+                    <button
+                      className="text-left hover:text-primary transition-colors"
+                      onClick={() => setLedgerCustomerId(c.id)}
+                      data-testid={`button-ledger-${c.id}`}
+                    >
+                      <div className="font-medium hover:underline">{c.name}</div>
+                      {c.email && <div className="text-xs text-muted-foreground">{c.email}</div>}
+                    </button>
                   </td>
                   <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{c.mobile}</td>
                   <td className="px-4 py-3 text-right font-medium text-primary">{formatCurrency(c.totalPurchases)}</td>
                   <td className="px-4 py-3 text-right hidden md:table-cell">
-                    <span className={c.balance >= 0 ? "text-green-400" : "text-destructive"}>
+                    <span className={c.balance >= 0 ? "text-green-600" : "text-destructive"}>
                       {c.balance >= 0 ? "+" : ""}{formatCurrency(Math.abs(c.balance))}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-center hidden md:table-cell">
-                    <div className="flex items-center justify-center gap-1 text-primary">
-                      <Star className="w-3 h-3 fill-primary" />{c.loyaltyPoints}
+                    <div className="flex items-center justify-center gap-1 text-amber-600">
+                      <Star className="w-3 h-3 fill-amber-500" />{c.loyaltyPoints}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <button
-                      onClick={() => sendWhatsApp(c.mobile, c.name)}
-                      className="text-green-400 hover:text-green-300 mx-2"
-                      title="Send WhatsApp"
-                      data-testid={`button-wa-customer-${c.id}`}
-                    >
-                      <MessageCircle className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center justify-center gap-2">
+                      <button
+                        onClick={() => setLedgerCustomerId(c.id)}
+                        className="text-muted-foreground hover:text-primary transition-colors"
+                        title="View Ledger / Khata"
+                        data-testid={`button-view-${c.id}`}
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => sendWhatsApp(c.mobile, c.name)}
+                        className="text-green-600 hover:text-green-700"
+                        title="Send WhatsApp"
+                        data-testid={`button-wa-customer-${c.id}`}
+                      >
+                        <MessageCircle className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -265,24 +453,34 @@ export default function Customers() {
         </div>
       </Card>
 
+      {/* Customer Ledger Dialog */}
+      <Dialog open={ledgerCustomerId !== null} onOpenChange={v => !v && setLedgerCustomerId(null)}>
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
+          {ledgerCustomerId !== null && (
+            <CustomerLedger
+              customerId={ledgerCustomerId}
+              onClose={() => setLedgerCustomerId(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Bulk WhatsApp Dialog */}
       <Dialog open={bulkOpen} onOpenChange={v => { if (!bulkSending) setBulkOpen(v); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <MessageCircle className="w-5 h-5 text-green-400" />
+              <MessageCircle className="w-5 h-5 text-green-600" />
               Bulk WhatsApp — {selectedIds.size} Recipient{selectedIds.size > 1 ? "s" : ""}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            {/* Recipient preview chips */}
             <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
               {selectedCustomers.map(c => (
                 <span key={c.id} className="px-2 py-0.5 bg-muted/40 border border-border rounded-full text-xs">{c.name}</span>
               ))}
             </div>
 
-            {/* Template editor */}
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">
                 Message Template — use <code className="bg-muted px-1 rounded">{"{name}"}</code> for customer name
@@ -296,7 +494,6 @@ export default function Customers() {
               <p className="text-xs text-muted-foreground mt-1">{bulkTemplate.length} chars</p>
             </div>
 
-            {/* Preview */}
             {selectedCustomers[0] && (
               <div className="p-3 rounded-lg bg-muted/20 border border-border">
                 <div className="text-xs text-muted-foreground mb-1">Preview for {selectedCustomers[0].name}:</div>
@@ -304,7 +501,6 @@ export default function Customers() {
               </div>
             )}
 
-            {/* Templates */}
             <div>
               <div className="text-xs text-muted-foreground mb-2">Quick templates:</div>
               <div className="flex flex-wrap gap-2">
@@ -326,7 +522,7 @@ export default function Customers() {
           </div>
           <DialogFooter className="flex-col sm:flex-row gap-2">
             <Button variant="outline" size="sm" onClick={() => setBulkOpen(false)} disabled={bulkSending}>Cancel</Button>
-            <Button size="sm" variant="outline" onClick={sendViaLinks} disabled={bulkSending} className="gap-1.5 border-green-500/40 text-green-400 hover:bg-green-500/10">
+            <Button size="sm" variant="outline" onClick={sendViaLinks} disabled={bulkSending} className="gap-1.5 border-green-500/40 text-green-600 hover:bg-green-50">
               <MessageCircle className="w-3.5 h-3.5" />
               Open WhatsApp Links
             </Button>

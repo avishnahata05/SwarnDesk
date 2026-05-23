@@ -1,37 +1,37 @@
 import { useState, useEffect } from "react";
 import { Link } from "wouter";
 import {
-  Gem, Zap, Users, Hammer, Package,
+  Zap, Users, Hammer, Package,
   CheckCircle2, Star, MessageCircle, ArrowRight, ShoppingCart, LayoutDashboard
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const features = [
-  { icon: LayoutDashboard, title: "Live Dashboard", desc: "Real-time gold rates, daily P&L, and sales analytics at a glance." },
-  { icon: Package, title: "Smart Inventory", desc: "Track every item by weight, purity, HUID, and karigar. Never lose stock." },
-  { icon: ShoppingCart, title: "Instant Billing", desc: "One-screen POS with GST auto-calculation, exchange gold, and WhatsApp invoices." },
-  { icon: Users, title: "Customer CRM", desc: "Birthday reminders, loyalty schemes, and full purchase history per customer." },
-  { icon: Hammer, title: "Karigar Tracking", desc: "Issue metal by weight, track wastage, and manage wages for every artisan." },
-  { icon: Zap, title: "AI Assistant", desc: "Ask HiraNXT anything — low stock, best-sellers, today's profit — in plain language." },
+  { icon: LayoutDashboard, title: "Live Dashboard", desc: "See your gold rates, daily earnings, and sales performance the moment you open the app — no waiting, no refresh needed." },
+  { icon: Package, title: "Smart Inventory", desc: "Track every ornament by weight, purity, HUID, and karigar. You'll always know what's in stock and where it is." },
+  { icon: ShoppingCart, title: "Instant Billing", desc: "Bill a customer in under 60 seconds. GST auto-calculation, old gold exchange, and instant WhatsApp invoice — all in one screen." },
+  { icon: Users, title: "Customer Management", desc: "Never forget a birthday or anniversary. Keep purchase history, loyalty points, and reminders for every customer." },
+  { icon: Hammer, title: "Karigar Tracking", desc: "Give metal, get ornaments. Track every gram of gold with your karigars — no more disputes, no more wastage." },
+  { icon: Zap, title: "AI Business Insights", desc: "Ask SwarnDesk in plain language — 'What sold most this week?' or 'Which items are running low?' — and get instant answers." },
 ];
 
 const testimonials = [
   {
     name: "Rajesh Mehta",
     role: "Owner, Mehta Jewellers — Surat",
-    text: "HiraNXT transformed how we run our 3 showrooms. The karigar tracking alone saved us 15 grams of gold per month in wastage disputes.",
+    text: "SwarnDesk changed how we run our 3 showrooms. The karigar tracking alone saved us 15 grams of gold per month in wastage disputes.",
     stars: 5,
   },
   {
     name: "Priya Agarwal",
     role: "Managing Partner, Agarwal Gold — Jaipur",
-    text: "The GST reports and GSTR-1 export are perfect. Our CA is thrilled. We cut compliance time from 2 days to 2 hours every month.",
+    text: "The GST reports are perfect for our CA. We cut compliance time from 2 days to 2 hours every single month.",
     stars: 5,
   },
   {
     name: "Suresh Patel",
     role: "Proprietor, Patel Ornaments — Ahmedabad",
-    text: "The WhatsApp billing feature is a game-changer. My customers love getting their invoices instantly on WhatsApp.",
+    text: "My customers love getting their invoice on WhatsApp right after purchase. It feels professional and my repeat customers have gone up.",
     stars: 5,
   },
 ];
@@ -40,7 +40,7 @@ const plans = [
   {
     name: "Starter",
     price: "₹999",
-    desc: "Perfect for single-shop jewellers",
+    desc: "Perfect for a single-shop jeweller",
     features: ["1 Branch", "Up to 500 items", "Billing & POS", "Customer CRM", "GST Reports"],
     cta: "Start Free Trial",
     highlight: false,
@@ -48,7 +48,7 @@ const plans = [
   {
     name: "Pro",
     price: "₹2,499",
-    desc: "For growing jewellery businesses",
+    desc: "For jewellers who are growing fast",
     features: ["5 Branches", "Unlimited items", "Karigar Management", "AI Assistant", "All Reports + Export", "WhatsApp Integration"],
     cta: "Start Free Trial",
     highlight: true,
@@ -56,7 +56,7 @@ const plans = [
   {
     name: "Enterprise",
     price: "Custom",
-    desc: "For large chains & wholesalers",
+    desc: "For large chains and wholesalers",
     features: ["Unlimited Branches", "Dedicated Support", "Custom Integrations", "API Access", "On-premise Option", "Training & Onboarding"],
     cta: "Contact Sales",
     highlight: false,
@@ -79,10 +79,10 @@ export default function LandingPage() {
       <nav className="fixed top-0 inset-x-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <Gem className="w-4 h-4 text-primary-foreground" />
+            <div className="w-9 h-9 rounded-full bg-white border border-border shadow-sm flex items-center justify-center overflow-hidden flex-shrink-0">
+              <img src="/logo.png" alt="SwarnDesk Logo" className="w-7 h-7 object-contain" />
             </div>
-            <span className="text-lg font-bold tracking-tight">HiraNXT</span>
+            <span className="text-lg font-bold tracking-tight">SwarnDesk</span>
           </div>
           <div className="flex items-center gap-3">
             <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-full px-3 py-1.5 border border-border">
@@ -108,36 +108,36 @@ export default function LandingPage() {
           </div>
 
           <h1 className="text-5xl sm:text-6xl md:text-7xl font-extrabold leading-tight mb-6">
-            <span className="text-foreground">India's Smartest</span>
+            <span className="text-foreground">Run Your Jewellery</span>
             <br />
             <span className="text-primary" style={{ textShadow: "0 0 60px rgba(244,197,66,0.4)" }}>
-              Jewellery ERP
+              Business Smarter
             </span>
           </h1>
 
           <p className="text-xl text-muted-foreground mb-10 max-w-2xl mx-auto leading-relaxed">
-            Manage inventory, billing, karigars, repairs, and GST compliance — all in one platform built for Indian jewellers.
+            SwarnDesk brings your entire jewellery shop onto one screen — inventory, billing, karigars, repairs, and GST — so you can focus on selling, not paperwork.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link href="/app/dashboard">
               <Button size="lg" className="gap-2 px-8 text-base font-semibold" data-testid="button-free-trial">
-                Start Free Trial <ArrowRight className="w-4 h-4" />
+                Try Free for 30 Days <ArrowRight className="w-4 h-4" />
               </Button>
             </Link>
             <a
-              href="https://wa.me/919999999999?text=I+want+to+know+more+about+HiraNXT"
+              href="https://wa.me/919999999999?text=I+want+to+know+more+about+SwarnDesk"
               target="_blank"
               rel="noopener noreferrer"
             >
               <Button variant="outline" size="lg" className="gap-2 px-8 text-base" data-testid="button-whatsapp-demo">
                 <MessageCircle className="w-4 h-4 text-green-400" />
-                WhatsApp Demo
+                See a Live Demo
               </Button>
             </a>
           </div>
 
-          <p className="mt-6 text-xs text-muted-foreground">No credit card required — 30 days free trial</p>
+          <p className="mt-6 text-xs text-muted-foreground">No credit card needed — free for 30 days, cancel anytime</p>
         </div>
 
         {/* Stats */}
@@ -159,9 +159,9 @@ export default function LandingPage() {
       <section className="py-20 px-4 sm:px-6">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-14">
-            <h2 className="text-3xl sm:text-4xl font-bold mb-4">Everything a jeweller needs</h2>
+            <h2 className="text-3xl sm:text-4xl font-bold mb-4">Everything a jeweller actually needs</h2>
             <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
-              Built ground-up for the Indian jewellery trade — from retail counters to wholesale operations.
+              Built from the ground up for Indian jewellers — whether you run a small counter or a chain of showrooms.
             </p>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -185,8 +185,8 @@ export default function LandingPage() {
       <section className="py-20 px-4 sm:px-6 bg-card/30">
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-14">
-            <h2 className="text-3xl sm:text-4xl font-bold mb-4">Simple, transparent pricing</h2>
-            <p className="text-muted-foreground text-lg">Start free. Upgrade when you're ready.</p>
+            <h2 className="text-3xl sm:text-4xl font-bold mb-4">Honest, simple pricing</h2>
+            <p className="text-muted-foreground text-lg">Start free. Pay only when your business grows.</p>
           </div>
           <div className="grid md:grid-cols-3 gap-6">
             {plans.map(plan => (
@@ -242,8 +242,8 @@ export default function LandingPage() {
       <section className="py-20 px-4 sm:px-6">
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-14">
-            <h2 className="text-3xl sm:text-4xl font-bold mb-4">Trusted by 2,400+ jewellers</h2>
-            <p className="text-muted-foreground text-lg">Across India's jewellery hubs — Mumbai, Surat, Jaipur, Ahmedabad</p>
+            <h2 className="text-3xl sm:text-4xl font-bold mb-4">2,400+ jewellers trust SwarnDesk</h2>
+            <p className="text-muted-foreground text-lg">From busy counters in Surat to showrooms in Jaipur and Ahmedabad</p>
           </div>
           <div className="grid md:grid-cols-3 gap-6">
             {testimonials.map(t => (
@@ -268,14 +268,16 @@ export default function LandingPage() {
       <section className="py-20 px-4 sm:px-6">
         <div className="max-w-3xl mx-auto text-center">
           <div className="p-10 rounded-3xl border border-primary/20 bg-primary/5">
-            <Gem className="w-12 h-12 text-primary mx-auto mb-6" />
-            <h2 className="text-3xl sm:text-4xl font-bold mb-4">Ready to transform your jewellery business?</h2>
+            <div className="w-16 h-16 rounded-full bg-white border border-border shadow-md flex items-center justify-center mx-auto mb-6 overflow-hidden">
+              <img src="/logo.png" alt="SwarnDesk" className="w-12 h-12 object-contain" />
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-bold mb-4">Ready to simplify your jewellery business?</h2>
             <p className="text-muted-foreground text-lg mb-8">
-              Join 2,400+ jewellers already using HiraNXT. Start your 30-day free trial today.
+              Join 2,400+ jewellers already using SwarnDesk. Your first 30 days are completely free — no setup fees, no contracts.
             </p>
             <Link href="/app/dashboard">
               <Button size="lg" className="gap-2 px-10 text-base font-semibold" data-testid="button-cta-trial">
-                Start Free Trial <ArrowRight className="w-4 h-4" />
+                Get Started Free <ArrowRight className="w-4 h-4" />
               </Button>
             </Link>
           </div>
@@ -286,17 +288,19 @@ export default function LandingPage() {
       <footer className="border-t border-border py-10 px-4 sm:px-6">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <Gem className="w-5 h-5 text-primary" />
-            <span className="font-bold">HiraNXT</span>
+            <div className="w-7 h-7 rounded-full bg-white border border-border flex items-center justify-center overflow-hidden">
+              <img src="/logo.png" alt="SwarnDesk" className="w-5 h-5 object-contain" />
+            </div>
+            <span className="font-bold">SwarnDesk</span>
             <span className="text-muted-foreground text-sm ml-2">India's Smartest Jewellery ERP</span>
           </div>
-          <div className="text-xs text-muted-foreground">© 2025 HiraNXT. Made with love for Indian jewellers.</div>
+          <div className="text-xs text-muted-foreground">© 2025 SwarnDesk. Made with love for Indian jewellers.</div>
         </div>
       </footer>
 
       {/* Floating WhatsApp button */}
       <a
-        href="https://wa.me/919999999999?text=Hello+HiraNXT+Support"
+        href="https://wa.me/919999999999?text=Hello+SwarnDesk+Support"
         target="_blank"
         rel="noopener noreferrer"
         className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-green-500 hover:bg-green-600 rounded-full flex items-center justify-center shadow-lg shadow-green-500/30 transition-all hover:scale-105"

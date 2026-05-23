@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { inventoryItemsTable } from "@workspace/db";
-import { eq, ilike, and, lte, sql } from "drizzle-orm";
+import { eq, ilike, and, or, lte, sql } from "drizzle-orm";
 
 const router = Router();
 
@@ -35,7 +35,11 @@ router.get("/", async (req, res) => {
     const conditions = [];
     if (category) conditions.push(eq(inventoryItemsTable.category, category));
     if (branch) conditions.push(eq(inventoryItemsTable.branch, branch));
-    if (search) conditions.push(ilike(inventoryItemsTable.name, `%${search}%`));
+    if (search) conditions.push(or(
+      ilike(inventoryItemsTable.name, `%${search}%`),
+      ilike(inventoryItemsTable.huid, `%${search}%`),
+      ilike(inventoryItemsTable.barcode, `%${search}%`)
+    ));
     const items = conditions.length > 0
       ? await db.select().from(inventoryItemsTable).where(and(...conditions))
       : await db.select().from(inventoryItemsTable);

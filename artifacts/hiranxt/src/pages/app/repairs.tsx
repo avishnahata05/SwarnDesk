@@ -94,7 +94,7 @@ export default function Repairs() {
     });
   };
 
-  const sendWhatsAppUpdate = (repair: typeof repairs extends Array<infer T> ? T : never) => {
+  const sendWhatsAppUpdate = (repair: NonNullable<typeof repairs>[number]) => {
     const msg = `Hello ${repair.customerName}! Your repair job (${repair.itemDescription}) is now "${STATUS_LABELS[repair.status as Status]}". Estimated cost: ${formatCurrency(repair.estimatedCost)}. Contact us at +91-99999-99999.`;
     window.open(`https://wa.me/91${repair.customerMobile.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`, "_blank");
   };

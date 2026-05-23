@@ -35,6 +35,7 @@ export default function Purchases() {
 
   const netWeight = watch("netWeight");
   const ratePerGram = watch("ratePerGram");
+  const metalTypeWatch = watch("metalType") ?? "gold";
 
   const onSubmit = (data: PurchaseForm) => {
     createPurchase.mutate({
@@ -46,7 +47,7 @@ export default function Purchases() {
         netWeight: parseFloat(String(data.netWeight)),
         fineWeight: parseFloat(String(data.fineWeight || data.netWeight)),
         ratePerGram: parseFloat(String(data.ratePerGram)),
-        totalAmount: parseFloat(String(data.totalAmount || (netWeight * ratePerGram))),
+        totalAmount: data.totalAmount > 0 ? parseFloat(String(data.totalAmount)) : parseFloat(String(netWeight)) * parseFloat(String(ratePerGram)) || 0,
         purchaseDate: new Date(data.purchaseDate).toISOString(),
         notes: data.notes || null,
         supplierId: null,
@@ -124,7 +125,7 @@ export default function Purchases() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Metal Type</label>
-                <Select defaultValue="gold" onValueChange={v => setValue("metalType", v)}>
+                <Select value={metalTypeWatch} onValueChange={v => setValue("metalType", v)}>
                   <SelectTrigger data-testid="select-metal-type"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="gold">Gold</SelectItem>

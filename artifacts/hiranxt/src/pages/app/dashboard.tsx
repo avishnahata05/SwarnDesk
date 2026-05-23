@@ -9,14 +9,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  TrendingUp, Package, Users, Wrench, AlertTriangle, Plus, PlusCircle, Bot, X, Send
+  TrendingUp, Package, Users, Wrench, AlertTriangle, Plus,
+  Bot, X, Send, ShoppingCart, IndianRupee, ArrowUpRight,
 } from "lucide-react";
 import {
   AreaChart, Area, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
 
-const COLORS = ["#f4c542", "#e94560", "#4fc3f7", "#81c784", "#ce93d8"];
+const PIE_COLORS = ["#16a34a", "#f59e0b", "#3b82f6", "#8b5cf6", "#ef4444"];
+const CHART_GREEN = "#16a34a";
 
 const AI_RESPONSES: Record<string, string> = {
   "low stock": "You have items with low stock. Check the Inventory page for details and reorder alerts.",
@@ -32,8 +34,71 @@ function getAIResponse(query: string): string {
   for (const [key, resp] of Object.entries(AI_RESPONSES)) {
     if (q.includes(key)) return resp;
   }
-  return `I found information related to "${query}". Your HiraNXT data shows healthy business activity. Visit the relevant module for detailed insights.`;
+  return `I found information related to "${query}". Your SwarnDesk data shows healthy business activity. Visit the relevant module for detailed insights.`;
 }
+
+const statCards = [
+  {
+    label: "Today's Sales",
+    hint: "Total revenue today",
+    key: "todaySales" as const,
+    format: "currency",
+    icon: IndianRupee,
+    iconBg: "bg-emerald-50",
+    iconColor: "text-emerald-600",
+    accent: "text-emerald-600",
+  },
+  {
+    label: "Today's Profit",
+    hint: "Net profit today",
+    key: "todayProfit" as const,
+    format: "currency",
+    icon: TrendingUp,
+    iconBg: "bg-green-50",
+    iconColor: "text-green-600",
+    accent: "text-green-600",
+  },
+  {
+    label: "Inventory Value",
+    hint: "Total stock worth",
+    key: "totalInventoryValue" as const,
+    format: "currency",
+    icon: Package,
+    iconBg: "bg-amber-50",
+    iconColor: "text-amber-600",
+    accent: "text-amber-600",
+  },
+  {
+    label: "Total Customers",
+    hint: "Registered customers",
+    key: "totalCustomers" as const,
+    format: "number",
+    icon: Users,
+    iconBg: "bg-blue-50",
+    iconColor: "text-blue-600",
+    accent: "text-blue-600",
+  },
+  {
+    label: "Stock Items",
+    hint: "Items in inventory",
+    key: "totalInventoryItems" as const,
+    format: "number",
+    icon: ShoppingCart,
+    iconBg: "bg-violet-50",
+    iconColor: "text-violet-600",
+    accent: "text-violet-600",
+  },
+  {
+    label: "Pending Repairs",
+    hint: "Jobs awaiting pickup",
+    key: "pendingRepairs" as const,
+    format: "number",
+    icon: Wrench,
+    iconBg: "bg-red-50",
+    iconColor: "text-red-500",
+    accent: "text-red-500",
+  },
+];
 
 export default function Dashboard() {
   const { data: summary, isLoading: summaryLoading } = useGetDashboardSummary();
@@ -45,7 +110,7 @@ export default function Dashboard() {
   const [aiOpen, setAiOpen] = useState(false);
   const [aiQuery, setAiQuery] = useState("");
   const [aiMessages, setAiMessages] = useState<{ role: "user" | "ai"; text: string }[]>([
-    { role: "ai", text: "Hello! I'm your HiraNXT AI assistant. Ask me about low stock, today's sales, best-selling categories, or anything about your business." }
+    { role: "ai", text: "Hello! I'm your SwarnDesk AI assistant. Ask me about low stock, today's sales, best-selling categories, or anything about your business." }
   ]);
 
   const sendAiQuery = () => {
@@ -55,49 +120,56 @@ export default function Dashboard() {
     setAiQuery("");
   };
 
-  const summaryCards = [
-    { label: "Today's Sales", value: summaryLoading ? "..." : formatCurrency(summary?.todaySales ?? 0), icon: TrendingUp, color: "text-primary", bg: "bg-primary/10" },
-    { label: "Today's Profit", value: summaryLoading ? "..." : formatCurrency(summary?.todayProfit ?? 0), icon: TrendingUp, color: "text-green-400", bg: "bg-green-400/10" },
-    { label: "Inventory Value", value: summaryLoading ? "..." : formatCurrency(summary?.totalInventoryValue ?? 0), icon: Package, color: "text-purple-400", bg: "bg-purple-400/10" },
-    { label: "Total Customers", value: summaryLoading ? "..." : (summary?.totalCustomers ?? 0).toLocaleString("en-IN"), icon: Users, color: "text-orange-400", bg: "bg-orange-400/10" },
-    { label: "Stock Items", value: summaryLoading ? "..." : (summary?.totalInventoryItems ?? 0).toString(), icon: Package, color: "text-blue-400", bg: "bg-blue-400/10" },
-    { label: "Pending Repairs", value: summaryLoading ? "..." : (summary?.pendingRepairs ?? 0).toString(), icon: Wrench, color: "text-red-400", bg: "bg-red-400/10" },
-  ];
+  function getStatValue(card: typeof statCards[0]): string {
+    if (summaryLoading) return "—";
+    const raw = summary?.[card.key] ?? 0;
+    if (card.format === "currency") return formatCurrency(raw as number);
+    return (raw as number).toLocaleString("en-IN");
+  }
 
   return (
-    <div className="space-y-6 max-w-7xl">
-      {/* Header */}
+    <div className="space-y-6 max-w-7xl mx-auto">
+      {/* Page header */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-muted-foreground text-sm mt-0.5">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Dashboard</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
             {new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
           </p>
         </div>
         <div className="flex gap-2">
           <Link href="/app/billing">
-            <Button size="sm" className="gap-1.5" data-testid="button-new-sale">
-              <Plus className="w-3.5 h-3.5" />New Sale
+            <Button size="sm" className="gap-1.5 shadow-sm" data-testid="button-new-sale">
+              <Plus className="w-4 h-4" />
+              New Sale
             </Button>
           </Link>
           <Link href="/app/inventory">
-            <Button size="sm" variant="outline" className="gap-1.5" data-testid="button-add-item">
-              <PlusCircle className="w-3.5 h-3.5" /><span className="hidden sm:inline">Add Item</span><span className="sm:hidden">+Item</span>
+            <Button size="sm" variant="outline" className="gap-1.5 shadow-xs" data-testid="button-add-item">
+              <Package className="w-4 h-4" />
+              <span className="hidden sm:inline">Add Item</span>
+              <span className="sm:hidden">Add</span>
             </Button>
           </Link>
         </div>
       </div>
 
-      {/* Summary cards */}
+      {/* Stat cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 md:gap-4">
-        {summaryCards.map((card) => (
-          <Card key={card.label} className="border-border" data-testid={`card-${card.label.toLowerCase().replace(/\s+/g, "-")}`}>
-            <CardContent className="p-3 md:p-4">
-              <div className={`w-8 h-8 md:w-9 md:h-9 rounded-lg ${card.bg} flex items-center justify-center mb-2 md:mb-3`}>
-                <card.icon className={`w-4 h-4 ${card.color}`} />
+        {statCards.map((card) => (
+          <Card
+            key={card.label}
+            className="border-card-border shadow-xs hover:shadow-sm transition-shadow"
+            data-testid={`card-${card.label.toLowerCase().replace(/\s+/g, "-")}`}
+          >
+            <CardContent className="p-4 md:p-5">
+              <div className={`w-10 h-10 rounded-xl ${card.iconBg} flex items-center justify-center mb-3 flex-shrink-0`}>
+                <card.icon className={`w-5 h-5 ${card.iconColor}`} />
               </div>
-              <div className="text-base md:text-lg font-bold leading-tight">{card.value}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">{card.label}</div>
+              <div className={`text-lg md:text-xl font-bold leading-tight tracking-tight ${summaryLoading ? "animate-pulse text-muted-foreground" : ""}`}>
+                {getStatValue(card)}
+              </div>
+              <div className="text-xs text-muted-foreground mt-1 font-medium leading-tight">{card.label}</div>
             </CardContent>
           </Card>
         ))}
@@ -106,88 +178,166 @@ export default function Dashboard() {
       {/* Charts row */}
       <div className="grid lg:grid-cols-3 gap-4 md:gap-5">
         {/* Sales trend */}
-        <Card className="lg:col-span-2 border-border">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base font-semibold">Sales Trend (30 days)</CardTitle>
+        <Card className="lg:col-span-2 border-card-border shadow-xs">
+          <CardHeader className="pb-2 flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-[15px] font-semibold">Sales Trend</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">Last 30 days</p>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-emerald-600 font-medium bg-emerald-50 px-2.5 py-1 rounded-full">
+              <TrendingUp className="w-3.5 h-3.5" />
+              Live
+            </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-0">
             <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={dailyStats ?? []}>
+              <AreaChart data={dailyStats ?? []} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f4c542" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#f4c542" stopOpacity={0} />
+                    <stop offset="5%" stopColor={CHART_GREEN} stopOpacity={0.12} />
+                    <stop offset="95%" stopColor={CHART_GREEN} stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                <XAxis dataKey="date" tick={{ fontSize: 9, fill: "#888" }} tickLine={false} interval="preserveStartEnd" />
-                <YAxis tick={{ fontSize: 9, fill: "#888" }} tickLine={false} axisLine={false} tickFormatter={v => `₹${(v / 1000).toFixed(0)}k`} width={38} />
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" vertical={false} />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize: 10, fill: "#9ca3af", fontFamily: "Inter" }}
+                  tickLine={false}
+                  axisLine={false}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: "#9ca3af", fontFamily: "Inter" }}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={v => `₹${(v / 1000).toFixed(0)}k`}
+                  width={42}
+                />
                 <Tooltip
-                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
+                  contentStyle={{
+                    background: "#fff",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 10,
+                    fontSize: 12,
+                    fontFamily: "Inter",
+                    boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                  }}
                   formatter={(v: number) => [formatCurrency(v), "Sales"]}
                 />
-                <Area type="monotone" dataKey="sales" stroke="#f4c542" strokeWidth={2} fill="url(#salesGrad)" />
+                <Area
+                  type="monotone"
+                  dataKey="sales"
+                  stroke={CHART_GREEN}
+                  strokeWidth={2.5}
+                  fill="url(#salesGrad)"
+                  dot={false}
+                  activeDot={{ r: 4, fill: CHART_GREEN, stroke: "#fff", strokeWidth: 2 }}
+                />
               </AreaChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
 
         {/* Category pie */}
-        <Card className="border-border">
+        <Card className="border-card-border shadow-xs">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base font-semibold">Sales by Category</CardTitle>
+            <CardTitle className="text-[15px] font-semibold">Sales by Category</CardTitle>
+            <p className="text-xs text-muted-foreground">Revenue breakdown</p>
           </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={180}>
-              <PieChart>
-                <Pie data={categoryStats ?? []} cx="50%" cy="50%" innerRadius={45} outerRadius={70} dataKey="value" nameKey="category">
-                  {(categoryStats ?? []).map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                </Pie>
-                <Tooltip
-                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
-                  formatter={(v: number) => [formatCurrency(v), "Revenue"]}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="space-y-1.5 mt-1">
-              {(categoryStats ?? []).slice(0, 4).map((s, i) => (
-                <div key={s.category} className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
-                    <span className="capitalize">{s.category}</span>
-                  </div>
-                  <span className="text-muted-foreground">{s.count} items</span>
+          <CardContent className="pt-0">
+            {!categoryStats || categoryStats.length === 0 ? (
+              <div className="h-[180px] flex flex-col items-center justify-center gap-2">
+                <Package className="w-8 h-8 text-muted-foreground/30" />
+                <p className="text-xs text-muted-foreground text-center">No sales data yet.<br />Start billing to see categories.</p>
+              </div>
+            ) : (
+              <>
+                <ResponsiveContainer width="100%" height={170}>
+                  <PieChart>
+                    <Pie
+                      data={categoryStats}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={48}
+                      outerRadius={72}
+                      dataKey="value"
+                      nameKey="category"
+                      paddingAngle={2}
+                    >
+                      {categoryStats.map((_, i) => (
+                        <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} strokeWidth={0} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{
+                        background: "#fff",
+                        border: "1px solid #e5e7eb",
+                        borderRadius: 10,
+                        fontSize: 12,
+                        fontFamily: "Inter",
+                        boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                      }}
+                      formatter={(v: number) => [formatCurrency(v), "Revenue"]}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="space-y-2 mt-1">
+                  {categoryStats.slice(0, 4).map((s, i) => (
+                    <div key={s.category} className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                        <span className="capitalize truncate text-foreground">{s.category}</span>
+                      </div>
+                      <span className="text-muted-foreground ml-2 flex-shrink-0">{s.count} items</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
 
-      {/* Low stock + Recent sales */}
+      {/* Alerts + Recent sales */}
       <div className="grid lg:grid-cols-2 gap-4 md:gap-5">
         {/* Low stock alerts */}
-        <Card className="border-border">
-          <CardHeader className="pb-3 flex-row items-center justify-between">
-            <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-destructive" />
-              Low Stock Alerts
-            </CardTitle>
-            <Link href="/app/inventory" className="text-xs text-primary hover:underline shrink-0">
-              View All
-            </Link>
+        <Card className="border-card-border shadow-xs">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-[15px] font-semibold flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">
+                  <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+                </div>
+                Low Stock Alerts
+              </CardTitle>
+              <Link href="/app/inventory" className="flex items-center gap-1 text-xs text-primary hover:underline font-medium">
+                View All <ArrowUpRight className="w-3 h-3" />
+              </Link>
+            </div>
           </CardHeader>
           <CardContent className="space-y-2">
             {!lowStock || lowStock.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">No low stock alerts</p>
+              <div className="py-8 flex flex-col items-center gap-2">
+                <div className="w-10 h-10 rounded-full bg-green-50 flex items-center justify-center">
+                  <Package className="w-5 h-5 text-green-500" />
+                </div>
+                <p className="text-sm text-muted-foreground text-center">
+                  Stock levels are healthy.<br />No alerts right now.
+                </p>
+              </div>
             ) : (
               lowStock.slice(0, 5).map(item => (
-                <div key={item.id} className="flex items-center justify-between p-2.5 rounded-lg bg-destructive/5 border border-destructive/20 gap-2">
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between p-3 rounded-xl bg-red-50/60 border border-red-100 gap-3"
+                >
                   <div className="min-w-0">
-                    <div className="text-sm font-medium truncate">{item.name}</div>
-                    <div className="text-xs text-muted-foreground">{item.category} • {item.purity}</div>
+                    <div className="text-sm font-medium text-foreground truncate">{item.name}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{item.category} · {item.purity}</div>
                   </div>
-                  <Badge variant="destructive" className="shrink-0" data-testid={`badge-stock-${item.id}`}>Qty: {item.quantity}</Badge>
+                  <Badge variant="destructive" className="shrink-0 text-[11px]" data-testid={`badge-stock-${item.id}`}>
+                    Qty: {item.quantity}
+                  </Badge>
                 </div>
               ))
             )}
@@ -195,26 +345,51 @@ export default function Dashboard() {
         </Card>
 
         {/* Recent sales */}
-        <Card className="border-border">
-          <CardHeader className="pb-3 flex-row items-center justify-between">
-            <CardTitle className="text-base font-semibold">Recent Sales</CardTitle>
-            <Link href="/app/billing" className="text-xs text-primary hover:underline shrink-0">
-              New Bill
-            </Link>
+        <Card className="border-card-border shadow-xs">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-[15px] font-semibold flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                  <ShoppingCart className="w-3.5 h-3.5 text-emerald-600" />
+                </div>
+                Recent Sales
+              </CardTitle>
+              <Link href="/app/billing" className="flex items-center gap-1 text-xs text-primary hover:underline font-medium">
+                New Bill <ArrowUpRight className="w-3 h-3" />
+              </Link>
+            </div>
           </CardHeader>
           <CardContent className="space-y-2">
             {!recentSales || recentSales.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">No sales yet. <Link href="/app/billing" className="text-primary underline">Create first bill</Link></p>
+              <div className="py-8 flex flex-col items-center gap-2">
+                <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center">
+                  <ShoppingCart className="w-5 h-5 text-blue-500" />
+                </div>
+                <p className="text-sm text-muted-foreground text-center">No sales yet today.</p>
+                <Link href="/app/billing">
+                  <Button size="sm" variant="outline" className="mt-1 gap-1.5 text-xs">
+                    <Plus className="w-3.5 h-3.5" />
+                    Create First Bill
+                  </Button>
+                </Link>
+              </div>
             ) : (
               recentSales.slice(0, 5).map(sale => (
-                <div key={sale.id} className="flex items-center justify-between p-2.5 rounded-lg border border-border hover:bg-muted/20 transition-colors gap-2" data-testid={`row-sale-${sale.id}`}>
+                <div
+                  key={sale.id}
+                  className="flex items-center justify-between p-3 rounded-xl border border-border hover:bg-muted/40 transition-colors gap-3"
+                  data-testid={`row-sale-${sale.id}`}
+                >
                   <div className="min-w-0">
-                    <div className="text-sm font-medium truncate">{sale.customerName}</div>
-                    <div className="text-xs text-muted-foreground">{sale.invoiceNumber} • {sale.paymentMode}</div>
+                    <div className="text-sm font-medium text-foreground truncate">{sale.customerName}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{sale.invoiceNumber} · {sale.paymentMode}</div>
                   </div>
                   <div className="text-right shrink-0">
-                    <div className="text-sm font-semibold text-primary">{formatCurrency(sale.totalAmount)}</div>
-                    <Badge variant={sale.paymentStatus === "paid" ? "default" : "secondary"} className="text-xs">
+                    <div className="text-sm font-bold text-emerald-600">{formatCurrency(sale.totalAmount)}</div>
+                    <Badge
+                      variant={sale.paymentStatus === "paid" ? "default" : "secondary"}
+                      className="text-[10px] mt-0.5"
+                    >
                       {sale.paymentStatus}
                     </Badge>
                   </div>
@@ -225,33 +400,40 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      {/* AI Chat widget — responsive width, stays on screen */}
+      {/* AI Chat widget */}
       {aiOpen && (
-        <div className="fixed bottom-24 right-4 z-50 w-[calc(100vw-2rem)] sm:w-80 max-w-sm bg-card border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-primary/10">
+        <div className="fixed bottom-24 right-4 z-50 w-[calc(100vw-2rem)] sm:w-80 max-w-sm bg-white border border-border rounded-2xl shadow-xl flex flex-col overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-sidebar text-white">
             <div className="flex items-center gap-2">
-              <Bot className="w-4 h-4 text-primary" />
-              <span className="text-sm font-semibold">HiraNXT AI</span>
+              <div className="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center">
+                <Bot className="w-4 h-4 text-white" />
+              </div>
+              <div>
+                <div className="text-sm font-semibold">SwarnDesk AI</div>
+                <div className="text-[10px] text-white/60">Ask me anything</div>
+              </div>
             </div>
-            <button onClick={() => setAiOpen(false)} className="text-muted-foreground hover:text-foreground">
+            <button onClick={() => setAiOpen(false)} className="text-white/70 hover:text-white transition-colors">
               <X className="w-4 h-4" />
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-3 max-h-64">
+          <div className="flex-1 overflow-y-auto p-3 space-y-3 max-h-64 bg-muted/30">
             {aiMessages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[85%] rounded-xl px-3 py-2 text-xs leading-relaxed ${
-                  msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
+                <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-xs leading-relaxed ${
+                  msg.role === "user"
+                    ? "bg-primary text-primary-foreground rounded-br-sm"
+                    : "bg-white border border-border text-foreground rounded-bl-sm shadow-xs"
                 }`}>
                   {msg.text}
                 </div>
               </div>
             ))}
           </div>
-          <div className="p-3 border-t border-border flex gap-2">
+          <div className="p-3 border-t border-border bg-white flex gap-2">
             <input
-              className="flex-1 bg-background border border-border rounded-lg px-3 py-2 text-xs outline-none focus:border-primary"
-              placeholder="Ask anything..."
+              className="flex-1 bg-muted border border-border rounded-xl px-3 py-2 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all"
+              placeholder="Ask about stock, sales, profits…"
               value={aiQuery}
               onChange={e => setAiQuery(e.target.value)}
               onKeyDown={e => e.key === "Enter" && sendAiQuery()}
@@ -259,7 +441,7 @@ export default function Dashboard() {
             />
             <button
               onClick={sendAiQuery}
-              className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center hover:bg-primary/80 transition-colors shrink-0"
+              className="w-9 h-9 bg-primary rounded-xl flex items-center justify-center hover:opacity-90 transition-opacity shrink-0 shadow-sm"
               data-testid="button-ai-send"
             >
               <Send className="w-3.5 h-3.5 text-primary-foreground" />
@@ -268,11 +450,12 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* AI button */}
+      {/* AI FAB */}
       <button
         onClick={() => setAiOpen(o => !o)}
-        className="fixed bottom-6 right-4 z-40 w-14 h-14 bg-primary rounded-full flex items-center justify-center shadow-lg shadow-primary/30 hover:scale-105 transition-all"
+        className="fixed bottom-6 right-4 z-40 w-14 h-14 bg-primary rounded-2xl flex items-center justify-center shadow-lg hover:scale-105 hover:opacity-95 transition-all duration-200"
         data-testid="button-ai-chat"
+        title="Ask SwarnDesk AI"
       >
         <Bot className="w-6 h-6 text-primary-foreground" />
       </button>

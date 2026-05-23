@@ -24,7 +24,7 @@ function generateLoanNumber() {
 
 function mapLoan(l: typeof girviLoansTable.$inferSelect, asOf = new Date()) {
   const loanAmount = parseFloat(l.loanAmount);
-  const accruedInterest = l.status === "active" ? calcAccruedInterest(l, asOf) : 0;
+  const accruedInterest = (l.status === "active" || l.status === "extended") ? calcAccruedInterest(l, asOf) : 0;
   const totalDue = loanAmount + accruedInterest;
   const dueDate = new Date(l.dueDate);
   const daysRemaining = Math.floor((dueDate.getTime() - asOf.getTime()) / 86400000);
@@ -50,7 +50,7 @@ function mapLoan(l: typeof girviLoansTable.$inferSelect, asOf = new Date()) {
     accruedInterest,
     totalDue,
     daysRemaining,
-    isOverdue: daysRemaining < 0 && l.status === "active",
+    isOverdue: daysRemaining < 0 && (l.status === "active" || l.status === "extended"),
     redeemedDate: l.redeemedDate?.toISOString() ?? null,
     redeemedAmount: l.redeemedAmount ? parseFloat(l.redeemedAmount) : null,
     goldSaleValue: l.goldSaleValue ? parseFloat(l.goldSaleValue) : null,
@@ -64,7 +64,7 @@ router.get("/stats/summary", async (req, res) => {
   try {
     const loans = await db.select().from(girviLoansTable).orderBy(desc(girviLoansTable.createdAt));
     const now = new Date();
-    const active = loans.filter(l => l.status === "active");
+    const active = loans.filter(l => l.status === "active" || l.status === "extended");
     const overdue = active.filter(l => new Date(l.dueDate) < now);
     const totalLent = active.reduce((s, l) => s + parseFloat(l.loanAmount), 0);
     const totalInterest = active.reduce((s, l) => s + calcAccruedInterest(l, now), 0);

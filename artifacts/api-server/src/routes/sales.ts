@@ -29,7 +29,7 @@ function generateInvoiceNumber() {
   const year = now.getFullYear().toString().slice(-2);
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const rand = Math.floor(Math.random() * 9000) + 1000;
-  return `HN${year}${month}${rand}`;
+  return `SD${year}${month}${rand}`;
 }
 
 router.get("/stats/by-category", async (req, res) => {
@@ -113,6 +113,16 @@ router.post("/", async (req, res) => {
     }).returning();
 
     if (data.items && Array.isArray(data.items)) {
+      // Pre-check stock for all inventory items before committing any change
+      for (const item of data.items) {
+        if (!item.inventoryItemId || item.inventoryItemId <= 0) continue;
+        const [inv] = await db.select().from(inventoryItemsTable).where(eq(inventoryItemsTable.id, item.inventoryItemId));
+        if (inv && inv.quantity < item.quantity) {
+          await db.delete(salesTable).where(eq(salesTable.id, sale.id));
+          return res.status(422).json({ error: `Insufficient stock for "${inv.name}". Available: ${inv.quantity}, requested: ${item.quantity}.` });
+        }
+      }
+
       for (const item of data.items) {
         await db.insert(saleLineItemsTable).values({
           saleId: sale.id,
@@ -126,10 +136,12 @@ router.post("/", async (req, res) => {
           discount: (item.discount ?? 0).toString(),
           lineTotal: (item.unitPrice * item.quantity - (item.discount ?? 0)).toString(),
         });
-        // Decrease inventory
-        const [inv] = await db.select().from(inventoryItemsTable).where(eq(inventoryItemsTable.id, item.inventoryItemId));
-        if (inv) {
-          await db.update(inventoryItemsTable).set({ quantity: Math.max(0, inv.quantity - item.quantity) }).where(eq(inventoryItemsTable.id, item.inventoryItemId));
+        // Decrease inventory (only for real inventory items, not quick-entry with id=0)
+        if (item.inventoryItemId > 0) {
+          const [inv] = await db.select().from(inventoryItemsTable).where(eq(inventoryItemsTable.id, item.inventoryItemId));
+          if (inv) {
+            await db.update(inventoryItemsTable).set({ quantity: inv.quantity - item.quantity }).where(eq(inventoryItemsTable.id, item.inventoryItemId));
+          }
         }
       }
     }

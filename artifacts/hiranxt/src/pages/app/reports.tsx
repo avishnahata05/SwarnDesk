@@ -15,7 +15,7 @@ import {
 import { TrendingUp, Package, ShoppingCart, DollarSign, Download, FileSpreadsheet } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-const COLORS = ["#f4c542", "#e94560", "#4fc3f7", "#81c784", "#ce93d8"];
+const COLORS = ["#16a34a", "#d97706", "#2563eb", "#7c3aed", "#dc2626"];
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 const HSN_CODE = "7113";
@@ -32,6 +32,7 @@ async function downloadGSTR1(month: number, year: number, toast: ReturnType<type
       customerName: string;
       totalAmount: number;
       gstAmount: number;
+      discountAmount: number;
       paymentMode: string;
       paymentStatus: string;
     }> = await res.json();
@@ -52,10 +53,10 @@ async function downloadGSTR1(month: number, year: number, toast: ReturnType<type
         "Total GST (₹)", "Invoice Value (₹)", "Payment Mode", "Payment Status"
       ],
       ...sales.map(s => {
-        const taxable = s.totalAmount / (1 + GST_RATE);
-        const cgst = taxable * (GST_RATE / 2);
-        const sgst = taxable * (GST_RATE / 2);
-        const totalGst = cgst + sgst;
+        const gst = s.gstAmount;
+        const taxable = s.totalAmount - gst;
+        const cgst = gst / 2;
+        const sgst = gst / 2;
         return [
           s.invoiceNumber,
           new Date(s.saleDate).toLocaleDateString("en-IN"),
@@ -64,7 +65,7 @@ async function downloadGSTR1(month: number, year: number, toast: ReturnType<type
           taxable.toFixed(2),
           cgst.toFixed(2),
           sgst.toFixed(2),
-          totalGst.toFixed(2),
+          gst.toFixed(2),
           s.totalAmount.toFixed(2),
           s.paymentMode,
           s.paymentStatus,
@@ -73,9 +74,9 @@ async function downloadGSTR1(month: number, year: number, toast: ReturnType<type
       [],
       ["SUMMARY"],
       ["Total Invoices", sales.length.toString()],
-      ["Total Taxable Value", (sales.reduce((a, s) => a + s.totalAmount / (1 + GST_RATE), 0)).toFixed(2)],
-      ["Total CGST (1.5%)", (sales.reduce((a, s) => a + (s.totalAmount / (1 + GST_RATE)) * (GST_RATE / 2), 0)).toFixed(2)],
-      ["Total SGST (1.5%)", (sales.reduce((a, s) => a + (s.totalAmount / (1 + GST_RATE)) * (GST_RATE / 2), 0)).toFixed(2)],
+      ["Total Taxable Value", sales.reduce((a, s) => a + (s.totalAmount - s.gstAmount), 0).toFixed(2)],
+      ["Total CGST (1.5%)", sales.reduce((a, s) => a + s.gstAmount / 2, 0).toFixed(2)],
+      ["Total SGST (1.5%)", sales.reduce((a, s) => a + s.gstAmount / 2, 0).toFixed(2)],
       ["Total Invoice Value", sales.reduce((a, s) => a + s.totalAmount, 0).toFixed(2)],
     ];
 
@@ -148,15 +149,15 @@ export default function Reports() {
             <AreaChart data={dailyStats ?? []}>
               <defs>
                 <linearGradient id="salesArea" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#f4c542" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#f4c542" stopOpacity={0} />
+                  <stop offset="5%" stopColor="#16a34a" stopOpacity={0.15} />
+                  <stop offset="95%" stopColor="#16a34a" stopOpacity={0} />
                 </linearGradient>
                 <linearGradient id="profitArea" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#81c784" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#81c784" stopOpacity={0} />
+                  <stop offset="5%" stopColor="#d97706" stopOpacity={0.15} />
+                  <stop offset="95%" stopColor="#d97706" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
               <XAxis dataKey="date" tick={{ fontSize: 9, fill: "#888" }} tickLine={false} interval="preserveStartEnd" />
               <YAxis tick={{ fontSize: 9, fill: "#888" }} tickLine={false} axisLine={false} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} width={38} />
               <Tooltip
@@ -164,8 +165,8 @@ export default function Reports() {
                 formatter={(v: number, name: string) => [formatCurrency(v), name.charAt(0).toUpperCase() + name.slice(1)]}
               />
               <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Area type="monotone" dataKey="sales" stroke="#f4c542" strokeWidth={2} fill="url(#salesArea)" name="Sales" />
-              <Area type="monotone" dataKey="profit" stroke="#81c784" strokeWidth={2} fill="url(#profitArea)" name="Profit" />
+              <Area type="monotone" dataKey="sales" stroke="#16a34a" strokeWidth={2} fill="url(#salesArea)" name="Sales" />
+              <Area type="monotone" dataKey="profit" stroke="#d97706" strokeWidth={2} fill="url(#profitArea)" name="Profit" />
             </AreaChart>
           </ResponsiveContainer>
         </CardContent>
@@ -180,7 +181,7 @@ export default function Reports() {
           <CardContent>
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={salesByCategory ?? []}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
                 <XAxis dataKey="category" tick={{ fontSize: 10, fill: "#888" }} tickLine={false} />
                 <YAxis tick={{ fontSize: 9, fill: "#888" }} tickLine={false} axisLine={false} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} width={38} />
                 <Tooltip
