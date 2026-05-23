@@ -17,6 +17,9 @@ function mapSettings(s: typeof businessSettingsTable.$inferSelect) {
     gstRate: parseFloat(s.gstRate),
     defaultBranch: s.defaultBranch,
     branches: s.branches.split(",").map(b => b.trim()).filter(Boolean),
+    whatsappApiEnabled: s.whatsappApiEnabled,
+    whatsappPhoneNumberId: s.whatsappPhoneNumberId ?? "",
+    whatsappAccessToken: s.whatsappAccessToken ?? "",
     updatedAt: s.updatedAt.toISOString(),
   };
 }
@@ -64,6 +67,9 @@ router.put("/", async (req, res) => {
     if (data.gstRate !== undefined) updateData.gstRate = data.gstRate.toString();
     if (data.defaultBranch !== undefined) updateData.defaultBranch = data.defaultBranch;
     if (data.branches !== undefined) updateData.branches = Array.isArray(data.branches) ? data.branches.join(",") : data.branches;
+    if (data.whatsappApiEnabled !== undefined) updateData.whatsappApiEnabled = data.whatsappApiEnabled;
+    if (data.whatsappPhoneNumberId !== undefined) updateData.whatsappPhoneNumberId = data.whatsappPhoneNumberId;
+    if (data.whatsappAccessToken !== undefined) updateData.whatsappAccessToken = data.whatsappAccessToken;
 
     if (existing) {
       [updated] = await db.update(businessSettingsTable).set(updateData).where(eq(businessSettingsTable.id, existing.id)).returning();

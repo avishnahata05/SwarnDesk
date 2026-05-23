@@ -11,6 +11,7 @@ import purchasesRouter from "./purchases";
 import suppliersRouter from "./suppliers";
 import settingsRouter from "./settings";
 import girviRouter from "./girvi";
+import whatsappRouter from "./whatsapp";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use("/purchases", purchasesRouter);
 router.use("/suppliers", suppliersRouter);
 router.use("/settings", settingsRouter);
 router.use("/girvi", girviRouter);
+router.use("/whatsapp", whatsappRouter);
 
 export default router;

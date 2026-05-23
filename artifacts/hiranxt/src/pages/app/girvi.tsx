@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/select";
 import {
   Banknote, AlertTriangle, CheckCircle2, Clock, TrendingDown,
-  Plus, RefreshCw, XCircle, ChevronDown, ChevronUp, Eye, Calendar
+  Plus, RefreshCw, XCircle, ChevronDown, ChevronUp, Eye, Calendar, MessageCircle
 } from "lucide-react";
 
 const API = "/api/girvi";
@@ -292,6 +292,21 @@ export default function Girvi() {
                           >
                             <XCircle className="w-3.5 h-3.5" />
                             Forfeit Gold
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5 border-green-500/40 text-green-400 hover:bg-green-500/10"
+                            onClick={() => {
+                              const dueText = loan.isOverdue
+                                ? `is OVERDUE by ${Math.abs(loan.daysRemaining)} days`
+                                : `is due in ${loan.daysRemaining} days`;
+                              const msg = `Namaskar ${loan.customerName} ji,\n\nYour Girvi loan ${loan.loanNumber} ${dueText}.\n\nLoan: ₹${loan.loanAmount.toLocaleString("en-IN")} | Interest: ₹${loan.accruedInterest.toLocaleString("en-IN")} | Total due: ₹${loan.totalDue.toLocaleString("en-IN")}\n\nKindly visit our store to redeem your ${loan.metalType} (${loan.purity}) at your earliest convenience.\n\nThank you.`;
+                              window.open(`https://wa.me/91${loan.customerMobile.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`, "_blank");
+                            }}
+                          >
+                            <MessageCircle className="w-3.5 h-3.5" />
+                            {loan.isOverdue ? "Send Overdue Reminder" : "Send Due Reminder"}
                           </Button>
                         </div>
                       )}

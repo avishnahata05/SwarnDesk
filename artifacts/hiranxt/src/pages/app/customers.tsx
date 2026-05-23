@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import {
   useListCustomers, useCreateCustomer, useDeleteCustomer, useGetUpcomingOccasions,
   getListCustomersQueryKey, getGetUpcomingOccasionsQueryKey
@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useForm } from "react-hook-form";
-import { Plus, Search, Users, Gift, MessageCircle, Star } from "lucide-react";
+import { Plus, Search, Gift, MessageCircle, Star, Send, CheckSquare, Square, Users } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface CustomerForm {
@@ -19,9 +19,17 @@ interface CustomerForm {
   birthday: string; anniversary: string; gstin: string; notes: string;
 }
 
+const DEFAULT_TEMPLATE = "Dear {name}, thank you for being a valued customer at our jewellery store! We'd love to see you again. Visit us for our latest collection and exclusive offers.";
+
 export default function Customers() {
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkTemplate, setBulkTemplate] = useState(DEFAULT_TEMPLATE);
+  const [bulkSending, setBulkSending] = useState(false);
+  const [waApiEnabled, setWaApiEnabled] = useState<boolean | null>(null);
+
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -60,16 +68,88 @@ export default function Customers() {
     window.open(`https://wa.me/91${mobile.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`, "_blank");
   };
 
+  const allIds = (customers ?? []).map(c => c.id);
+  const allSelected = allIds.length > 0 && allIds.every(id => selectedIds.has(id));
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(allIds));
+    }
+  };
+
+  const toggleOne = (id: number) => {
+    setSelectedIds(prev => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  };
+
+  const openBulkDialog = async () => {
+    if (selectedIds.size === 0) { toast({ title: "Select at least one customer" }); return; }
+    if (waApiEnabled === null) {
+      const r = await fetch("/api/whatsapp/config");
+      const d = await r.json() as { whatsappApiEnabled: boolean };
+      setWaApiEnabled(d.whatsappApiEnabled);
+    }
+    setBulkOpen(true);
+  };
+
+  const selectedCustomers = (customers ?? []).filter(c => selectedIds.has(c.id));
+
+  const buildMessage = (name: string) => bulkTemplate.replace(/{name}/g, name);
+
+  const sendViaLinks = () => {
+    if (selectedCustomers.length === 0) return;
+    selectedCustomers.forEach(c => {
+      window.open(`https://wa.me/91${c.mobile.replace(/\D/g, "")}?text=${encodeURIComponent(buildMessage(c.name))}`, "_blank");
+    });
+    toast({ title: `Opened WhatsApp for ${selectedCustomers.length} customer(s)` });
+    setBulkOpen(false);
+    setSelectedIds(new Set());
+  };
+
+  const sendViaApi = async () => {
+    setBulkSending(true);
+    try {
+      const recipients = selectedCustomers.map(c => ({ mobile: c.mobile, name: c.name, message: buildMessage(c.name) }));
+      const r = await fetch("/api/whatsapp/send-bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipients }),
+      });
+      const d = await r.json() as { sent: number; failed: number; error?: string };
+      if (!r.ok) throw new Error(d.error ?? "Failed");
+      toast({ title: `Sent: ${d.sent} | Failed: ${d.failed}` });
+      setBulkOpen(false);
+      setSelectedIds(new Set());
+    } catch (err) {
+      toast({ title: (err as Error).message || "Failed to send via API", variant: "destructive" });
+    } finally {
+      setBulkSending(false);
+    }
+  };
+
   return (
     <div className="space-y-5 max-w-7xl">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold">Customers</h1>
           <p className="text-muted-foreground text-sm">Manage your customer relationships</p>
         </div>
-        <Button onClick={() => setAddOpen(true)} className="gap-2" data-testid="button-add-customer">
-          <Plus className="w-4 h-4" />Add Customer
-        </Button>
+        <div className="flex gap-2">
+          {selectedIds.size > 0 && (
+            <Button onClick={openBulkDialog} className="gap-2 bg-green-600 hover:bg-green-700" size="sm">
+              <MessageCircle className="w-4 h-4" />
+              WhatsApp ({selectedIds.size})
+            </Button>
+          )}
+          <Button onClick={() => setAddOpen(true)} className="gap-2" data-testid="button-add-customer">
+            <Plus className="w-4 h-4" />Add Customer
+          </Button>
+        </div>
       </div>
 
       {/* Upcoming occasions */}
@@ -113,12 +193,25 @@ export default function Customers() {
         />
       </div>
 
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-green-500/10 border border-green-500/20 text-sm">
+          <Users className="w-4 h-4 text-green-400" />
+          <span className="text-green-400 font-medium">{selectedIds.size} customer{selectedIds.size > 1 ? "s" : ""} selected</span>
+          <button className="text-xs text-muted-foreground hover:text-foreground ml-auto" onClick={() => setSelectedIds(new Set())}>Clear selection</button>
+        </div>
+      )}
+
       {/* Table */}
       <Card className="border-border">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-muted-foreground text-xs">
+                <th className="px-4 py-3 text-left w-10">
+                  <button onClick={toggleAll} className="text-muted-foreground hover:text-foreground">
+                    {allSelected ? <CheckSquare className="w-4 h-4 text-green-400" /> : <Square className="w-4 h-4" />}
+                  </button>
+                </th>
                 <th className="px-4 py-3 text-left font-medium">Customer</th>
                 <th className="px-4 py-3 text-left font-medium">Mobile</th>
                 <th className="px-4 py-3 text-right font-medium">Total Purchases</th>
@@ -128,12 +221,17 @@ export default function Customers() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>}
+              {isLoading && <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>}
               {!isLoading && (!customers || customers.length === 0) && (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No customers found.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No customers found.</td></tr>
               )}
               {(customers ?? []).map(c => (
-                <tr key={c.id} className="border-b border-border hover:bg-muted/10" data-testid={`row-customer-${c.id}`}>
+                <tr key={c.id} className={`border-b border-border hover:bg-muted/10 ${selectedIds.has(c.id) ? "bg-green-500/5" : ""}`} data-testid={`row-customer-${c.id}`}>
+                  <td className="px-4 py-3">
+                    <button onClick={() => toggleOne(c.id)} className="text-muted-foreground hover:text-foreground">
+                      {selectedIds.has(c.id) ? <CheckSquare className="w-4 h-4 text-green-400" /> : <Square className="w-4 h-4" />}
+                    </button>
+                  </td>
                   <td className="px-4 py-3">
                     <div className="font-medium">{c.name}</div>
                     {c.email && <div className="text-xs text-muted-foreground">{c.email}</div>}
@@ -154,6 +252,7 @@ export default function Customers() {
                     <button
                       onClick={() => sendWhatsApp(c.mobile, c.name)}
                       className="text-green-400 hover:text-green-300 mx-2"
+                      title="Send WhatsApp"
                       data-testid={`button-wa-customer-${c.id}`}
                     >
                       <MessageCircle className="w-4 h-4" />
@@ -165,6 +264,86 @@ export default function Customers() {
           </table>
         </div>
       </Card>
+
+      {/* Bulk WhatsApp Dialog */}
+      <Dialog open={bulkOpen} onOpenChange={v => { if (!bulkSending) setBulkOpen(v); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageCircle className="w-5 h-5 text-green-400" />
+              Bulk WhatsApp — {selectedIds.size} Recipient{selectedIds.size > 1 ? "s" : ""}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Recipient preview chips */}
+            <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
+              {selectedCustomers.map(c => (
+                <span key={c.id} className="px-2 py-0.5 bg-muted/40 border border-border rounded-full text-xs">{c.name}</span>
+              ))}
+            </div>
+
+            {/* Template editor */}
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">
+                Message Template — use <code className="bg-muted px-1 rounded">{"{name}"}</code> for customer name
+              </label>
+              <textarea
+                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary resize-none"
+                rows={5}
+                value={bulkTemplate}
+                onChange={e => setBulkTemplate(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground mt-1">{bulkTemplate.length} chars</p>
+            </div>
+
+            {/* Preview */}
+            {selectedCustomers[0] && (
+              <div className="p-3 rounded-lg bg-muted/20 border border-border">
+                <div className="text-xs text-muted-foreground mb-1">Preview for {selectedCustomers[0].name}:</div>
+                <div className="text-xs">{buildMessage(selectedCustomers[0].name)}</div>
+              </div>
+            )}
+
+            {/* Templates */}
+            <div>
+              <div className="text-xs text-muted-foreground mb-2">Quick templates:</div>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { label: "Thank you", msg: "Dear {name}, thank you for your continued trust in us! Your patronage means a lot. Visit us soon for our latest jewellery collection." },
+                  { label: "Festival offer", msg: "Dear {name}, wishing you a joyful festive season! Enjoy special discounts on gold jewellery this week. Visit our store or call us for details." },
+                  { label: "New arrivals", msg: "Hello {name}! We have exciting new arrivals in our jewellery collection. Come in and explore — we'd love to show you something special." },
+                ].map(t => (
+                  <button
+                    key={t.label}
+                    onClick={() => setBulkTemplate(t.msg)}
+                    className="px-2 py-1 text-xs rounded border border-border hover:border-primary hover:text-primary transition-colors"
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" size="sm" onClick={() => setBulkOpen(false)} disabled={bulkSending}>Cancel</Button>
+            <Button size="sm" variant="outline" onClick={sendViaLinks} disabled={bulkSending} className="gap-1.5 border-green-500/40 text-green-400 hover:bg-green-500/10">
+              <MessageCircle className="w-3.5 h-3.5" />
+              Open WhatsApp Links
+            </Button>
+            {waApiEnabled && (
+              <Button size="sm" onClick={sendViaApi} disabled={bulkSending} className="gap-1.5 bg-green-600 hover:bg-green-700">
+                <Send className="w-3.5 h-3.5" />
+                {bulkSending ? "Sending..." : "Send via API"}
+              </Button>
+            )}
+          </DialogFooter>
+          {!waApiEnabled && (
+            <p className="text-xs text-muted-foreground text-center -mt-1">
+              To send directly via API (no window pop-ups), configure WhatsApp Business API in Settings.
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Add dialog */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
