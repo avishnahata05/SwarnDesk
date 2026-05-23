@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { useGetCurrentRates } from "@workspace/api-client-react";
 import {
   LayoutDashboard, Package, ShoppingCart, Users, Hammer, Wrench,
-  TruckIcon, BarChart3, Settings, Menu, X, Gem, MessageCircle, Globe
+  TruckIcon, BarChart3, Settings, Menu, X, Gem, MessageCircle, Globe, Banknote
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -15,6 +15,7 @@ const navItems = [
   { href: "/app/customers", label: "Customers", labelHi: "ग्राहक", icon: Users },
   { href: "/app/karigars", label: "Karigars", labelHi: "कारीगर", icon: Hammer },
   { href: "/app/repairs", label: "Repairs", labelHi: "मरम्मत", icon: Wrench },
+  { href: "/app/girvi", label: "Girvi", labelHi: "गिरवी", icon: Banknote },
   { href: "/app/purchases", label: "Purchases", labelHi: "खरीद", icon: TruckIcon },
   { href: "/app/reports", label: "Reports", labelHi: "रिपोर्ट", icon: BarChart3 },
   { href: "/app/settings", label: "Settings", labelHi: "सेटिंग्स", icon: Settings },

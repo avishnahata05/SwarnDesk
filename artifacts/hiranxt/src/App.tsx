@@ -14,6 +14,7 @@ import Repairs from "@/pages/app/repairs";
 import Purchases from "@/pages/app/purchases";
 import Reports from "@/pages/app/reports";
 import Settings from "@/pages/app/settings";
+import Girvi from "@/pages/app/girvi";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -40,6 +41,7 @@ function Router() {
             <Route path="/app/purchases" component={Purchases} />
             <Route path="/app/reports" component={Reports} />
             <Route path="/app/settings" component={Settings} />
+            <Route path="/app/girvi" component={Girvi} />
             <Route component={Dashboard} />
           </Switch>
         </AppLayout>

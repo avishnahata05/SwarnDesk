@@ -10,6 +10,7 @@ import repairsRouter from "./repairs";
 import purchasesRouter from "./purchases";
 import suppliersRouter from "./suppliers";
 import settingsRouter from "./settings";
+import girviRouter from "./girvi";
 
 const router: IRouter = Router();
 
@@ -24,5 +25,6 @@ router.use("/repairs", repairsRouter);
 router.use("/purchases", purchasesRouter);
 router.use("/suppliers", suppliersRouter);
 router.use("/settings", settingsRouter);
+router.use("/girvi", girviRouter);
 
 export default router;

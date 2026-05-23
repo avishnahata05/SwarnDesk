@@ -6,3 +6,4 @@ export * from "./karigars";
 export * from "./repairs";
 export * from "./purchases";
 export * from "./settings";
+export * from "./girvi";
