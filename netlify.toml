@@ -1,6 +1,6 @@
 [build]
   base    = "."
-  command = "npm install -g pnpm@9 && pnpm install --no-frozen-lockfile && pnpm --filter @workspace/hiranxt run build"
+  command = "pnpm install --no-frozen-lockfile && pnpm --filter @workspace/hiranxt run build"
   publish = "artifacts/hiranxt/dist/public"
 
 [build.environment]
