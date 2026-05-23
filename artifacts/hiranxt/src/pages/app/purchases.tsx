@@ -1,18 +1,18 @@
 import { useState } from "react";
 import { formatCurrency, formatDate, formatWeight } from "@/lib/utils";
 import {
-  useListPurchases, useCreatePurchase, useListSuppliers, useCreateSupplier,
-  getListPurchasesQueryKey, getListSuppliersQueryKey
+  useListPurchases, useCreatePurchase, useListSuppliers,
+  getListPurchasesQueryKey
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useForm } from "react-hook-form";
-import { Plus, TruckIcon } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface PurchaseForm {
@@ -27,14 +27,12 @@ export default function Purchases() {
   const { toast } = useToast();
 
   const { data: purchases, isLoading } = useListPurchases();
-  const { data: suppliers } = useListSuppliers();
   const createPurchase = useCreatePurchase();
 
   const { register, handleSubmit, reset, setValue, watch } = useForm<PurchaseForm>({
     defaultValues: { metalType: "gold", purity: "22K", purchaseDate: new Date().toISOString().split("T")[0] }
   });
 
-  const grossWeight = watch("grossWeight");
   const netWeight = watch("netWeight");
   const ratePerGram = watch("ratePerGram");
 
@@ -48,7 +46,7 @@ export default function Purchases() {
         netWeight: parseFloat(String(data.netWeight)),
         fineWeight: parseFloat(String(data.fineWeight || data.netWeight)),
         ratePerGram: parseFloat(String(data.ratePerGram)),
-        totalAmount: parseFloat(String(data.totalAmount || (data.netWeight * data.ratePerGram))),
+        totalAmount: parseFloat(String(data.totalAmount || (netWeight * ratePerGram))),
         purchaseDate: new Date(data.purchaseDate).toISOString(),
         notes: data.notes || null,
         supplierId: null,
@@ -66,7 +64,7 @@ export default function Purchases() {
 
   return (
     <div className="space-y-5 max-w-7xl">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold">Purchases</h1>
           <p className="text-muted-foreground text-sm">Track metal receipts and supplier purchases</p>
@@ -81,14 +79,14 @@ export default function Purchases() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-muted-foreground text-xs">
-                <th className="px-4 py-3 text-left font-medium">Invoice</th>
+                <th className="px-4 py-3 text-left font-medium hidden sm:table-cell">Invoice</th>
                 <th className="px-4 py-3 text-left font-medium">Supplier</th>
                 <th className="px-4 py-3 text-left font-medium">Metal</th>
-                <th className="px-4 py-3 text-right font-medium">Gross Wt.</th>
+                <th className="px-4 py-3 text-right font-medium hidden md:table-cell">Gross Wt.</th>
                 <th className="px-4 py-3 text-right font-medium">Fine Wt.</th>
-                <th className="px-4 py-3 text-right font-medium">Rate/g</th>
+                <th className="px-4 py-3 text-right font-medium hidden md:table-cell">Rate/g</th>
                 <th className="px-4 py-3 text-right font-medium">Total</th>
-                <th className="px-4 py-3 text-left font-medium">Date</th>
+                <th className="px-4 py-3 text-left font-medium hidden sm:table-cell">Date</th>
               </tr>
             </thead>
             <tbody>
@@ -98,16 +96,16 @@ export default function Purchases() {
               )}
               {(purchases ?? []).map(p => (
                 <tr key={p.id} className="border-b border-border hover:bg-muted/10" data-testid={`row-purchase-${p.id}`}>
-                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{p.invoiceNumber}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground hidden sm:table-cell">{p.invoiceNumber}</td>
                   <td className="px-4 py-3 font-medium">{p.supplierName}</td>
                   <td className="px-4 py-3">
                     <Badge variant="outline" className="capitalize">{p.metalType} {p.purity}</Badge>
                   </td>
-                  <td className="px-4 py-3 text-right text-muted-foreground">{formatWeight(p.grossWeight)}</td>
+                  <td className="px-4 py-3 text-right text-muted-foreground hidden md:table-cell">{formatWeight(p.grossWeight)}</td>
                   <td className="px-4 py-3 text-right text-muted-foreground">{formatWeight(p.fineWeight)}</td>
-                  <td className="px-4 py-3 text-right text-muted-foreground">₹{p.ratePerGram.toLocaleString("en-IN")}</td>
+                  <td className="px-4 py-3 text-right text-muted-foreground hidden md:table-cell">₹{p.ratePerGram.toLocaleString("en-IN")}</td>
                   <td className="px-4 py-3 text-right font-semibold text-primary">{formatCurrency(p.totalAmount)}</td>
-                  <td className="px-4 py-3 text-muted-foreground text-xs">{formatDate(p.purchaseDate)}</td>
+                  <td className="px-4 py-3 text-muted-foreground text-xs hidden sm:table-cell">{formatDate(p.purchaseDate)}</td>
                 </tr>
               ))}
             </tbody>
@@ -116,7 +114,7 @@ export default function Purchases() {
       </Card>
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Record Purchase</DialogTitle></DialogHeader>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
@@ -157,7 +155,7 @@ export default function Purchases() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Total Amount (₹)</label>
-                <Input type="number" {...register("totalAmount")} data-testid="input-purchase-total" />
+                <Input type="number" {...register("totalAmount")} placeholder="Auto-calculated if blank" data-testid="input-purchase-total" />
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Purchase Date</label>

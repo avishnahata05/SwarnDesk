@@ -213,10 +213,10 @@ export default function Customers() {
                   </button>
                 </th>
                 <th className="px-4 py-3 text-left font-medium">Customer</th>
-                <th className="px-4 py-3 text-left font-medium">Mobile</th>
-                <th className="px-4 py-3 text-right font-medium">Total Purchases</th>
-                <th className="px-4 py-3 text-right font-medium">Balance</th>
-                <th className="px-4 py-3 text-center font-medium">Points</th>
+                <th className="px-4 py-3 text-left font-medium hidden sm:table-cell">Mobile</th>
+                <th className="px-4 py-3 text-right font-medium">Purchases</th>
+                <th className="px-4 py-3 text-right font-medium hidden md:table-cell">Balance</th>
+                <th className="px-4 py-3 text-center font-medium hidden md:table-cell">Points</th>
                 <th className="px-4 py-3 text-center font-medium">Actions</th>
               </tr>
             </thead>
@@ -236,14 +236,14 @@ export default function Customers() {
                     <div className="font-medium">{c.name}</div>
                     {c.email && <div className="text-xs text-muted-foreground">{c.email}</div>}
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground">{c.mobile}</td>
+                  <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{c.mobile}</td>
                   <td className="px-4 py-3 text-right font-medium text-primary">{formatCurrency(c.totalPurchases)}</td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right hidden md:table-cell">
                     <span className={c.balance >= 0 ? "text-green-400" : "text-destructive"}>
                       {c.balance >= 0 ? "+" : ""}{formatCurrency(Math.abs(c.balance))}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-center">
+                  <td className="px-4 py-3 text-center hidden md:table-cell">
                     <div className="flex items-center justify-center gap-1 text-primary">
                       <Star className="w-3 h-3 fill-primary" />{c.loyaltyPoints}
                     </div>

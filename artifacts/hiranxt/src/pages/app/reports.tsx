@@ -18,7 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 const COLORS = ["#f4c542", "#e94560", "#4fc3f7", "#81c784", "#ce93d8"];
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
-const HSN_CODE = "7113"; // Jewellery HSN
+const HSN_CODE = "7113";
 const GST_RATE = 0.03;
 
 async function downloadGSTR1(month: number, year: number, toast: ReturnType<typeof useToast>["toast"]) {
@@ -119,7 +119,7 @@ export default function Reports() {
       </div>
 
       {/* KPI row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
         {[
           { label: "Total Inventory Value", value: formatCurrency(summary?.totalInventoryValue ?? 0), icon: Package, color: "text-purple-400" },
           { label: "Total Customers", value: (summary?.totalCustomers ?? 0).toLocaleString("en-IN"), icon: ShoppingCart, color: "text-blue-400" },
@@ -127,11 +127,11 @@ export default function Reports() {
           { label: "Today's Profit", value: formatCurrency(summary?.todayProfit ?? 0), icon: DollarSign, color: "text-green-400" },
         ].map(kpi => (
           <Card key={kpi.label} className="border-border">
-            <CardContent className="p-4 flex items-center gap-3">
-              <kpi.icon className={`w-8 h-8 ${kpi.color} flex-shrink-0`} />
-              <div>
-                <div className="text-xs text-muted-foreground">{kpi.label}</div>
-                <div className="text-lg font-bold">{kpi.value}</div>
+            <CardContent className="p-3 md:p-4 flex items-center gap-3">
+              <kpi.icon className={`w-7 h-7 md:w-8 md:h-8 ${kpi.color} flex-shrink-0`} />
+              <div className="min-w-0">
+                <div className="text-xs text-muted-foreground leading-tight">{kpi.label}</div>
+                <div className="text-base md:text-lg font-bold">{kpi.value}</div>
               </div>
             </CardContent>
           </Card>
@@ -144,7 +144,7 @@ export default function Reports() {
           <CardTitle className="text-base font-semibold">Daily Sales (Last 30 Days)</CardTitle>
         </CardHeader>
         <CardContent>
-          <ResponsiveContainer width="100%" height={260}>
+          <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={dailyStats ?? []}>
               <defs>
                 <linearGradient id="salesArea" x1="0" y1="0" x2="0" y2="1">
@@ -157,13 +157,13 @@ export default function Reports() {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-              <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#888" }} tickLine={false} />
-              <YAxis tick={{ fontSize: 10, fill: "#888" }} tickLine={false} axisLine={false} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} />
+              <XAxis dataKey="date" tick={{ fontSize: 9, fill: "#888" }} tickLine={false} interval="preserveStartEnd" />
+              <YAxis tick={{ fontSize: 9, fill: "#888" }} tickLine={false} axisLine={false} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} width={38} />
               <Tooltip
-                contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
+                contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
                 formatter={(v: number, name: string) => [formatCurrency(v), name.charAt(0).toUpperCase() + name.slice(1)]}
               />
-              <Legend />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
               <Area type="monotone" dataKey="sales" stroke="#f4c542" strokeWidth={2} fill="url(#salesArea)" name="Sales" />
               <Area type="monotone" dataKey="profit" stroke="#81c784" strokeWidth={2} fill="url(#profitArea)" name="Profit" />
             </AreaChart>
@@ -171,20 +171,20 @@ export default function Reports() {
         </CardContent>
       </Card>
 
-      <div className="grid lg:grid-cols-2 gap-5">
+      <div className="grid lg:grid-cols-2 gap-4 md:gap-5">
         {/* Sales by category */}
         <Card className="border-border">
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-semibold">Revenue by Category</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={240}>
+            <ResponsiveContainer width="100%" height={220}>
               <BarChart data={salesByCategory ?? []}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                <XAxis dataKey="category" tick={{ fontSize: 11, fill: "#888" }} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: "#888" }} tickLine={false} axisLine={false} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} />
+                <XAxis dataKey="category" tick={{ fontSize: 10, fill: "#888" }} tickLine={false} />
+                <YAxis tick={{ fontSize: 9, fill: "#888" }} tickLine={false} axisLine={false} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} width={38} />
                 <Tooltip
-                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
+                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
                   formatter={(v: number) => [formatCurrency(v), "Revenue"]}
                 />
                 <Bar dataKey="value" radius={[4, 4, 0, 0]}>
@@ -203,13 +203,13 @@ export default function Reports() {
             <CardTitle className="text-base font-semibold">Inventory Stock Valuation</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
+            <ResponsiveContainer width="100%" height={180}>
               <PieChart>
                 <Pie
                   data={inventoryByCategory ?? []}
                   cx="50%"
                   cy="50%"
-                  outerRadius={80}
+                  outerRadius={75}
                   dataKey="value"
                   nameKey="category"
                   label={({ category, percent }) => `${category} ${((percent ?? 0) * 100).toFixed(0)}%`}
@@ -220,15 +220,15 @@ export default function Reports() {
                   ))}
                 </Pie>
                 <Tooltip
-                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
+                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
                   formatter={(v: number) => [formatCurrency(v), "Value"]}
                 />
               </PieChart>
             </ResponsiveContainer>
-            <div className="grid grid-cols-2 gap-2 mt-4">
+            <div className="grid grid-cols-2 gap-2 mt-3">
               {(inventoryByCategory ?? []).map((s, i) => (
                 <div key={s.category} className="flex items-center gap-2 text-xs">
-                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
+                  <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
                   <span className="capitalize">{s.category}</span>
                   <span className="text-muted-foreground ml-auto">{s.count}</span>
                 </div>
@@ -238,13 +238,13 @@ export default function Reports() {
         </Card>
       </div>
 
-      {/* GST Summary */}
+      {/* GST Summary — fix: single col on mobile */}
       <Card className="border-border">
         <CardHeader className="pb-2">
           <CardTitle className="text-base font-semibold">GST Summary (Today's Estimate)</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-3 gap-4 text-sm mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 text-sm mb-4">
             {[
               { label: "Taxable Value (Sales)", value: formatCurrency((summary?.todaySales ?? 0) / 1.03) },
               { label: "CGST (1.5%)", value: formatCurrency(((summary?.todaySales ?? 0) / 1.03) * 0.015) },
@@ -263,17 +263,17 @@ export default function Reports() {
       {/* GSTR-1 Export */}
       <Card className="border-border bg-primary/5 border-primary/20">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base font-semibold flex items-center gap-2">
+          <CardTitle className="text-base font-semibold flex items-center gap-2 flex-wrap">
             <FileSpreadsheet className="w-5 h-5 text-primary" />
             GSTR-1 Export
-            <span className="ml-2 text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded-full">GST Filing Ready</span>
+            <span className="text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded-full">GST Filing Ready</span>
           </CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground mb-4">
             Export B2C sales data in GSTR-1 format (HSN: 7113, Jewellery). Includes invoice number, date, customer, taxable value, CGST (1.5%), SGST (1.5%), and totals. Upload directly to the GST portal.
           </p>
-          <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-end gap-3 flex-wrap">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Month</label>
               <Select value={gstrMonth} onValueChange={setGstrMonth}>
@@ -300,12 +300,10 @@ export default function Reports() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="mt-4">
-              <Button onClick={handleExport} disabled={exporting} className="gap-2">
-                <Download className="w-4 h-4" />
-                {exporting ? "Generating..." : `Export ${MONTHS[parseInt(gstrMonth) - 1]} ${gstrYear} CSV`}
-              </Button>
-            </div>
+            <Button onClick={handleExport} disabled={exporting} className="gap-2 h-9">
+              <Download className="w-4 h-4" />
+              {exporting ? "Generating..." : `Export ${MONTHS[parseInt(gstrMonth) - 1]} ${gstrYear}`}
+            </Button>
           </div>
           <div className="mt-4 p-3 rounded-lg bg-muted/30 border border-border text-xs text-muted-foreground grid grid-cols-2 md:grid-cols-4 gap-2">
             {[

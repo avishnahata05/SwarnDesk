@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,8 +11,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Banknote, AlertTriangle, CheckCircle2, Clock, TrendingDown,
-  Plus, RefreshCw, XCircle, ChevronDown, ChevronUp, Eye, Calendar, MessageCircle
+  Banknote, AlertTriangle, CheckCircle2, TrendingDown,
+  Plus, RefreshCw, XCircle, ChevronDown, ChevronUp, Calendar, MessageCircle
 } from "lucide-react";
 
 const API = "/api/girvi";
@@ -69,24 +69,11 @@ type Summary = {
   totalLoans: number;
 };
 
-function useFetch<T>(url: string) {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(false);
-  const load = async () => {
-    setLoading(true);
-    try {
-      const r = await fetch(url);
-      setData(await r.json());
-    } finally { setLoading(false); }
-  };
-  return { data, loading, load };
-}
-
 export default function Girvi() {
   const { toast } = useToast();
   const [loans, setLoans] = useState<Loan[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all");
   const [calendarMode, setCalendarMode] = useState<"en" | "hi">("en");
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -96,17 +83,29 @@ export default function Girvi() {
   const [goldSaleValue, setGoldSaleValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  // Bug fix: use useEffect instead of bare if-call on every render
   const loadAll = async () => {
-    const [loansRes, sumRes] = await Promise.all([
-      fetch(`${API}${statusFilter !== "all" ? `?status=${statusFilter}` : ""}`),
-      fetch(`${API}/stats/summary`),
-    ]);
-    setLoans(await loansRes.json());
-    setSummary(await sumRes.json());
-    setLoaded(true);
+    setLoading(true);
+    try {
+      const [loansRes, sumRes] = await Promise.all([
+        fetch(`${API}${statusFilter !== "all" ? `?status=${statusFilter}` : ""}`),
+        fetch(`${API}/stats/summary`),
+      ]);
+      if (loansRes.ok && sumRes.ok) {
+        setLoans(await loansRes.json());
+        setSummary(await sumRes.json());
+      }
+    } catch {
+      toast({ title: "Failed to load data", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
   };
 
-  if (!loaded) { loadAll(); }
+  useEffect(() => {
+    loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter]);
 
   const formatDateDisplay = (iso: string) => {
     const d = new Date(iso);
@@ -131,12 +130,10 @@ export default function Girvi() {
     } finally { setSubmitting(false); }
   };
 
-  const filtered = statusFilter === "all" ? loans : loans.filter(l => l.status === statusFilter);
-
   return (
     <div className="space-y-6 max-w-7xl">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Banknote className="w-6 h-6 text-primary" />
@@ -144,14 +141,14 @@ export default function Girvi() {
           </h1>
           <p className="text-muted-foreground text-sm mt-0.5">Gold collateral loans with auto interest recalculation</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={() => setCalendarMode(c => c === "en" ? "hi" : "en")} className="gap-1.5">
             <Calendar className="w-3.5 h-3.5" />
             {calendarMode === "en" ? "हिंदी तिथि" : "English Date"}
           </Button>
-          <Button variant="outline" size="sm" onClick={loadAll} className="gap-1.5">
-            <RefreshCw className="w-3.5 h-3.5" />
-            Recalculate All
+          <Button variant="outline" size="sm" onClick={loadAll} disabled={loading} className="gap-1.5">
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+            Recalculate
           </Button>
           <Button size="sm" onClick={() => setShowNewLoan(true)} className="gap-1.5">
             <Plus className="w-3.5 h-3.5" />
@@ -161,7 +158,7 @@ export default function Girvi() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 md:gap-4">
         {[
           { label: "Active Loans", value: (summary?.totalActive ?? 0).toString(), icon: Banknote, color: "text-primary", bg: "bg-primary/10" },
           { label: "Total Lent", value: formatCurrency(summary?.totalLent ?? 0), icon: TrendingDown, color: "text-blue-400", bg: "bg-blue-400/10" },
@@ -170,11 +167,11 @@ export default function Girvi() {
           { label: "Total Loss", value: formatCurrency(summary?.totalLoss ?? 0), icon: XCircle, color: "text-red-400", bg: "bg-red-400/10" },
         ].map(card => (
           <Card key={card.label} className="border-border">
-            <CardContent className="p-4">
-              <div className={`w-9 h-9 rounded-lg ${card.bg} flex items-center justify-center mb-2`}>
+            <CardContent className="p-3 md:p-4">
+              <div className={`w-8 h-8 md:w-9 md:h-9 rounded-lg ${card.bg} flex items-center justify-center mb-2`}>
                 <card.icon className={`w-4 h-4 ${card.color}`} />
               </div>
-              <div className="text-lg font-bold">{card.value}</div>
+              <div className="text-base md:text-lg font-bold">{card.value}</div>
               <div className="text-xs text-muted-foreground">{card.label}</div>
             </CardContent>
           </Card>
@@ -185,7 +182,7 @@ export default function Girvi() {
       <Card className="border-border">
         <CardHeader className="pb-3 flex-row items-center justify-between flex-wrap gap-3">
           <CardTitle className="text-base font-semibold">Girvi Vouchers</CardTitle>
-          <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setLoaded(false); }}>
+          <Select value={statusFilter} onValueChange={v => setStatusFilter(v)}>
             <SelectTrigger className="w-36 h-8 text-xs">
               <SelectValue />
             </SelectTrigger>
@@ -199,23 +196,25 @@ export default function Girvi() {
           </Select>
         </CardHeader>
         <CardContent className="p-0">
-          {filtered.length === 0 ? (
+          {loading && loans.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground text-sm">Loading...</div>
+          ) : loans.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground text-sm">
               No girvi vouchers yet. Click "New Girvi" to create the first loan.
             </div>
           ) : (
             <div className="divide-y divide-border">
-              {filtered.map(loan => (
-                <div key={loan.id} className="px-4 py-3">
+              {loans.map(loan => (
+                <div key={loan.id} className="px-3 md:px-4 py-3">
                   <div
-                    className="flex items-center justify-between gap-4 cursor-pointer"
+                    className="flex items-center justify-between gap-2 md:gap-4 cursor-pointer"
                     onClick={() => setExpandedId(expandedId === loan.id ? null : loan.id)}
                   >
                     {/* Left: customer + loan # */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-semibold text-sm">{loan.customerName}</span>
-                        <span className="text-xs text-muted-foreground font-mono">{loan.loanNumber}</span>
+                        <span className="text-xs text-muted-foreground font-mono hidden sm:inline">{loan.loanNumber}</span>
                         <Badge
                           variant={loan.status === "active" ? (loan.isOverdue ? "destructive" : "default") : loan.status === "redeemed" ? "secondary" : "outline"}
                           className="text-xs"
@@ -223,33 +222,35 @@ export default function Girvi() {
                           {loan.isOverdue ? "OVERDUE" : loan.status.toUpperCase()}
                         </Badge>
                       </div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
+                      <div className="text-xs text-muted-foreground mt-0.5 truncate">
                         {loan.metalType.toUpperCase()} {loan.purity} • {loan.grossWeight.toFixed(3)}g •{" "}
-                        {loan.interestRate}% {loan.interestPeriod} • Start: {formatDateDisplay(loan.startDate)}
+                        {loan.interestRate}% {loan.interestPeriod}
+                        <span className="hidden sm:inline"> • Start: {formatDateDisplay(loan.startDate)}</span>
                       </div>
                     </div>
 
                     {/* Right: amounts */}
                     <div className="text-right flex-shrink-0">
                       <div className="text-sm font-bold text-primary">{formatCurrency(loan.totalDue)}</div>
-                      <div className="text-xs text-muted-foreground">
-                        Principal {formatCurrency(loan.loanAmount)} + {formatCurrency(loan.accruedInterest)} int
+                      <div className="text-xs text-muted-foreground hidden sm:block">
+                        {formatCurrency(loan.loanAmount)} + {formatCurrency(loan.accruedInterest)} int
                       </div>
                     </div>
 
-                    <div className="text-muted-foreground">
+                    <div className="text-muted-foreground flex-shrink-0">
                       {expandedId === loan.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                     </div>
                   </div>
 
                   {/* Expanded detail */}
                   {expandedId === loan.id && (
-                    <div className="mt-4 p-4 rounded-xl bg-muted/20 border border-border space-y-4">
+                    <div className="mt-4 p-3 md:p-4 rounded-xl bg-muted/20 border border-border space-y-4">
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                         <div>
                           <div className="text-muted-foreground mb-1">Gold Details</div>
                           <div className="font-medium">{loan.metalType.toUpperCase()} {loan.purity}</div>
-                          <div>Gross: {loan.grossWeight.toFixed(3)}g | Net: {loan.netWeight.toFixed(3)}g</div>
+                          <div>Gross: {loan.grossWeight.toFixed(3)}g</div>
+                          <div>Net: {loan.netWeight.toFixed(3)}g</div>
                           <div>Est. Value: {formatCurrency(loan.estimatedValue)}</div>
                         </div>
                         <div>
@@ -268,8 +269,8 @@ export default function Girvi() {
                         </div>
                         <div>
                           <div className="text-muted-foreground mb-1">KYC</div>
-                          <div className="font-medium">{loan.kycDocType ? loan.kycDocType.toUpperCase() : "—"}</div>
-                          <div>{loan.kycDocNumber ?? "Not recorded"}</div>
+                          <div className="font-medium">{loan.kycDocType ? loan.kycDocType.replace(/_/g, " ").toUpperCase() : "—"}</div>
+                          <div className="break-all">{loan.kycDocNumber ?? "Not recorded"}</div>
                           <div className="text-muted-foreground">{loan.customerMobile}</div>
                         </div>
                       </div>
@@ -306,7 +307,7 @@ export default function Girvi() {
                             }}
                           >
                             <MessageCircle className="w-3.5 h-3.5" />
-                            {loan.isOverdue ? "Send Overdue Reminder" : "Send Due Reminder"}
+                            {loan.isOverdue ? "Overdue Reminder" : "Due Reminder"}
                           </Button>
                         </div>
                       )}
@@ -314,7 +315,7 @@ export default function Girvi() {
                       {loan.status === "forfeited" && loan.lossAmount !== null && (
                         <div className="flex items-center gap-2 text-xs p-2 rounded-lg bg-destructive/10 border border-destructive/20">
                           <TrendingDown className="w-4 h-4 text-destructive flex-shrink-0" />
-                          <span>Gold sold for {formatCurrency(loan.goldSaleValue ?? 0)} • Total due was {formatCurrency((loan.loanAmount ?? 0) + (loan.accruedInterest ?? 0))} • <strong className="text-destructive">Loss: {formatCurrency(loan.lossAmount)}</strong></span>
+                          <span>Sold for {formatCurrency(loan.goldSaleValue ?? 0)} • Due was {formatCurrency((loan.loanAmount ?? 0) + (loan.accruedInterest ?? 0))} • <strong className="text-destructive">Loss: {formatCurrency(loan.lossAmount)}</strong></span>
                         </div>
                       )}
 
@@ -388,7 +389,7 @@ export default function Girvi() {
                   onClick={handleAction}
                   disabled={submitting}
                 >
-                  {submitting ? "Processing..." : actionType === "redeem" ? `Confirm Redemption` : "Forfeit & Record Loss"}
+                  {submitting ? "Processing..." : actionType === "redeem" ? "Confirm Redemption" : "Forfeit & Record Loss"}
                 </Button>
               </div>
             </div>
@@ -441,7 +442,7 @@ function NewLoanDialog({ open, onClose, onCreated }: { open: boolean; onClose: (
   };
 
   const inp = "w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary";
-  const label = "text-xs text-muted-foreground block mb-1";
+  const lbl = "text-xs text-muted-foreground block mb-1";
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -453,17 +454,17 @@ function NewLoanDialog({ open, onClose, onCreated }: { open: boolean; onClose: (
           {/* Customer */}
           <div className="p-3 rounded-xl bg-muted/20 border border-border space-y-3">
             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Customer & KYC</div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className={label}>Customer Name *</label>
+                <label className={lbl}>Customer Name *</label>
                 <input className={inp} value={form.customerName} onChange={e => set("customerName", e.target.value)} placeholder="Full name" />
               </div>
               <div>
-                <label className={label}>Mobile *</label>
+                <label className={lbl}>Mobile *</label>
                 <input className={inp} value={form.customerMobile} onChange={e => set("customerMobile", e.target.value)} placeholder="+91 XXXXX XXXXX" />
               </div>
               <div>
-                <label className={label}>KYC Document Type</label>
+                <label className={lbl}>KYC Document Type</label>
                 <Select value={form.kycDocType} onValueChange={v => set("kycDocType", v)}>
                   <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -476,7 +477,7 @@ function NewLoanDialog({ open, onClose, onCreated }: { open: boolean; onClose: (
                 </Select>
               </div>
               <div>
-                <label className={label}>Document Number</label>
+                <label className={lbl}>Document Number</label>
                 <input className={inp} value={form.kycDocNumber} onChange={e => set("kycDocNumber", e.target.value)} placeholder="Document number" />
               </div>
             </div>
@@ -485,9 +486,9 @@ function NewLoanDialog({ open, onClose, onCreated }: { open: boolean; onClose: (
           {/* Gold details */}
           <div className="p-3 rounded-xl bg-muted/20 border border-border space-y-3">
             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Gold / Silver Collateral</div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className={label}>Metal Type</label>
+                <label className={lbl}>Metal Type</label>
                 <Select value={form.metalType} onValueChange={v => set("metalType", v)}>
                   <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -497,7 +498,7 @@ function NewLoanDialog({ open, onClose, onCreated }: { open: boolean; onClose: (
                 </Select>
               </div>
               <div>
-                <label className={label}>Purity</label>
+                <label className={lbl}>Purity</label>
                 <Select value={form.purity} onValueChange={v => set("purity", v)}>
                   <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -510,16 +511,16 @@ function NewLoanDialog({ open, onClose, onCreated }: { open: boolean; onClose: (
                 </Select>
               </div>
               <div>
-                <label className={label}>Gross Weight (g) *</label>
+                <label className={lbl}>Gross Weight (g) *</label>
                 <input className={inp} type="number" step="0.001" value={form.grossWeight} onChange={e => set("grossWeight", e.target.value)} placeholder="0.000" />
               </div>
               <div>
-                <label className={label}>Net Weight (g)</label>
+                <label className={lbl}>Net Weight (g)</label>
                 <input className={inp} type="number" step="0.001" value={form.netWeight} onChange={e => set("netWeight", e.target.value)} placeholder="After stone deduction" />
               </div>
-              <div className="col-span-2">
-                <label className={label}>Estimated Gold Value (₹)</label>
-                <input className={inp} type="number" value={form.estimatedValue} onChange={e => set("estimatedValue", e.target.value)} placeholder="Current market value of gold" />
+              <div className="sm:col-span-2">
+                <label className={lbl}>Estimated Gold Value (₹)</label>
+                <input className={inp} type="number" value={form.estimatedValue} onChange={e => set("estimatedValue", e.target.value)} placeholder="Current market value" />
               </div>
             </div>
           </div>
@@ -527,17 +528,17 @@ function NewLoanDialog({ open, onClose, onCreated }: { open: boolean; onClose: (
           {/* Loan terms */}
           <div className="p-3 rounded-xl bg-muted/20 border border-border space-y-3">
             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Loan Terms</div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className={label}>Loan Amount (₹) *</label>
+                <label className={lbl}>Loan Amount (₹) *</label>
                 <input className={inp} type="number" value={form.loanAmount} onChange={e => set("loanAmount", e.target.value)} placeholder="Principal amount" />
               </div>
               <div>
-                <label className={label}>Interest Rate (%)</label>
+                <label className={lbl}>Interest Rate (%)</label>
                 <input className={inp} type="number" step="0.1" value={form.interestRate} onChange={e => set("interestRate", e.target.value)} placeholder="e.g. 2" />
               </div>
               <div>
-                <label className={label}>Interest Period</label>
+                <label className={lbl}>Interest Period</label>
                 <Select value={form.interestPeriod} onValueChange={v => set("interestPeriod", v)}>
                   <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -548,17 +549,17 @@ function NewLoanDialog({ open, onClose, onCreated }: { open: boolean; onClose: (
                 </Select>
               </div>
               <div>
-                <label className={label}>Due Date *</label>
+                <label className={lbl}>Due Date *</label>
                 <input className={inp} type="date" value={form.dueDate} onChange={e => set("dueDate", e.target.value)} />
               </div>
-              <div className="col-span-2">
-                <label className={label}>Notes</label>
+              <div className="sm:col-span-2">
+                <label className={lbl}>Notes</label>
                 <input className={inp} value={form.notes} onChange={e => set("notes", e.target.value)} placeholder="Optional notes about the item" />
               </div>
             </div>
           </div>
 
-          {/* Preview */}
+          {/* Interest preview */}
           {form.loanAmount && form.interestRate && (
             <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 text-xs space-y-1">
               <div className="font-semibold text-primary mb-2">Interest Preview</div>

@@ -251,7 +251,7 @@ export default function Settings() {
               onClick={() => setWaConfig(c => ({ ...c, enabled: !c.enabled }))}
               className={`w-11 h-6 rounded-full transition-colors relative ${waConfig.enabled ? "bg-green-500" : "bg-muted"}`}
             >
-              <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${waConfig.enabled ? "left-5.5 left-[22px]" : "left-0.5"}`} />
+              <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${waConfig.enabled ? "left-[22px]" : "left-0.5"}`} />
             </button>
           </div>
 

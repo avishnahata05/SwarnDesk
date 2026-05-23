@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "wouter";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import {
   useGetDashboardSummary, useGetRecentSales, useGetLowStockItems,
   useGetDailySalesStats, useGetSalesByCategory,
@@ -67,7 +67,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-6 max-w-7xl">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold">Dashboard</h1>
           <p className="text-muted-foreground text-sm mt-0.5">
@@ -82,21 +82,21 @@ export default function Dashboard() {
           </Link>
           <Link href="/app/inventory">
             <Button size="sm" variant="outline" className="gap-1.5" data-testid="button-add-item">
-              <PlusCircle className="w-3.5 h-3.5" />Add Item
+              <PlusCircle className="w-3.5 h-3.5" /><span className="hidden sm:inline">Add Item</span><span className="sm:hidden">+Item</span>
             </Button>
           </Link>
         </div>
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 md:gap-4">
         {summaryCards.map((card) => (
           <Card key={card.label} className="border-border" data-testid={`card-${card.label.toLowerCase().replace(/\s+/g, "-")}`}>
-            <CardContent className="p-4">
-              <div className={`w-9 h-9 rounded-lg ${card.bg} flex items-center justify-center mb-3`}>
+            <CardContent className="p-3 md:p-4">
+              <div className={`w-8 h-8 md:w-9 md:h-9 rounded-lg ${card.bg} flex items-center justify-center mb-2 md:mb-3`}>
                 <card.icon className={`w-4 h-4 ${card.color}`} />
               </div>
-              <div className="text-lg font-bold">{card.value}</div>
+              <div className="text-base md:text-lg font-bold leading-tight">{card.value}</div>
               <div className="text-xs text-muted-foreground mt-0.5">{card.label}</div>
             </CardContent>
           </Card>
@@ -104,14 +104,14 @@ export default function Dashboard() {
       </div>
 
       {/* Charts row */}
-      <div className="grid lg:grid-cols-3 gap-5">
+      <div className="grid lg:grid-cols-3 gap-4 md:gap-5">
         {/* Sales trend */}
         <Card className="lg:col-span-2 border-border">
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-semibold">Sales Trend (30 days)</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={dailyStats ?? []}>
                 <defs>
                   <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
@@ -120,10 +120,10 @@ export default function Dashboard() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#888" }} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: "#888" }} tickLine={false} axisLine={false} tickFormatter={v => `₹${(v / 1000).toFixed(0)}k`} />
+                <XAxis dataKey="date" tick={{ fontSize: 9, fill: "#888" }} tickLine={false} interval="preserveStartEnd" />
+                <YAxis tick={{ fontSize: 9, fill: "#888" }} tickLine={false} axisLine={false} tickFormatter={v => `₹${(v / 1000).toFixed(0)}k`} width={38} />
                 <Tooltip
-                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
+                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
                   formatter={(v: number) => [formatCurrency(v), "Sales"]}
                 />
                 <Area type="monotone" dataKey="sales" stroke="#f4c542" strokeWidth={2} fill="url(#salesGrad)" />
@@ -138,22 +138,22 @@ export default function Dashboard() {
             <CardTitle className="text-base font-semibold">Sales by Category</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
+            <ResponsiveContainer width="100%" height={180}>
               <PieChart>
-                <Pie data={categoryStats ?? []} cx="50%" cy="50%" innerRadius={50} outerRadius={75} dataKey="value" nameKey="category">
+                <Pie data={categoryStats ?? []} cx="50%" cy="50%" innerRadius={45} outerRadius={70} dataKey="value" nameKey="category">
                   {(categoryStats ?? []).map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                 </Pie>
                 <Tooltip
-                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
+                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
                   formatter={(v: number) => [formatCurrency(v), "Revenue"]}
                 />
               </PieChart>
             </ResponsiveContainer>
-            <div className="space-y-1.5 mt-2">
+            <div className="space-y-1.5 mt-1">
               {(categoryStats ?? []).slice(0, 4).map((s, i) => (
                 <div key={s.category} className="flex items-center justify-between text-xs">
                   <div className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full" style={{ background: COLORS[i % COLORS.length] }} />
+                    <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
                     <span className="capitalize">{s.category}</span>
                   </div>
                   <span className="text-muted-foreground">{s.count} items</span>
@@ -165,7 +165,7 @@ export default function Dashboard() {
       </div>
 
       {/* Low stock + Recent sales */}
-      <div className="grid lg:grid-cols-2 gap-5">
+      <div className="grid lg:grid-cols-2 gap-4 md:gap-5">
         {/* Low stock alerts */}
         <Card className="border-border">
           <CardHeader className="pb-3 flex-row items-center justify-between">
@@ -173,7 +173,7 @@ export default function Dashboard() {
               <AlertTriangle className="w-4 h-4 text-destructive" />
               Low Stock Alerts
             </CardTitle>
-            <Link href="/app/inventory" className="text-xs text-primary hover:underline">
+            <Link href="/app/inventory" className="text-xs text-primary hover:underline shrink-0">
               View All
             </Link>
           </CardHeader>
@@ -182,12 +182,12 @@ export default function Dashboard() {
               <p className="text-sm text-muted-foreground py-4 text-center">No low stock alerts</p>
             ) : (
               lowStock.slice(0, 5).map(item => (
-                <div key={item.id} className="flex items-center justify-between p-2.5 rounded-lg bg-destructive/5 border border-destructive/20">
-                  <div>
-                    <div className="text-sm font-medium">{item.name}</div>
+                <div key={item.id} className="flex items-center justify-between p-2.5 rounded-lg bg-destructive/5 border border-destructive/20 gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate">{item.name}</div>
                     <div className="text-xs text-muted-foreground">{item.category} • {item.purity}</div>
                   </div>
-                  <Badge variant="destructive" data-testid={`badge-stock-${item.id}`}>Qty: {item.quantity}</Badge>
+                  <Badge variant="destructive" className="shrink-0" data-testid={`badge-stock-${item.id}`}>Qty: {item.quantity}</Badge>
                 </div>
               ))
             )}
@@ -198,7 +198,7 @@ export default function Dashboard() {
         <Card className="border-border">
           <CardHeader className="pb-3 flex-row items-center justify-between">
             <CardTitle className="text-base font-semibold">Recent Sales</CardTitle>
-            <Link href="/app/billing" className="text-xs text-primary hover:underline">
+            <Link href="/app/billing" className="text-xs text-primary hover:underline shrink-0">
               New Bill
             </Link>
           </CardHeader>
@@ -207,12 +207,12 @@ export default function Dashboard() {
               <p className="text-sm text-muted-foreground py-4 text-center">No sales yet. <Link href="/app/billing" className="text-primary underline">Create first bill</Link></p>
             ) : (
               recentSales.slice(0, 5).map(sale => (
-                <div key={sale.id} className="flex items-center justify-between p-2.5 rounded-lg border border-border hover:bg-muted/20 transition-colors" data-testid={`row-sale-${sale.id}`}>
-                  <div>
-                    <div className="text-sm font-medium">{sale.customerName}</div>
+                <div key={sale.id} className="flex items-center justify-between p-2.5 rounded-lg border border-border hover:bg-muted/20 transition-colors gap-2" data-testid={`row-sale-${sale.id}`}>
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate">{sale.customerName}</div>
                     <div className="text-xs text-muted-foreground">{sale.invoiceNumber} • {sale.paymentMode}</div>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right shrink-0">
                     <div className="text-sm font-semibold text-primary">{formatCurrency(sale.totalAmount)}</div>
                     <Badge variant={sale.paymentStatus === "paid" ? "default" : "secondary"} className="text-xs">
                       {sale.paymentStatus}
@@ -225,9 +225,9 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      {/* AI Chat widget */}
+      {/* AI Chat widget — responsive width, stays on screen */}
       {aiOpen && (
-        <div className="fixed bottom-24 right-6 z-50 w-80 bg-card border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        <div className="fixed bottom-24 right-4 z-50 w-[calc(100vw-2rem)] sm:w-80 max-w-sm bg-card border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-primary/10">
             <div className="flex items-center gap-2">
               <Bot className="w-4 h-4 text-primary" />
@@ -237,7 +237,7 @@ export default function Dashboard() {
               <X className="w-4 h-4" />
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-3 max-h-72">
+          <div className="flex-1 overflow-y-auto p-3 space-y-3 max-h-64">
             {aiMessages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                 <div className={`max-w-[85%] rounded-xl px-3 py-2 text-xs leading-relaxed ${
@@ -259,7 +259,7 @@ export default function Dashboard() {
             />
             <button
               onClick={sendAiQuery}
-              className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center hover:bg-primary/80 transition-colors"
+              className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center hover:bg-primary/80 transition-colors shrink-0"
               data-testid="button-ai-send"
             >
               <Send className="w-3.5 h-3.5 text-primary-foreground" />
@@ -271,7 +271,7 @@ export default function Dashboard() {
       {/* AI button */}
       <button
         onClick={() => setAiOpen(o => !o)}
-        className="fixed bottom-6 right-6 z-40 w-14 h-14 bg-primary rounded-full flex items-center justify-center shadow-lg shadow-primary/30 hover:scale-105 transition-all"
+        className="fixed bottom-6 right-4 z-40 w-14 h-14 bg-primary rounded-full flex items-center justify-center shadow-lg shadow-primary/30 hover:scale-105 transition-all"
         data-testid="button-ai-chat"
       >
         <Bot className="w-6 h-6 text-primary-foreground" />

@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useForm } from "react-hook-form";
-import { Plus, Search, Package, Trash2, AlertTriangle } from "lucide-react";
+import { Plus, Search, Trash2, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const CATEGORIES = ["gold", "silver", "diamond", "kundan", "platinum"];
@@ -49,11 +49,10 @@ export default function Inventory() {
   const createItem = useCreateInventoryItem();
   const deleteItem = useDeleteInventoryItem();
 
-  const { register, handleSubmit, reset, setValue, watch } = useForm<ItemForm>({
+  const { register, handleSubmit, reset, setValue } = useForm<ItemForm>({
     defaultValues: { category: "gold", purity: "22K", quantity: 1, branch: "Main", stoneWeight: 0 }
   });
 
-  const grossWeight = watch("grossWeight");
   const metalRateMap: Record<string, number> = {
     gold: rates?.gold22k ?? 7250,
     silver: rates?.silver ?? 95,
@@ -92,7 +91,7 @@ export default function Inventory() {
   return (
     <div className="space-y-5 max-w-7xl">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold">Inventory</h1>
           <p className="text-muted-foreground text-sm">Manage your jewellery stock</p>
@@ -102,11 +101,11 @@ export default function Inventory() {
         </Button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {(categoryStats ?? []).map((s, i) => (
+      {/* Category stats */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+        {(categoryStats ?? []).map((s) => (
           <Card key={s.category} className="border-border">
-            <CardContent className="p-4">
+            <CardContent className="p-3 md:p-4">
               <div className="text-xs text-muted-foreground capitalize mb-1">{s.category}</div>
               <div className="text-xl font-bold">{s.count}</div>
               <div className="text-xs text-muted-foreground">{formatCurrency(s.value)}</div>
@@ -128,7 +127,7 @@ export default function Inventory() {
           />
         </div>
         <Select value={category} onValueChange={setCategory}>
-          <SelectTrigger className="w-40" data-testid="select-category-filter">
+          <SelectTrigger className="w-full sm:w-40" data-testid="select-category-filter">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -138,21 +137,21 @@ export default function Inventory() {
         </Select>
       </div>
 
-      {/* Items table */}
+      {/* Items table — columns hidden on mobile for readability */}
       <Card className="border-border">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-muted-foreground text-xs">
                 <th className="px-4 py-3 text-left font-medium">Item</th>
-                <th className="px-4 py-3 text-left font-medium">Category</th>
+                <th className="px-4 py-3 text-left font-medium hidden sm:table-cell">Category</th>
                 <th className="px-4 py-3 text-left font-medium">Purity</th>
                 <th className="px-4 py-3 text-right font-medium">Weight</th>
-                <th className="px-4 py-3 text-right font-medium">Rate/g</th>
+                <th className="px-4 py-3 text-right font-medium hidden md:table-cell">Rate/g</th>
                 <th className="px-4 py-3 text-right font-medium">Value</th>
-                <th className="px-4 py-3 text-center font-medium">Qty</th>
+                <th className="px-4 py-3 text-center font-medium hidden sm:table-cell">Qty</th>
                 <th className="px-4 py-3 text-center font-medium">Status</th>
-                <th className="px-4 py-3 text-center font-medium">Actions</th>
+                <th className="px-4 py-3 text-center font-medium">Del</th>
               </tr>
             </thead>
             <tbody>
@@ -168,14 +167,14 @@ export default function Inventory() {
                     <div className="font-medium">{item.name}</div>
                     {item.huid && <div className="text-xs text-muted-foreground">HUID: {item.huid}</div>}
                   </td>
-                  <td className="px-4 py-3 capitalize">
+                  <td className="px-4 py-3 hidden sm:table-cell">
                     <Badge variant="outline" className="capitalize">{item.category}</Badge>
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground">{item.purity}</td>
-                  <td className="px-4 py-3 text-right text-muted-foreground">{formatWeight(item.grossWeight)}</td>
-                  <td className="px-4 py-3 text-right text-muted-foreground">₹{item.metalRate.toLocaleString("en-IN")}</td>
+                  <td className="px-4 py-3 text-muted-foreground text-xs">{item.purity}</td>
+                  <td className="px-4 py-3 text-right text-muted-foreground text-xs">{formatWeight(item.grossWeight)}</td>
+                  <td className="px-4 py-3 text-right text-muted-foreground hidden md:table-cell">₹{item.metalRate.toLocaleString("en-IN")}</td>
                   <td className="px-4 py-3 text-right font-medium text-primary">{formatCurrency(item.totalValue)}</td>
-                  <td className="px-4 py-3 text-center font-medium">{item.quantity}</td>
+                  <td className="px-4 py-3 text-center font-medium hidden sm:table-cell">{item.quantity}</td>
                   <td className="px-4 py-3 text-center">{getStatusBadge(item.quantity, item.lowStockThreshold)}</td>
                   <td className="px-4 py-3 text-center">
                     <button
@@ -202,14 +201,14 @@ export default function Inventory() {
 
       {/* Add item dialog */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add Inventory Item</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
-                <label className="text-xs text-muted-foreground mb-1 block">Item Name</label>
+                <label className="text-xs text-muted-foreground mb-1 block">Item Name *</label>
                 <Input {...register("name", { required: true })} placeholder="Gold Bangle 22K" data-testid="input-item-name" />
               </div>
               <div>
@@ -231,11 +230,11 @@ export default function Inventory() {
                 </Select>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Gross Weight (g)</label>
+                <label className="text-xs text-muted-foreground mb-1 block">Gross Weight (g) *</label>
                 <Input type="number" step="0.001" {...register("grossWeight", { required: true })} data-testid="input-gross-weight" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Net Weight (g)</label>
+                <label className="text-xs text-muted-foreground mb-1 block">Net Weight (g) *</label>
                 <Input type="number" step="0.001" {...register("netWeight", { required: true })} data-testid="input-net-weight" />
               </div>
               <div>
@@ -243,7 +242,7 @@ export default function Inventory() {
                 <Input type="number" step="0.001" defaultValue="0" {...register("stoneWeight")} data-testid="input-stone-weight" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Making Charges (₹)</label>
+                <label className="text-xs text-muted-foreground mb-1 block">Making Charges (₹) *</label>
                 <Input type="number" {...register("makingCharges", { required: true })} data-testid="input-making-charges" />
               </div>
               <div>
