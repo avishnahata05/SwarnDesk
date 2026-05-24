@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
+import { useBackClose } from "@/hooks/use-back-close";
 import { formatCurrency } from "@/lib/utils";
 import {
   useListCustomers, useCreateCustomer, useDeleteCustomer, useGetUpcomingOccasions,
@@ -24,6 +25,11 @@ interface CustomerForm {
 }
 
 const DEFAULT_TEMPLATE = "Dear {name}, thank you for being a valued customer at our jewellery store! We'd love to see you again. Visit us for our latest collection and exclusive offers.";
+
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem("swarndesk_token");
+  return { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+}
 
 function CustomerLedger({ customerId, onClose }: { customerId: number; onClose: () => void }) {
   const { data, isLoading } = useGetCustomer(customerId);
@@ -154,9 +160,9 @@ function CustomerLedger({ customerId, onClose }: { customerId: number; onClose: 
             {pendingRepairs.map(r => (
               <div key={r.id} className="flex items-center justify-between p-3 rounded-xl border border-border bg-muted/10 text-xs">
                 <div>
-                  <div className="font-medium">{r.jobDescription}</div>
+                  <div className="font-medium">{r.itemDescription}</div>
                   <div className="text-muted-foreground mt-0.5">
-                    {r.itemType} • Due: {new Date(r.promisedDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                    {r.issue} • Due: {new Date(r.promisedDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
                   </div>
                 </div>
                 <Badge variant="outline" className="text-[10px] capitalize">{r.status}</Badge>
@@ -197,6 +203,9 @@ export default function Customers() {
 
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  const closeLedger = useCallback(() => setLedgerCustomerId(null), []);
+  useBackClose(ledgerCustomerId !== null, closeLedger);
 
   const { data: customers, isLoading } = useListCustomers({ ...(search ? { search } : {}) });
   const { data: occasions } = useGetUpcomingOccasions();
@@ -255,7 +264,8 @@ export default function Customers() {
   const openBulkDialog = async () => {
     if (selectedIds.size === 0) { toast({ title: "Select at least one customer" }); return; }
     if (waApiEnabled === null) {
-      const r = await fetch("/api/whatsapp/config");
+      const token = localStorage.getItem("swarndesk_token");
+      const r = await fetch("/api/whatsapp/config", { headers: token ? { Authorization: `Bearer ${token}` } : {} });
       const d = await r.json() as { whatsappApiEnabled: boolean };
       setWaApiEnabled(d.whatsappApiEnabled);
     }
@@ -282,7 +292,7 @@ export default function Customers() {
       const recipients = selectedCustomers.map(c => ({ mobile: c.mobile, name: c.name, message: buildMessage(c.name) }));
       const r = await fetch("/api/whatsapp/send-bulk", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ recipients }),
       });
       const d = await r.json() as { sent: number; failed: number; error?: string };

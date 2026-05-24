@@ -10,6 +10,7 @@ interface AuthUser {
   role: string;
   plan: string;
   trialEndsAt: string;
+  subscriptionEndsAt: string | null;
 }
 
 interface AuthContextType {

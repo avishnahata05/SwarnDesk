@@ -10,11 +10,11 @@ function mapSale(s: typeof salesTable.$inferSelect) {
     id: s.id,
     customerId: s.customerId,
     customerName: s.customerName,
-    totalAmount: parseFloat(s.totalAmount),
-    gstAmount: parseFloat(s.gstAmount),
-    discountAmount: parseFloat(s.discountAmount),
-    exchangeGoldWeight: parseFloat(s.exchangeGoldWeight),
-    exchangeGoldValue: parseFloat(s.exchangeGoldValue),
+    totalAmount: parseFloat(s.totalAmount) || 0,
+    gstAmount: parseFloat(s.gstAmount) || 0,
+    discountAmount: parseFloat(s.discountAmount) || 0,
+    exchangeGoldWeight: parseFloat(s.exchangeGoldWeight) || 0,
+    exchangeGoldValue: parseFloat(s.exchangeGoldValue) || 0,
     paymentMode: s.paymentMode,
     paymentStatus: s.paymentStatus,
     invoiceNumber: s.invoiceNumber,
@@ -75,7 +75,7 @@ router.get("/stats/daily", async (req, res) => {
       date: s.date,
       sales: parseFloat(String(s.sales)) || 0,
       purchases: 0,
-      profit: parseFloat(String(s.sales)) * 0.15 || 0,
+      profit: 0,
     })));
   } catch (err) {
     req.log.error({ err }, "Failed to get daily stats");
@@ -86,12 +86,25 @@ router.get("/stats/daily", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const userId = req.user!.userId;
-    const { startDate, endDate, customerId } = req.query as Record<string, string>;
+    const { startDate, endDate, customerId, limit } = req.query as Record<string, string>;
+    const limitNum = Math.min(5000, Math.max(1, parseInt(limit) || 500));
     const conditions = [eq(salesTable.userId, userId)];
-    if (startDate) conditions.push(gte(salesTable.saleDate, new Date(startDate)));
-    if (endDate) conditions.push(lte(salesTable.saleDate, new Date(endDate)));
-    if (customerId) conditions.push(eq(salesTable.customerId, parseInt(customerId)));
-    const sales = await db.select().from(salesTable).where(conditions.length === 1 ? conditions[0] : and(...conditions)).orderBy(desc(salesTable.saleDate));
+    if (startDate) {
+      const d = new Date(startDate);
+      if (!isNaN(d.getTime())) conditions.push(gte(salesTable.saleDate, d));
+    }
+    if (endDate) {
+      const d = new Date(endDate);
+      if (!isNaN(d.getTime())) conditions.push(lte(salesTable.saleDate, d));
+    }
+    if (customerId) {
+      const cid = parseInt(customerId);
+      if (!isNaN(cid)) conditions.push(eq(salesTable.customerId, cid));
+    }
+    const sales = await db.select().from(salesTable)
+      .where(conditions.length === 1 ? conditions[0] : and(...conditions))
+      .orderBy(desc(salesTable.saleDate))
+      .limit(limitNum);
     res.json(sales.map(mapSale));
   } catch (err) {
     req.log.error({ err }, "Failed to list sales");
@@ -103,70 +116,113 @@ router.post("/", async (req, res) => {
   try {
     const userId = req.user!.userId;
     const data = req.body;
+
+    // Validate required fields
+    const totalAmount = parseFloat(data.totalAmount);
+    if (!data.customerName?.trim()) return res.status(400).json({ error: "Customer name is required" });
+    if (!isFinite(totalAmount) || totalAmount < 0) return res.status(400).json({ error: "Invalid total amount" });
+
     const invoiceNumber = generateInvoiceNumber();
-    const [sale] = await db.insert(salesTable).values({
-      userId,
-      customerId: data.customerId,
-      customerName: data.customerName,
-      totalAmount: data.totalAmount.toString(),
-      gstAmount: (data.gstAmount ?? 0).toString(),
-      discountAmount: (data.discountAmount ?? 0).toString(),
-      exchangeGoldWeight: (data.exchangeGoldWeight ?? 0).toString(),
-      exchangeGoldValue: (data.exchangeGoldValue ?? 0).toString(),
-      paymentMode: data.paymentMode,
-      paymentStatus: data.paymentStatus,
-      invoiceNumber,
-      notes: data.notes,
-    }).returning();
+    const items: Array<{
+      inventoryItemId: number; itemName: string; quantity: number;
+      unitPrice: number; metalRate: number; goldWeight: number;
+      makingCharges: number; discount: number;
+    }> = Array.isArray(data.items) ? data.items : [];
 
-    if (data.items && Array.isArray(data.items)) {
-      // Pre-check stock for all inventory items before committing any change
-      for (const item of data.items) {
-        if (!item.inventoryItemId || item.inventoryItemId <= 0) continue;
-        const [inv] = await db.select().from(inventoryItemsTable).where(and(eq(inventoryItemsTable.id, item.inventoryItemId), eq(inventoryItemsTable.userId, userId)));
-        if (inv && inv.quantity < item.quantity) {
-          await db.delete(salesTable).where(eq(salesTable.id, sale.id));
-          return res.status(422).json({ error: `Insufficient stock for "${inv.name}". Available: ${inv.quantity}, requested: ${item.quantity}.` });
+    // Validate all line items up-front before touching DB
+    for (const item of items) {
+      const qty = parseInt(item.quantity as unknown as string);
+      if (!isFinite(qty) || qty <= 0) return res.status(400).json({ error: "Invalid item quantity" });
+      const unitPrice = parseFloat(item.unitPrice as unknown as string);
+      if (!isFinite(unitPrice) || unitPrice < 0) return res.status(400).json({ error: "Invalid unit price" });
+    }
+
+    const sale = await db.transaction(async (tx) => {
+      // 1. Lock inventory rows and check stock atomically
+      for (const item of items) {
+        const itemId = parseInt(item.inventoryItemId as unknown as string);
+        if (!itemId || itemId <= 0) continue;
+        const qty = parseInt(item.quantity as unknown as string);
+
+        // SELECT FOR UPDATE acquires a row lock — prevents concurrent deductions
+        const rows = await tx.execute(
+          sql`SELECT id, name, quantity FROM inventory_items WHERE id = ${itemId} AND user_id = ${userId} FOR UPDATE`
+        );
+        const inv = rows.rows[0] as { id: number; name: string; quantity: number } | undefined;
+        if (inv && Number(inv.quantity) < qty) {
+          throw Object.assign(
+            new Error(`Insufficient stock for "${inv.name}". Available: ${inv.quantity}, requested: ${qty}.`),
+            { statusCode: 422 }
+          );
         }
       }
 
-      for (const item of data.items) {
-        await db.insert(saleLineItemsTable).values({
+      // 2. Insert the sale record
+      const [newSale] = await tx.insert(salesTable).values({
+        userId,
+        customerId: data.customerId ?? null,
+        customerName: data.customerName.trim(),
+        totalAmount: totalAmount.toString(),
+        gstAmount: (parseFloat(data.gstAmount) || 0).toString(),
+        discountAmount: (parseFloat(data.discountAmount) || 0).toString(),
+        exchangeGoldWeight: (parseFloat(data.exchangeGoldWeight) || 0).toString(),
+        exchangeGoldValue: (parseFloat(data.exchangeGoldValue) || 0).toString(),
+        paymentMode: data.paymentMode ?? "cash",
+        paymentStatus: data.paymentStatus ?? "paid",
+        invoiceNumber,
+        notes: data.notes ?? null,
+      }).returning();
+
+      // 3. Insert line items + atomically decrement inventory
+      for (const item of items) {
+        const itemId = parseInt(item.inventoryItemId as unknown as string);
+        const qty = parseInt(item.quantity as unknown as string);
+        const unitPrice = parseFloat(item.unitPrice as unknown as string);
+        const makingCharges = parseFloat(item.makingCharges as unknown as string) || 0;
+        const discount = parseFloat(item.discount as unknown as string) || 0;
+
+        await tx.insert(saleLineItemsTable).values({
           userId,
-          saleId: sale.id,
-          inventoryItemId: item.inventoryItemId,
-          itemName: item.itemName ?? "Item",
-          quantity: item.quantity,
-          unitPrice: item.unitPrice.toString(),
-          metalRate: item.metalRate.toString(),
-          goldWeight: item.goldWeight.toString(),
-          makingCharges: (item.makingCharges ?? 0).toString(),
-          discount: (item.discount ?? 0).toString(),
-          lineTotal: (item.unitPrice * item.quantity - (item.discount ?? 0)).toString(),
+          saleId: newSale.id,
+          inventoryItemId: itemId || 0,
+          itemName: item.itemName || "Item",
+          quantity: qty,
+          unitPrice: unitPrice.toString(),
+          metalRate: (parseFloat(item.metalRate as unknown as string) || 0).toString(),
+          goldWeight: (parseFloat(item.goldWeight as unknown as string) || 0).toString(),
+          makingCharges: makingCharges.toString(),
+          discount: discount.toString(),
+          lineTotal: (unitPrice * qty - discount).toString(),
         });
-        // Decrease inventory (only for real inventory items, not quick-entry with id=0)
-        if (item.inventoryItemId > 0) {
-          const [inv] = await db.select().from(inventoryItemsTable).where(and(eq(inventoryItemsTable.id, item.inventoryItemId), eq(inventoryItemsTable.userId, userId)));
-          if (inv) {
-            await db.update(inventoryItemsTable).set({ quantity: inv.quantity - item.quantity }).where(and(eq(inventoryItemsTable.id, item.inventoryItemId), eq(inventoryItemsTable.userId, userId)));
-          }
+
+        if (itemId > 0) {
+          // Atomic decrement — no read required since we already checked with FOR UPDATE
+          await tx.execute(
+            sql`UPDATE inventory_items SET quantity = quantity - ${qty} WHERE id = ${itemId} AND user_id = ${userId}`
+          );
         }
       }
-    }
 
-    // Update customer total purchases
-    if (data.customerId) {
-      const [cust] = await db.select().from(customersTable).where(and(eq(customersTable.id, data.customerId), eq(customersTable.userId, userId)));
-      if (cust) {
-        await db.update(customersTable).set({
-          totalPurchases: (parseFloat(cust.totalPurchases) + data.totalAmount).toString(),
-          loyaltyPoints: cust.loyaltyPoints + Math.floor(data.totalAmount / 1000),
-        }).where(and(eq(customersTable.id, data.customerId), eq(customersTable.userId, userId)));
+      // 4. Atomically update customer totals
+      if (data.customerId) {
+        const custId = parseInt(data.customerId);
+        if (!isNaN(custId) && custId > 0) {
+          await tx.execute(
+            sql`UPDATE customers
+                SET total_purchases = total_purchases + ${totalAmount}::numeric,
+                    loyalty_points   = loyalty_points + ${Math.floor(totalAmount / 1000)}
+                WHERE id = ${custId} AND user_id = ${userId}`
+          );
+        }
       }
-    }
+
+      return newSale;
+    });
 
     res.status(201).json(mapSale(sale));
-  } catch (err) {
+  } catch (err: unknown) {
+    const e = err as { statusCode?: number; message?: string };
+    if (e.statusCode === 422) return res.status(422).json({ error: e.message });
     req.log.error({ err }, "Failed to create sale");
     res.status(500).json({ error: "Internal server error" });
   }
@@ -176,6 +232,7 @@ router.get("/:id", async (req, res) => {
   try {
     const userId = req.user!.userId;
     const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
     const [sale] = await db.select().from(salesTable).where(and(eq(salesTable.id, id), eq(salesTable.userId, userId)));
     if (!sale) return res.status(404).json({ error: "Not found" });
     const items = await db.select().from(saleLineItemsTable).where(and(eq(saleLineItemsTable.saleId, id), eq(saleLineItemsTable.userId, userId)));
@@ -187,12 +244,12 @@ router.get("/:id", async (req, res) => {
         inventoryItemId: item.inventoryItemId,
         itemName: item.itemName,
         quantity: item.quantity,
-        unitPrice: parseFloat(item.unitPrice),
-        metalRate: parseFloat(item.metalRate),
-        goldWeight: parseFloat(item.goldWeight),
-        makingCharges: parseFloat(item.makingCharges),
-        discount: parseFloat(item.discount),
-        lineTotal: parseFloat(item.lineTotal),
+        unitPrice: parseFloat(item.unitPrice) || 0,
+        metalRate: parseFloat(item.metalRate) || 0,
+        goldWeight: parseFloat(item.goldWeight) || 0,
+        makingCharges: parseFloat(item.makingCharges) || 0,
+        discount: parseFloat(item.discount) || 0,
+        lineTotal: parseFloat(item.lineTotal) || 0,
       })),
     });
   } catch (err) {
@@ -204,12 +261,22 @@ router.get("/:id", async (req, res) => {
 router.patch("/:id", async (req, res) => {
   try {
     const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
     const data = req.body;
+    const allowed = ["cash", "upi", "card", "credit", "partial"];
+    const allowedStatus = ["paid", "partial", "pending"];
     const updateData: Record<string, unknown> = {};
-    if (data.paymentMode !== undefined) updateData.paymentMode = data.paymentMode;
-    if (data.paymentStatus !== undefined) updateData.paymentStatus = data.paymentStatus;
-    if (data.notes !== undefined) updateData.notes = data.notes;
-    const [sale] = await db.update(salesTable).set(updateData).where(and(eq(salesTable.id, parseInt(req.params.id)), eq(salesTable.userId, userId))).returning();
+    if (data.paymentMode !== undefined) {
+      if (!allowed.includes(data.paymentMode)) return res.status(400).json({ error: "Invalid paymentMode" });
+      updateData.paymentMode = data.paymentMode;
+    }
+    if (data.paymentStatus !== undefined) {
+      if (!allowedStatus.includes(data.paymentStatus)) return res.status(400).json({ error: "Invalid paymentStatus" });
+      updateData.paymentStatus = data.paymentStatus;
+    }
+    if (data.notes !== undefined) updateData.notes = String(data.notes).slice(0, 500) || null;
+    const [sale] = await db.update(salesTable).set(updateData).where(and(eq(salesTable.id, id), eq(salesTable.userId, userId))).returning();
     if (!sale) return res.status(404).json({ error: "Not found" });
     res.json(mapSale(sale));
   } catch (err) {

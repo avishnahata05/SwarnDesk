@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useBackClose } from "@/hooks/use-back-close";
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import { useGetCurrentRates, useUpdateRates, getGetCurrentRatesQueryKey } from "@workspace/api-client-react";
@@ -6,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboard, Package, ShoppingCart, Users, Hammer, Wrench,
   TruckIcon, BarChart3, Settings, Menu, X, MessageCircle, Globe, Banknote,
-  ChevronRight, Pencil, LogOut, ShieldCheck,
+  ChevronRight, Pencil, LogOut, ShieldCheck, Megaphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -23,6 +24,7 @@ const navItems = [
   { href: "/app/repairs", label: "Repairs", labelHi: "मरम्मत", icon: Wrench },
   { href: "/app/girvi", label: "Girvi", labelHi: "गिरवी", icon: Banknote },
   { href: "/app/purchases", label: "Purchases", labelHi: "खरीद", icon: TruckIcon },
+  { href: "/app/marketing", label: "Marketing", labelHi: "मार्केटिंग", icon: Megaphone },
   { href: "/app/reports", label: "Reports", labelHi: "रिपोर्ट", icon: BarChart3 },
   { href: "/app/settings", label: "Settings", labelHi: "सेटिंग्स", icon: Settings },
 ];
@@ -36,6 +38,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user, logout } = useAuth();
   const [goldRate, setGoldRate] = useState(7250);
+
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+  useBackClose(sidebarOpen, closeSidebar);
   const [lang, setLang] = useState<"en" | "hi">("en");
   const [rateDialogOpen, setRateDialogOpen] = useState(false);
   const [rateForm, setRateForm] = useState({ gold22k: "", gold24k: "", gold18k: "", silver: "" });
@@ -196,7 +201,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
           )}
 
           <a
-            href="https://wa.me/919999999999?text=Hello+SwarnDesk+Support"
+            href="https://wa.me/919424575918?text=Hello+SwarnDesk+Support"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-white/60 hover:bg-white/10 hover:text-white transition-all"
@@ -260,21 +265,38 @@ export default function AppLayout({ children }: AppLayoutProps) {
           </Button>
         </header>
 
-        {/* Trial banner */}
-        {user && user.plan === "trial" && (() => {
-          const daysLeft = Math.ceil((new Date(user.trialEndsAt).getTime() - Date.now()) / 86400000);
+        {/* Subscription / trial expiry banner */}
+        {user && user.role !== "admin" && (() => {
+          const now = Date.now();
+          let daysLeft = 0;
+          let label = "";
+          let urgent = false;
+
+          if (user.plan === "trial") {
+            daysLeft = Math.ceil((new Date(user.trialEndsAt).getTime() - now) / 86400000);
+            label = daysLeft > 0
+              ? `Free trial ends in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}. Subscribe to keep access.`
+              : "Your free trial has ended.";
+            urgent = daysLeft <= 2;
+          } else if (user.plan === "active" && user.subscriptionEndsAt) {
+            daysLeft = Math.ceil((new Date(user.subscriptionEndsAt).getTime() - now) / 86400000);
+            if (daysLeft <= 7) {
+              label = daysLeft > 0
+                ? `Subscription expires in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}. Renew to avoid interruption.`
+                : "Your subscription has expired.";
+              urgent = daysLeft <= 2;
+            }
+          }
+
+          if (!label) return null;
           return (
             <div className={cn(
               "flex items-center justify-between px-4 py-2 text-xs font-medium flex-shrink-0",
-              daysLeft <= 1 ? "bg-red-600 text-white" : "bg-amber-500 text-white"
+              urgent ? "bg-red-600 text-white" : "bg-amber-500 text-white"
             )}>
-              <span>
-                {daysLeft > 0
-                  ? `Trial ends in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}. Upgrade to continue after trial.`
-                  : "Your trial has ended."}
-              </span>
+              <span>{label}</span>
               <Link href="/payment" className="underline font-semibold whitespace-nowrap ml-3 hover:opacity-80">
-                Upgrade now →
+                {user.plan === "active" ? "Renew now →" : "Subscribe now →"}
               </Link>
             </div>
           );

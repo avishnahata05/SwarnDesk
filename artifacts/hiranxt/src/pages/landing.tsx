@@ -36,29 +36,44 @@ const testimonials = [
   },
 ];
 
+const ALL_FEATURES = [
+  "Unlimited Inventory Items",
+  "Billing & POS with GST",
+  "Customer CRM & Loyalty",
+  "Karigar Management",
+  "Repairs Tracking",
+  "Girvi / Loan Management",
+  "Purchase Management",
+  "AI Business Insights",
+  "WhatsApp Integration",
+  "GSTR-1 Export",
+  "Live Gold & Silver Rates",
+  "Unlimited Branches",
+];
+
 const plans = [
   {
-    name: "Starter",
-    price: "₹999",
-    desc: "Perfect for a single-shop jeweller",
-    features: ["1 Branch", "Up to 500 items", "Billing & POS", "Customer CRM", "GST Reports"],
-    cta: "Start Free Trial",
+    name: "Monthly",
+    price: "₹2,999",
+    period: "/month",
+    desc: "Pay month to month, cancel anytime",
+    saving: null,
     highlight: false,
   },
   {
-    name: "Pro",
-    price: "₹2,499",
-    desc: "For jewellers who are growing fast",
-    features: ["5 Branches", "Unlimited items", "Karigar Management", "AI Assistant", "All Reports + Export", "WhatsApp Integration"],
-    cta: "Start Free Trial",
+    name: "Quarterly",
+    price: "₹7,999",
+    period: "/quarter",
+    desc: "3 months — save ₹998 vs monthly",
+    saving: "Save ₹998",
     highlight: true,
   },
   {
-    name: "Enterprise",
-    price: "Custom",
-    desc: "For large chains and wholesalers",
-    features: ["Unlimited Branches", "Dedicated Support", "Custom Integrations", "API Access", "On-premise Option", "Training & Onboarding"],
-    cta: "Contact Sales",
+    name: "Annual",
+    price: "₹29,999",
+    period: "/year",
+    desc: "12 months — save ₹5,989 vs monthly",
+    saving: "Best Value",
     highlight: false,
   },
 ];
@@ -126,7 +141,7 @@ export default function LandingPage() {
               </Button>
             </Link>
             <a
-              href="https://wa.me/919999999999?text=I+want+to+know+more+about+SwarnDesk"
+              href="https://wa.me/919424575918?text=I+want+to+know+more+about+SwarnDesk"
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -185,9 +200,24 @@ export default function LandingPage() {
       <section className="py-20 px-4 sm:px-6 bg-card/30">
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-14">
-            <h2 className="text-3xl sm:text-4xl font-bold mb-4">Honest, simple pricing</h2>
-            <p className="text-muted-foreground text-lg">Start free. Pay only when your business grows.</p>
+            <h2 className="text-3xl sm:text-4xl font-bold mb-4">One plan. All features. No limits.</h2>
+            <p className="text-muted-foreground text-lg">Every plan includes the complete SwarnDesk suite — inventory, billing, karigars, repairs, GST, and AI.</p>
           </div>
+
+          {/* Feature list */}
+          <div className="mb-10 p-6 rounded-2xl border border-border bg-card">
+            <p className="text-sm font-semibold text-foreground mb-4 text-center">Everything included in every plan:</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              {ALL_FEATURES.map(f => (
+                <div key={f} className="flex items-center gap-2 text-sm">
+                  <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+                  {f}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Billing period cards */}
           <div className="grid md:grid-cols-3 gap-6">
             {plans.map(plan => (
               <div
@@ -198,10 +228,10 @@ export default function LandingPage() {
                     : "border-border bg-card"
                 }`}
               >
-                {plan.highlight && (
+                {plan.saving && (
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                    <div className="bg-primary text-primary-foreground text-xs font-semibold px-4 py-1 rounded-full">
-                      Most Popular
+                    <div className={`text-xs font-semibold px-4 py-1 rounded-full ${plan.highlight ? "bg-primary text-primary-foreground" : "bg-green-600 text-white"}`}>
+                      {plan.saving}
                     </div>
                   </div>
                 )}
@@ -209,32 +239,25 @@ export default function LandingPage() {
                   <h3 className="text-lg font-bold mb-1">{plan.name}</h3>
                   <div className="text-3xl font-extrabold text-primary mb-1">
                     {plan.price}
-                    <span className="text-base font-normal text-muted-foreground">
-                      {plan.price !== "Custom" ? "/mo" : ""}
-                    </span>
+                    <span className="text-base font-normal text-muted-foreground">{plan.period}</span>
                   </div>
                   <p className="text-sm text-muted-foreground">{plan.desc}</p>
                 </div>
-                <ul className="space-y-2.5 mb-8">
-                  {plan.features.map(f => (
-                    <li key={f} className="flex items-center gap-2 text-sm">
-                      <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-                <Link href="/app/dashboard">
+                <Link href="/register">
                   <Button
                     className="w-full"
                     variant={plan.highlight ? "default" : "outline"}
                     data-testid={`button-plan-${plan.name.toLowerCase()}`}
                   >
-                    {plan.cta}
+                    Start Free Trial
                   </Button>
                 </Link>
               </div>
             ))}
           </div>
+          <p className="text-center text-sm text-muted-foreground mt-6">
+            All plans start with a <strong>30-day free trial</strong> — no credit card required. Pay only after your trial ends.
+          </p>
         </div>
       </section>
 
@@ -300,7 +323,7 @@ export default function LandingPage() {
 
       {/* Floating WhatsApp button */}
       <a
-        href="https://wa.me/919999999999?text=Hello+SwarnDesk+Support"
+        href="https://wa.me/919424575918?text=Hello+SwarnDesk+Support"
         target="_blank"
         rel="noopener noreferrer"
         className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-green-500 hover:bg-green-600 rounded-full flex items-center justify-center shadow-lg shadow-green-500/30 transition-all hover:scale-105"

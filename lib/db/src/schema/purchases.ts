@@ -1,4 +1,4 @@
-import { pgTable, serial, text, numeric, integer, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, numeric, integer, timestamp, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -11,7 +11,9 @@ export const suppliersTable = pgTable("suppliers", {
   gstin: text("gstin"),
   email: text("email"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => [
+  index("suppliers_user_idx").on(t.userId),
+]);
 
 export const purchasesTable = pgTable("purchases", {
   id: serial("id").primaryKey(),
@@ -29,7 +31,11 @@ export const purchasesTable = pgTable("purchases", {
   purchaseDate: timestamp("purchase_date").notNull(),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => [
+  index("purchases_user_idx").on(t.userId),
+  index("purchases_user_date_idx").on(t.userId, t.purchaseDate),
+  index("purchases_supplier_idx").on(t.supplierId),
+]);
 
 export const insertSupplierSchema = createInsertSchema(suppliersTable).omit({ id: true, createdAt: true });
 export const insertPurchaseSchema = createInsertSchema(purchasesTable).omit({ id: true, createdAt: true });

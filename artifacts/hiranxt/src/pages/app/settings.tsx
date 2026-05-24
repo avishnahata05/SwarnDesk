@@ -4,9 +4,17 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { useForm } from "react-hook-form";
-import { Settings as SettingsIcon, Building2, Percent, GitBranch, MessageCircle, CheckCircle2, AlertCircle, Coins, Download, FileSpreadsheet } from "lucide-react";
+import { Settings as SettingsIcon, Building2, Percent, GitBranch, MessageCircle, CheckCircle2, AlertCircle, Coins, Download, FileSpreadsheet, CreditCard, Clock, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+import { Link } from "wouter";
+
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem("swarndesk_token");
+  return { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+}
 
 interface SettingsForm {
   businessName: string; gstin: string; address: string;
@@ -21,6 +29,7 @@ interface WaConfig {
 
 export default function Settings() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const { data: settings, isLoading } = useGetSettings();
   const updateSettings = useUpdateSettings();
@@ -112,7 +121,7 @@ export default function Settings() {
     try {
       const r = await fetch("/api/settings", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           whatsappApiEnabled: waConfig.enabled,
           whatsappPhoneNumberId: waConfig.phoneNumberId,
@@ -145,21 +154,37 @@ export default function Settings() {
     const a = document.createElement("a");
     a.href = url;
     a.download = filename;
+    a.style.display = "none";
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 200);
+  };
+
+  const EXPORT_PARAMS: Record<string, string> = {
+    inventory: "?limit=2000",
+    sales: "?limit=5000",
   };
 
   const exportModule = async (endpoint: string, label: string) => {
     setExporting(endpoint);
     try {
-      const r = await fetch(`/api/${endpoint}`);
-      if (!r.ok) throw new Error();
+      const token = localStorage.getItem("swarndesk_token");
+      const params = EXPORT_PARAMS[endpoint] ?? "";
+      const r = await fetch(`/api/${endpoint}${params}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error ?? `HTTP ${r.status}`);
+      }
       const data = await r.json();
+      if (!Array.isArray(data) || data.length === 0) {
+        toast({ title: `No ${label} data to export`, description: "Add some records first.", variant: "destructive" }); return;
+      }
       const date = new Date().toISOString().split("T")[0];
-      exportToCsv(`swarndesk-${endpoint}-${date}.csv`, Array.isArray(data) ? data : []);
-      toast({ title: `${label} exported` });
-    } catch {
-      toast({ title: `Failed to export ${label}`, variant: "destructive" });
+      exportToCsv(`swarndesk-${endpoint}-${date}.csv`, data);
+      toast({ title: `${label} exported`, description: `${data.length} records saved as CSV` });
+    } catch (err) {
+      toast({ title: `Failed to export ${label}`, description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
       setExporting(null);
     }
@@ -184,12 +209,89 @@ export default function Settings() {
 
   if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
 
+  // Compute subscription status for the card
+  const subStatus = (() => {
+    if (!user || user.role === "admin") return null;
+    const now = Date.now();
+    if (user.plan === "trial") {
+      const daysLeft = Math.ceil((new Date(user.trialEndsAt).getTime() - now) / 86400000);
+      return { type: "trial" as const, daysLeft, endsAt: user.trialEndsAt };
+    }
+    if (user.plan === "active" && user.subscriptionEndsAt) {
+      const daysLeft = Math.ceil((new Date(user.subscriptionEndsAt).getTime() - now) / 86400000);
+      return { type: "active" as const, daysLeft, endsAt: user.subscriptionEndsAt };
+    }
+    if (user.plan === "expired") {
+      return { type: "expired" as const, daysLeft: 0, endsAt: null };
+    }
+    return null;
+  })();
+
   return (
     <div className="space-y-6 max-w-2xl">
       <div>
         <h1 className="text-2xl font-bold">Settings</h1>
         <p className="text-muted-foreground text-sm">Configure your business profile</p>
       </div>
+
+      {/* Subscription Status Card */}
+      {subStatus && (
+        <Card className={`border-2 ${
+          subStatus.type === "expired" ? "border-destructive/50 bg-destructive/5" :
+          subStatus.daysLeft <= 7 ? "border-amber-400/50 bg-amber-50/50" :
+          "border-green-400/30 bg-green-50/30"
+        }`}>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <CreditCard className="w-4 h-4 text-primary" />Subscription Status
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                {subStatus.type === "expired" ? (
+                  <Badge variant="destructive">Expired</Badge>
+                ) : subStatus.type === "trial" ? (
+                  <Badge className="bg-blue-100 text-blue-800 border-blue-200">Free Trial</Badge>
+                ) : (
+                  <Badge className="bg-green-100 text-green-800 border-green-200">Active</Badge>
+                )}
+                {subStatus.endsAt && (
+                  <span className="text-xs text-muted-foreground">
+                    {subStatus.type === "trial" ? "Trial ends:" : "Renews/expires:"}{" "}
+                    <strong>{new Date(subStatus.endsAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</strong>
+                  </span>
+                )}
+              </div>
+              {subStatus.type !== "expired" && subStatus.daysLeft > 0 && (
+                <div className={`flex items-center gap-1.5 text-sm font-semibold ${
+                  subStatus.daysLeft <= 3 ? "text-red-600" :
+                  subStatus.daysLeft <= 7 ? "text-amber-700" : "text-green-700"
+                }`}>
+                  {subStatus.daysLeft <= 7 ? <AlertTriangle className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
+                  {subStatus.daysLeft} day{subStatus.daysLeft !== 1 ? "s" : ""} remaining
+                </div>
+              )}
+            </div>
+            {(subStatus.type === "expired" || subStatus.daysLeft <= 7) && (
+              <div className={`p-3 rounded-lg text-xs ${subStatus.type === "expired" || subStatus.daysLeft <= 3 ? "bg-red-50 border border-red-200 text-red-700" : "bg-amber-50 border border-amber-200 text-amber-800"}`}>
+                {subStatus.type === "expired"
+                  ? "Your access has expired. Pay to restore access immediately."
+                  : `Your ${subStatus.type === "trial" ? "trial" : "subscription"} ends in ${subStatus.daysLeft} day${subStatus.daysLeft !== 1 ? "s" : ""}. Renew to avoid interruption.`}
+              </div>
+            )}
+            <div className="pt-1 border-t border-border/50">
+              <div className="text-xs text-muted-foreground mb-2">Plans: ₹2,999/month · ₹7,999/quarter · ₹29,999/year</div>
+              <Link href="/payment">
+                <Button size="sm" className="gap-1.5 text-xs h-8">
+                  <CreditCard className="w-3.5 h-3.5" />
+                  {subStatus.type === "active" ? "Renew / Upgrade" : "Subscribe Now"}
+                </Button>
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
         {/* Business Profile */}

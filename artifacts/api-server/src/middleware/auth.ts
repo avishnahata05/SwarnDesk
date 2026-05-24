@@ -7,6 +7,7 @@ export interface AuthUser {
   role: string;
   plan: string;
   trialEndsAt: string;
+  subscriptionEndsAt: string | null;
   shopName: string;
 }
 
@@ -48,11 +49,15 @@ export function adminOnly(req: Request, res: Response, next: NextFunction) {
 export function subscriptionCheck(req: Request, res: Response, next: NextFunction) {
   if (!req.user) return res.status(401).json({ error: "Unauthorized" });
   if (req.user.role === "admin") return next();
-  const { plan, trialEndsAt } = req.user;
+  const { plan, trialEndsAt, subscriptionEndsAt } = req.user;
+  const now = new Date();
   if (plan === "trial") {
-    if (new Date(trialEndsAt) > new Date()) return next();
+    if (new Date(trialEndsAt) > now) return next();
     return res.status(402).json({ error: "Trial expired. Please subscribe to continue." });
   }
-  if (plan === "active") return next();
+  if (plan === "active") {
+    if (!subscriptionEndsAt || new Date(subscriptionEndsAt) > now) return next();
+    return res.status(402).json({ error: "Subscription expired. Please renew." });
+  }
   return res.status(402).json({ error: "Subscription expired. Please renew." });
 }

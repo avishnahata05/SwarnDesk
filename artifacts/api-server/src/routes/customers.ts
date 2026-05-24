@@ -5,6 +5,11 @@ import { eq, ilike, and, or, desc } from "drizzle-orm";
 
 const router = Router();
 
+function safeFloat(val: unknown, fallback = 0): number {
+  const n = parseFloat(String(val ?? ""));
+  return isFinite(n) ? n : fallback;
+}
+
 function mapCustomer(c: typeof customersTable.$inferSelect) {
   return {
     id: c.id,
@@ -14,13 +19,64 @@ function mapCustomer(c: typeof customersTable.$inferSelect) {
     address: c.address,
     birthday: c.birthday,
     anniversary: c.anniversary,
-    totalPurchases: parseFloat(c.totalPurchases),
-    balance: parseFloat(c.balance),
+    totalPurchases: safeFloat(c.totalPurchases),
+    balance: safeFloat(c.balance),
     loyaltyPoints: c.loyaltyPoints,
     gstin: c.gstin,
     notes: c.notes,
     createdAt: c.createdAt.toISOString(),
   };
+}
+
+function mapSale(s: typeof salesTable.$inferSelect) {
+  return {
+    id: s.id,
+    customerId: s.customerId,
+    customerName: s.customerName,
+    totalAmount: safeFloat(s.totalAmount),
+    gstAmount: safeFloat(s.gstAmount),
+    discountAmount: safeFloat(s.discountAmount),
+    exchangeGoldWeight: safeFloat(s.exchangeGoldWeight),
+    exchangeGoldValue: safeFloat(s.exchangeGoldValue),
+    paymentMode: s.paymentMode,
+    paymentStatus: s.paymentStatus,
+    invoiceNumber: s.invoiceNumber,
+    saleDate: s.saleDate.toISOString(),
+    notes: s.notes,
+    createdAt: s.createdAt.toISOString(),
+  };
+}
+
+function mapRepair(r: typeof repairJobsTable.$inferSelect) {
+  return {
+    id: r.id,
+    customerId: r.customerId,
+    customerName: r.customerName,
+    customerMobile: r.customerMobile,
+    itemDescription: r.itemDescription,
+    issue: r.issue,
+    estimatedCost: safeFloat(r.estimatedCost),
+    actualCost: r.actualCost ? safeFloat(r.actualCost) : null,
+    status: r.status,
+    receivedDate: r.receivedDate.toISOString(),
+    promisedDate: r.promisedDate.toISOString(),
+    deliveredDate: r.deliveredDate ? r.deliveredDate.toISOString() : null,
+    notes: r.notes,
+    createdAt: r.createdAt.toISOString(),
+  };
+}
+
+function parseMmDd(dateStr: string | null | undefined): { month: number; day: number } | null {
+  if (!dateStr) return null;
+  try {
+    const parts = dateStr.split("-").map(Number);
+    if (parts.length < 2) return null;
+    const [month, day] = parts;
+    if (isNaN(month) || isNaN(day) || month < 1 || month > 12 || day < 1 || day > 31) return null;
+    return { month, day };
+  } catch {
+    return null;
+  }
 }
 
 router.get("/upcoming-occasions", async (req, res) => {
@@ -32,8 +88,9 @@ router.get("/upcoming-occasions", async (req, res) => {
 
     for (const c of customers) {
       for (const [type, dateStr] of [["birthday", c.birthday], ["anniversary", c.anniversary]] as [string, string | null][]) {
-        if (!dateStr) continue;
-        const [month, day] = dateStr.split("-").map(Number);
+        const parsed = parseMmDd(dateStr);
+        if (!parsed) continue;
+        const { month, day } = parsed;
         const thisYear = new Date(today.getFullYear(), month - 1, day);
         let diff = Math.ceil((thisYear.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
         if (diff < 0) {
@@ -41,14 +98,7 @@ router.get("/upcoming-occasions", async (req, res) => {
           diff = Math.ceil((nextYear.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
         }
         if (diff <= 30) {
-          upcoming.push({
-            customerId: c.id,
-            customerName: c.name,
-            mobile: c.mobile,
-            occasionType: type,
-            occasionDate: dateStr,
-            daysUntil: diff,
-          });
+          upcoming.push({ customerId: c.id, customerName: c.name, mobile: c.mobile, occasionType: type, occasionDate: dateStr, daysUntil: diff });
         }
       }
     }
@@ -71,8 +121,8 @@ router.get("/", async (req, res) => {
           and(
             baseCondition,
             or(
-              ilike(customersTable.name, `%${search}%`),
-              ilike(customersTable.mobile, `%${search}%`)
+              ilike(customersTable.name, `%${search.replace(/[%_\\]/g, "\\$&")}%`),
+              ilike(customersTable.mobile, `%${search.replace(/[%_\\]/g, "\\$&")}%`)
             )
           )
         )
@@ -88,17 +138,28 @@ router.post("/", async (req, res) => {
   try {
     const userId = req.user!.userId;
     const data = req.body;
+    if (!data.name?.trim()) return res.status(400).json({ error: "Customer name is required" });
+    if (!data.mobile?.trim()) return res.status(400).json({ error: "Mobile number is required" });
+
+    // Validate birthday/anniversary format if provided
+    if (data.birthday && !parseMmDd(data.birthday)) {
+      return res.status(400).json({ error: "Birthday must be in MM-DD format" });
+    }
+    if (data.anniversary && !parseMmDd(data.anniversary)) {
+      return res.status(400).json({ error: "Anniversary must be in MM-DD format" });
+    }
+
     const [customer] = await db.insert(customersTable).values({
       userId,
-      name: data.name,
-      mobile: data.mobile,
-      email: data.email,
-      address: data.address,
-      birthday: data.birthday,
-      anniversary: data.anniversary,
-      balance: (data.balance ?? 0).toString(),
-      gstin: data.gstin,
-      notes: data.notes,
+      name: data.name.trim(),
+      mobile: String(data.mobile).trim(),
+      email: data.email ? String(data.email).trim() || null : null,
+      address: data.address ? String(data.address).trim() || null : null,
+      birthday: data.birthday || null,
+      anniversary: data.anniversary || null,
+      balance: safeFloat(data.balance).toString(),
+      gstin: data.gstin ? String(data.gstin).trim() || null : null,
+      notes: data.notes ? String(data.notes).slice(0, 500) || null : null,
     }).returning();
     res.status(201).json(mapCustomer(customer));
   } catch (err) {
@@ -111,10 +172,16 @@ router.get("/:id", async (req, res) => {
   try {
     const userId = req.user!.userId;
     const id = parseInt(req.params.id);
-    const [customer] = await db.select().from(customersTable).where(and(eq(customersTable.id, id), eq(customersTable.userId, userId)));
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    // Fetch customer + recent sales + pending repairs in parallel
+    const [[customer], recentSales, pendingRepairs] = await Promise.all([
+      db.select().from(customersTable).where(and(eq(customersTable.id, id), eq(customersTable.userId, userId))),
+      db.select().from(salesTable).where(and(eq(salesTable.customerId, id), eq(salesTable.userId, userId))).orderBy(desc(salesTable.saleDate)).limit(20),
+      db.select().from(repairJobsTable).where(and(eq(repairJobsTable.customerId, id), eq(repairJobsTable.status, "in_progress"), eq(repairJobsTable.userId, userId))).limit(10),
+    ]);
+
     if (!customer) return res.status(404).json({ error: "Not found" });
-    const recentSales = await db.select().from(salesTable).where(and(eq(salesTable.customerId, id), eq(salesTable.userId, userId))).orderBy(desc(salesTable.saleDate)).limit(10);
-    const pendingRepairs = await db.select().from(repairJobsTable).where(and(eq(repairJobsTable.customerId, id), eq(repairJobsTable.status, "in_progress"), eq(repairJobsTable.userId, userId)));
     res.json({
       customer: mapCustomer(customer),
       recentSales: recentSales.map(mapSale),
@@ -129,17 +196,25 @@ router.get("/:id", async (req, res) => {
 router.patch("/:id", async (req, res) => {
   try {
     const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
     const data = req.body;
     const updateData: Record<string, unknown> = {};
-    if (data.name !== undefined) updateData.name = data.name;
-    if (data.mobile !== undefined) updateData.mobile = data.mobile;
-    if (data.email !== undefined) updateData.email = data.email;
-    if (data.address !== undefined) updateData.address = data.address;
-    if (data.birthday !== undefined) updateData.birthday = data.birthday;
-    if (data.anniversary !== undefined) updateData.anniversary = data.anniversary;
-    if (data.gstin !== undefined) updateData.gstin = data.gstin;
-    if (data.notes !== undefined) updateData.notes = data.notes;
-    const [customer] = await db.update(customersTable).set(updateData).where(and(eq(customersTable.id, parseInt(req.params.id)), eq(customersTable.userId, userId))).returning();
+    if (data.name !== undefined) updateData.name = String(data.name).trim() || undefined;
+    if (data.mobile !== undefined) updateData.mobile = String(data.mobile).trim() || undefined;
+    if (data.email !== undefined) updateData.email = String(data.email).trim() || null;
+    if (data.address !== undefined) updateData.address = String(data.address).trim() || null;
+    if (data.birthday !== undefined) {
+      if (data.birthday && !parseMmDd(data.birthday)) return res.status(400).json({ error: "Birthday must be in MM-DD format" });
+      updateData.birthday = data.birthday || null;
+    }
+    if (data.anniversary !== undefined) {
+      if (data.anniversary && !parseMmDd(data.anniversary)) return res.status(400).json({ error: "Anniversary must be in MM-DD format" });
+      updateData.anniversary = data.anniversary || null;
+    }
+    if (data.gstin !== undefined) updateData.gstin = String(data.gstin).trim() || null;
+    if (data.notes !== undefined) updateData.notes = String(data.notes).slice(0, 500) || null;
+    const [customer] = await db.update(customersTable).set(updateData).where(and(eq(customersTable.id, id), eq(customersTable.userId, userId))).returning();
     if (!customer) return res.status(404).json({ error: "Not found" });
     res.json(mapCustomer(customer));
   } catch (err) {
@@ -151,50 +226,15 @@ router.patch("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const userId = req.user!.userId;
-    await db.delete(customersTable).where(and(eq(customersTable.id, parseInt(req.params.id)), eq(customersTable.userId, userId)));
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const result = await db.delete(customersTable).where(and(eq(customersTable.id, id), eq(customersTable.userId, userId))).returning({ id: customersTable.id });
+    if (result.length === 0) return res.status(404).json({ error: "Not found" });
     res.status(204).send();
   } catch (err) {
     req.log.error({ err }, "Failed to delete customer");
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
-function mapSale(s: typeof salesTable.$inferSelect) {
-  return {
-    id: s.id,
-    customerId: s.customerId,
-    customerName: s.customerName,
-    totalAmount: parseFloat(s.totalAmount),
-    gstAmount: parseFloat(s.gstAmount),
-    discountAmount: parseFloat(s.discountAmount),
-    exchangeGoldWeight: parseFloat(s.exchangeGoldWeight),
-    exchangeGoldValue: parseFloat(s.exchangeGoldValue),
-    paymentMode: s.paymentMode,
-    paymentStatus: s.paymentStatus,
-    invoiceNumber: s.invoiceNumber,
-    saleDate: s.saleDate.toISOString(),
-    notes: s.notes,
-    createdAt: s.createdAt.toISOString(),
-  };
-}
-
-function mapRepair(r: typeof repairJobsTable.$inferSelect) {
-  return {
-    id: r.id,
-    customerId: r.customerId,
-    customerName: r.customerName,
-    customerMobile: r.customerMobile,
-    itemDescription: r.itemDescription,
-    issue: r.issue,
-    estimatedCost: parseFloat(r.estimatedCost),
-    actualCost: r.actualCost ? parseFloat(r.actualCost) : null,
-    status: r.status,
-    receivedDate: r.receivedDate.toISOString(),
-    promisedDate: r.promisedDate.toISOString(),
-    deliveredDate: r.deliveredDate ? r.deliveredDate.toISOString() : null,
-    notes: r.notes,
-    createdAt: r.createdAt.toISOString(),
-  };
-}
 
 export default router;

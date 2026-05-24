@@ -1,4 +1,4 @@
-import { pgTable, serial, text, numeric, integer, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, numeric, integer, timestamp, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -14,7 +14,9 @@ export const karigarsTable = pgTable("karigars", {
   pendingOrders: integer("pending_orders").notNull().default(0),
   totalWagesPaid: numeric("total_wages_paid", { precision: 12, scale: 2 }).notNull().default("0"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => [
+  index("karigars_user_idx").on(t.userId),
+]);
 
 export const metalIssuesTable = pgTable("metal_issues", {
   id: serial("id").primaryKey(),
@@ -25,7 +27,10 @@ export const metalIssuesTable = pgTable("metal_issues", {
   purity: text("purity").notNull(),
   issueDate: timestamp("issue_date").defaultNow().notNull(),
   notes: text("notes"),
-});
+}, (t) => [
+  index("metal_issues_karigar_idx").on(t.karigarId),
+  index("metal_issues_user_idx").on(t.userId),
+]);
 
 export const metalReturnsTable = pgTable("metal_returns", {
   id: serial("id").primaryKey(),
@@ -37,7 +42,10 @@ export const metalReturnsTable = pgTable("metal_returns", {
   wastagePercent: numeric("wastage_percent", { precision: 5, scale: 2 }).notNull(),
   returnDate: timestamp("return_date").defaultNow().notNull(),
   notes: text("notes"),
-});
+}, (t) => [
+  index("metal_returns_karigar_idx").on(t.karigarId),
+  index("metal_returns_user_idx").on(t.userId),
+]);
 
 export const insertKarigarSchema = createInsertSchema(karigarsTable).omit({ id: true, createdAt: true, pendingGoldWeight: true, pendingSilverWeight: true, pendingOrders: true, totalWagesPaid: true });
 export const insertMetalIssueSchema = createInsertSchema(metalIssuesTable).omit({ id: true, issueDate: true });

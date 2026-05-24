@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 
 const UPI_VPA = "akshatnahata05@ibl";
-const AMOUNT = 2500;
+const AMOUNT = 2999;
 
 export default function PaymentPage() {
   const { user, logout } = useAuth();
@@ -89,10 +89,22 @@ export default function PaymentPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-            {/* Price */}
-            <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-center">
-              <div className="text-3xl font-bold text-amber-800">₹{AMOUNT.toLocaleString("en-IN")}</div>
-              <div className="text-sm text-amber-600 mt-1">per month · Unlimited access</div>
+            {/* Price options */}
+            <div className="space-y-2">
+              {[
+                { label: "Monthly", amount: "₹2,999", sub: "/month", highlight: true },
+                { label: "Quarterly", amount: "₹7,999", sub: "/quarter · save ₹998" },
+                { label: "Annual", amount: "₹29,999", sub: "/year · save ₹5,989" },
+              ].map(opt => (
+                <div key={opt.label} className={`rounded-xl border p-3 flex items-center justify-between ${opt.highlight ? "bg-amber-50 border-amber-200" : "bg-muted/30 border-border"}`}>
+                  <span className={`text-sm font-medium ${opt.highlight ? "text-amber-800" : "text-foreground"}`}>{opt.label}</span>
+                  <div className="text-right">
+                    <span className={`font-bold ${opt.highlight ? "text-amber-800" : "text-foreground"}`}>{opt.amount}</span>
+                    <span className="text-xs text-muted-foreground ml-1">{opt.sub}</span>
+                  </div>
+                </div>
+              ))}
+              <p className="text-xs text-muted-foreground text-center">All plans include every feature. Contact us to pay for a quarterly or annual plan.</p>
             </div>
 
             {/* UPI Payment Details */}
@@ -115,7 +127,7 @@ export default function PaymentPage() {
             <div className="space-y-2">
               <div className="text-sm font-semibold text-foreground">Steps:</div>
               <ol className="list-decimal list-inside space-y-1 text-sm text-muted-foreground">
-                <li>Open your UPI app and pay <strong className="text-foreground">₹{AMOUNT.toLocaleString("en-IN")}</strong> to <strong className="text-foreground font-mono">{UPI_VPA}</strong></li>
+                <li>Open your UPI app and pay your chosen plan amount to <strong className="text-foreground font-mono">{UPI_VPA}</strong></li>
                 <li>Copy the UTR / transaction reference from your payment app</li>
                 <li>Paste it below and submit</li>
                 <li>We'll verify and activate your account within 24 hours</li>

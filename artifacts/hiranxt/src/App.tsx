@@ -15,6 +15,7 @@ import Purchases from "@/pages/app/purchases";
 import Reports from "@/pages/app/reports";
 import Settings from "@/pages/app/settings";
 import Girvi from "@/pages/app/girvi";
+import Marketing from "@/pages/app/marketing";
 import LoginPage from "@/pages/auth/login";
 import RegisterPage from "@/pages/auth/register";
 import PaymentPage from "@/pages/auth/payment";
@@ -30,12 +31,21 @@ const queryClient = new QueryClient({
   },
 });
 
-/** Wraps a component — redirects to /login if not authenticated, /payment if trial expired */
+/** Returns true if the user's access has actually expired based on real dates */
+function isAccessExpired(user: { plan: string; trialEndsAt: string; subscriptionEndsAt: string | null }) {
+  const now = new Date();
+  if (user.plan === "expired") return true;
+  if (user.plan === "trial" && new Date(user.trialEndsAt) < now) return true;
+  if (user.plan === "active" && user.subscriptionEndsAt && new Date(user.subscriptionEndsAt) < now) return true;
+  return false;
+}
+
+/** Wraps a component — redirects to /login if not authenticated, /payment if access expired */
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
 
   if (!user) return <Redirect to="/login" />;
-  if (user.plan === "expired") return <Redirect to="/payment" />;
+  if (user.role !== "admin" && isAccessExpired(user)) return <Redirect to="/payment" />;
 
   return <>{children}</>;
 }
@@ -76,6 +86,7 @@ function Router() {
               <Route path="/app/reports" component={Reports} />
               <Route path="/app/settings" component={Settings} />
               <Route path="/app/girvi" component={Girvi} />
+              <Route path="/app/marketing" component={Marketing} />
               <Route component={Dashboard} />
             </Switch>
           </AppLayout>

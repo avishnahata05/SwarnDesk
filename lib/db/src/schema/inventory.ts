@@ -1,4 +1,4 @@
-import { pgTable, serial, text, numeric, integer, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, numeric, integer, timestamp, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -23,7 +23,13 @@ export const inventoryItemsTable = pgTable("inventory_items", {
   karigarName: text("karigar_name"),
   lowStockThreshold: integer("low_stock_threshold").notNull().default(2),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => [
+  index("inv_user_idx").on(t.userId),
+  index("inv_user_cat_idx").on(t.userId, t.category),
+  index("inv_user_branch_idx").on(t.userId, t.branch),
+  index("inv_barcode_idx").on(t.barcode),
+  index("inv_huid_idx").on(t.huid),
+]);
 
 export const insertInventoryItemSchema = createInsertSchema(inventoryItemsTable).omit({ id: true, createdAt: true });
 export type InsertInventoryItem = z.infer<typeof insertInventoryItemSchema>;

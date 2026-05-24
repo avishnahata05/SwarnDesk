@@ -453,7 +453,7 @@ export default function Dashboard() {
       {/* AI FAB */}
       <button
         onClick={() => setAiOpen(o => !o)}
-        className="fixed bottom-6 right-4 z-40 w-14 h-14 bg-primary rounded-2xl flex items-center justify-center shadow-lg hover:scale-105 hover:opacity-95 transition-all duration-200"
+        className="fixed bottom-6 right-4 z-40 w-14 h-14 bg-primary rounded-full flex items-center justify-center shadow-lg hover:scale-105 hover:opacity-95 transition-all duration-200"
         data-testid="button-ai-chat"
         title="Ask SwarnDesk AI"
       >

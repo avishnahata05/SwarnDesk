@@ -25,7 +25,11 @@ async function downloadGSTR1(month: number, year: number, toast: ReturnType<type
   try {
     const startDate = new Date(year, month - 1, 1).toISOString();
     const endDate = new Date(year, month, 0, 23, 59, 59).toISOString();
-    const res = await fetch(`/api/sales?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
+    const token = localStorage.getItem("swarndesk_token");
+    const res = await fetch(`/api/sales?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error("Failed to fetch sales data");
     const sales: Array<{
       invoiceNumber: string;
       saleDate: string;

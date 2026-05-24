@@ -34,9 +34,10 @@ router.post("/register", async (req, res) => {
       role: user.role,
       plan: user.plan,
       trialEndsAt: user.trialEndsAt.toISOString(),
+      subscriptionEndsAt: null,
       shopName: user.shopName,
     });
-    res.status(201).json({ token, user: { id: user.id, email: user.email, name: user.name, shopName: user.shopName, role: user.role, plan: user.plan, trialEndsAt: user.trialEndsAt } });
+    res.status(201).json({ token, user: { id: user.id, email: user.email, name: user.name, shopName: user.shopName, role: user.role, plan: user.plan, trialEndsAt: user.trialEndsAt, subscriptionEndsAt: null } });
   } catch (err) {
     req.log.error({ err }, "Register failed");
     res.status(500).json({ error: "Registration failed" });
@@ -51,9 +52,13 @@ router.post("/login", async (req, res) => {
     if (!user) return res.status(401).json({ error: "Invalid email or password" });
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) return res.status(401).json({ error: "Invalid email or password" });
-    // Refresh plan status
+    // Refresh plan status on login
     let plan = user.plan;
-    if (plan === "trial" && new Date(user.trialEndsAt) < new Date()) {
+    const now = new Date();
+    if (plan === "trial" && new Date(user.trialEndsAt) < now) {
+      plan = "expired";
+      await db.update(usersTable).set({ plan: "expired" }).where(eq(usersTable.id, user.id));
+    } else if (plan === "active" && user.subscriptionEndsAt && new Date(user.subscriptionEndsAt) < now) {
       plan = "expired";
       await db.update(usersTable).set({ plan: "expired" }).where(eq(usersTable.id, user.id));
     }
@@ -63,9 +68,10 @@ router.post("/login", async (req, res) => {
       role: user.role,
       plan,
       trialEndsAt: user.trialEndsAt.toISOString(),
+      subscriptionEndsAt: user.subscriptionEndsAt ? new Date(user.subscriptionEndsAt).toISOString() : null,
       shopName: user.shopName,
     });
-    res.json({ token, user: { id: user.id, email: user.email, name: user.name, shopName: user.shopName, role: user.role, plan, trialEndsAt: user.trialEndsAt } });
+    res.json({ token, user: { id: user.id, email: user.email, name: user.name, shopName: user.shopName, role: user.role, plan, trialEndsAt: user.trialEndsAt, subscriptionEndsAt: user.subscriptionEndsAt ?? null } });
   } catch (err) {
     req.log.error({ err }, "Login failed");
     res.status(500).json({ error: "Login failed" });
@@ -109,7 +115,7 @@ router.post("/payment-request", async (req, res) => {
     const [pr] = await db.insert(paymentRequestsTable).values({
       userId: parseInt(userId),
       utrNumber,
-      amount: 2500,
+      amount: 2999,
       status: "pending",
     }).returning();
     res.status(201).json(pr);

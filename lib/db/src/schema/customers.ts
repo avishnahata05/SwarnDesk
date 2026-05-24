@@ -1,4 +1,4 @@
-import { pgTable, serial, text, numeric, integer, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, numeric, integer, timestamp, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -17,7 +17,11 @@ export const customersTable = pgTable("customers", {
   gstin: text("gstin"),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => [
+  index("customers_user_idx").on(t.userId),
+  index("customers_mobile_idx").on(t.userId, t.mobile),
+  index("customers_name_idx").on(t.userId, t.name),
+]);
 
 export const insertCustomerSchema = createInsertSchema(customersTable).omit({ id: true, createdAt: true, totalPurchases: true, loyaltyPoints: true });
 export type InsertCustomer = z.infer<typeof insertCustomerSchema>;

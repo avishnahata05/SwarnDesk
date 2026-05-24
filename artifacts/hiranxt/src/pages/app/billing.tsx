@@ -25,8 +25,10 @@ interface CartItem {
   availableQty: number; // max allowed; Infinity for quick-entry items
   unitPrice: number;
   metalRate: number;
-  goldWeight: number;
+  grossWeight: number;
+  netWeight: number;
   makingCharges: number;
+  stoneCharges: number;
   discount: number;
 }
 
@@ -78,10 +80,11 @@ function openPrintWindow(params: {
     <tr>
       <td>${i + 1}</td>
       <td class="desc">${item.itemName}</td>
-      <td class="center">${item.goldWeight.toFixed(3)}g</td>
-      <td class="right">${fmt(item.metalRate)}</td>
-      <td class="right">${fmt(item.makingCharges)}</td>
       <td class="center">${item.quantity}</td>
+      <td class="right">${item.grossWeight.toFixed(3)}g</td>
+      <td class="right">${item.netWeight.toFixed(3)}g</td>
+      <td class="right">${fmt(item.makingCharges)}</td>
+      <td class="right">${item.stoneCharges > 0 ? fmt(item.stoneCharges) : "—"}</td>
       <td class="right">${fmt(item.unitPrice * item.quantity)}</td>
     </tr>
   `).join("");
@@ -220,10 +223,11 @@ ${isEstimate ? '<div class="watermark">ESTIMATE</div>' : ""}
       <tr>
         <th style="width:32px">#</th>
         <th>Description</th>
-        <th class="center">Weight</th>
-        <th class="right">Rate/g</th>
-        <th class="right">Making</th>
         <th class="center">Qty</th>
+        <th class="right">Gross Wt</th>
+        <th class="right">Net Wt</th>
+        <th class="right">Making</th>
+        <th class="right">Stone/Other</th>
         <th class="right">Amount</th>
       </tr>
     </thead>
@@ -327,7 +331,8 @@ export default function Billing() {
   const [quickName, setQuickName] = useState("");
   const [quickPurity, setQuickPurity] = useState("22K");
   const [quickWeight, setQuickWeight] = useState("");
-  const [quickMaking, setQuickMaking] = useState("");
+  const [quickMakingPct, setQuickMakingPct] = useState("10");
+  const [quickStoneCharges, setQuickStoneCharges] = useState("");
   const [quickQty, setQuickQty] = useState("1");
 
   const customerDropdownRef = useRef<HTMLDivElement>(null);
@@ -352,7 +357,7 @@ export default function Billing() {
   const { data: items } = useListInventoryItems({ ...(itemSearch ? { search: itemSearch } : {}) });
   const { data: customerDetail } = useGetCustomer(
     selectedCustomer?.id ?? 0,
-    { query: { enabled: !!(selectedCustomer?.id && selectedCustomer.id > 0) } }
+    { query: { enabled: !!(selectedCustomer?.id && selectedCustomer.id > 0), queryKey: [] as unknown[] } }
   );
   const createSale = useCreateSale();
   const createCustomer = useCreateCustomer();
@@ -362,10 +367,12 @@ export default function Billing() {
   const GST_RATE = 0.03;
 
   const quickGoldRate = goldRate22k;
-  const quickNetWeight = parseFloat(quickWeight || "0") * (PURITY_MULTIPLIER[quickPurity] ?? 1);
+  const quickGrossWeight = parseFloat(quickWeight || "0");
+  const quickNetWeight = quickGrossWeight * (PURITY_MULTIPLIER[quickPurity] ?? 1);
   const quickMetalValue = quickNetWeight * quickGoldRate;
-  const quickMakingVal = parseFloat(quickMaking || "0");
-  const quickUnitPrice = Math.round(quickMetalValue + quickMakingVal);
+  const quickMakingVal = Math.round(quickMetalValue * parseFloat(quickMakingPct || "0") / 100);
+  const quickStoneChargesVal = parseFloat(quickStoneCharges || "0");
+  const quickUnitPrice = Math.round(quickMetalValue + quickMakingVal + quickStoneChargesVal);
 
   const addQuickItemToCart = () => {
     if (!quickName || !quickWeight || parseFloat(quickWeight) <= 0) {
@@ -380,11 +387,13 @@ export default function Billing() {
       availableQty: Infinity,
       unitPrice: quickUnitPrice,
       metalRate: quickGoldRate,
-      goldWeight: parseFloat(quickWeight),
+      grossWeight: quickGrossWeight,
+      netWeight: quickNetWeight,
       makingCharges: quickMakingVal,
+      stoneCharges: quickStoneChargesVal,
       discount: 0,
     }]);
-    setQuickName(""); setQuickWeight(""); setQuickMaking(""); setQuickQty("1");
+    setQuickName(""); setQuickWeight(""); setQuickMakingPct("10"); setQuickStoneCharges(""); setQuickQty("1");
     toast({ title: "Added to cart" });
   };
 
@@ -394,7 +403,7 @@ export default function Billing() {
   const gstAmount = taxableBase * GST_RATE;
   const totalAmount = taxableBase + gstAmount;
 
-  const addToCart = (item: { id: number; name: string; metalRate: number; grossWeight: number; makingCharges: number; totalValue: number; quantity: number }) => {
+  const addToCart = (item: { id: number; name: string; metalRate: number; grossWeight: number; netWeight: number; makingCharges: number; stoneValue?: number | null; totalValue: number; quantity: number }) => {
     setCart(prev => {
       const existing = prev.find(c => c.inventoryItemId === item.id);
       if (existing) return prev.map(c => c.inventoryItemId === item.id ? { ...c, quantity: c.quantity + 1 } : c);
@@ -402,7 +411,8 @@ export default function Billing() {
         inventoryItemId: item.id, itemName: item.name, quantity: 1,
         availableQty: item.quantity,
         unitPrice: item.totalValue, metalRate: item.metalRate,
-        goldWeight: item.grossWeight, makingCharges: item.makingCharges, discount: 0,
+        grossWeight: item.grossWeight, netWeight: item.netWeight,
+        makingCharges: item.makingCharges, stoneCharges: item.stoneValue ?? 0, discount: 0,
       }];
     });
     setItemSearch("");
@@ -478,7 +488,7 @@ export default function Billing() {
         items: cart.map(c => ({
           inventoryItemId: c.inventoryItemId > 0 ? c.inventoryItemId : 0,
           quantity: c.quantity, unitPrice: c.unitPrice, metalRate: c.metalRate,
-          goldWeight: c.goldWeight, makingCharges: c.makingCharges, discount: c.discount,
+          goldWeight: c.grossWeight, makingCharges: c.makingCharges, discount: c.discount,
         })),
       }
     }, {
@@ -782,9 +792,13 @@ export default function Billing() {
                       <label className="text-xs text-muted-foreground mb-1 block">Qty</label>
                       <Input type="number" min="1" value={quickQty} onChange={e => setQuickQty(e.target.value)} data-testid="input-quick-qty" />
                     </div>
-                    <div className="col-span-2">
-                      <label className="text-xs text-muted-foreground mb-1 block">Making Charges (₹)</label>
-                      <Input type="number" placeholder="e.g. 500" value={quickMaking} onChange={e => setQuickMaking(e.target.value)} data-testid="input-quick-making" />
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Making (%)</label>
+                      <Input type="number" step="0.1" placeholder="e.g. 10" value={quickMakingPct} onChange={e => setQuickMakingPct(e.target.value)} data-testid="input-quick-making" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Stone/Other (₹)</label>
+                      <Input type="number" placeholder="e.g. 500" value={quickStoneCharges} onChange={e => setQuickStoneCharges(e.target.value)} data-testid="input-quick-stone" />
                     </div>
                     <div>
                       {parseFloat(quickWeight || "0") > 0 && (
@@ -792,6 +806,8 @@ export default function Billing() {
                           <div className="p-2.5 rounded-lg bg-primary/10 border border-primary/20 text-xs">
                             <div className="text-muted-foreground">Metal value</div>
                             <div className="font-semibold text-primary">{formatCurrency(quickMetalValue)}</div>
+                            <div className="text-muted-foreground mt-1">Making ({quickMakingPct}%)</div>
+                            <div className="font-semibold text-primary">{formatCurrency(quickMakingVal)}</div>
                             <div className="text-muted-foreground mt-1">Unit price</div>
                             <div className="font-bold text-primary text-sm">{formatCurrency(quickUnitPrice)}</div>
                           </div>
@@ -843,8 +859,11 @@ export default function Billing() {
                   <thead>
                     <tr className="border-b border-border text-muted-foreground">
                       <th className="px-4 py-2 text-left font-medium">Item</th>
+                      <th className="px-4 py-2 text-right font-medium hidden sm:table-cell">Gross Wt</th>
+                      <th className="px-4 py-2 text-right font-medium hidden md:table-cell">Net Wt</th>
+                      <th className="px-4 py-2 text-right font-medium hidden md:table-cell">Making</th>
+                      <th className="px-4 py-2 text-right font-medium hidden lg:table-cell">Stone</th>
                       <th className="px-4 py-2 text-center font-medium">Qty</th>
-                      <th className="px-4 py-2 text-right font-medium hidden sm:table-cell">Unit Price</th>
                       <th className="px-4 py-2 text-right font-medium">Total</th>
                       <th className="px-4 py-2 w-8"></th>
                     </tr>
@@ -856,6 +875,10 @@ export default function Billing() {
                           <div className="font-medium max-w-[150px] truncate">{item.itemName}</div>
                           {item.inventoryItemId < 0 && <Badge variant="outline" className="text-[9px] h-4 mt-0.5">Custom</Badge>}
                         </td>
+                        <td className="px-4 py-2.5 text-right text-xs text-muted-foreground hidden sm:table-cell">{item.grossWeight.toFixed(3)}g</td>
+                        <td className="px-4 py-2.5 text-right text-xs text-muted-foreground hidden md:table-cell">{item.netWeight.toFixed(3)}g</td>
+                        <td className="px-4 py-2.5 text-right text-xs text-muted-foreground hidden md:table-cell">{formatCurrency(item.makingCharges)}</td>
+                        <td className="px-4 py-2.5 text-right text-xs text-muted-foreground hidden lg:table-cell">{item.stoneCharges > 0 ? formatCurrency(item.stoneCharges) : "—"}</td>
                         <td className="px-4 py-2.5 text-center">
                           <div className="flex items-center justify-center gap-1.5">
                             <button onClick={() => setCart(prev => prev.map(c => c.inventoryItemId === item.inventoryItemId ? { ...c, quantity: Math.max(1, c.quantity - 1) } : c))} className="w-5 h-5 rounded bg-muted flex items-center justify-center hover:bg-primary hover:text-primary-foreground transition-colors">-</button>
@@ -873,7 +896,6 @@ export default function Billing() {
                             >+</button>
                           </div>
                         </td>
-                        <td className="px-4 py-2.5 text-right hidden sm:table-cell">{formatCurrency(item.unitPrice)}</td>
                         <td className="px-4 py-2.5 text-right font-semibold">{formatCurrency(item.unitPrice * item.quantity)}</td>
                         <td className="px-4 py-2.5">
                           <button onClick={() => removeFromCart(item.inventoryItemId)} className="text-muted-foreground hover:text-destructive transition-colors">
