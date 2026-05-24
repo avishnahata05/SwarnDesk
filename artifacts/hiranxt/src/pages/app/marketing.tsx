@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useListCustomers } from "@workspace/api-client-react";
+import { useListCustomers, useGetSettings } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -84,6 +84,7 @@ interface SendResult {
 export default function Marketing() {
   const { toast } = useToast();
   const { data: allCustomers, isLoading } = useListCustomers({});
+  const { data: settingsData } = useGetSettings();
 
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -91,20 +92,17 @@ export default function Marketing() {
   const [customMessage, setCustomMessage] = useState(TEMPLATES[0].body);
   const [shopName, setShopName] = useState("Our Jewellery Store");
   const [sending, setSending] = useState(false);
-  const [waEnabled, setWaEnabled] = useState<boolean | null>(null);
   const [results, setResults] = useState<SendResult[] | null>(null);
 
-  // Load WhatsApp config + shop name
+  // Derive WhatsApp API status from cached settings (null = still loading)
+  const waEnabled: boolean | null = settingsData === undefined
+    ? null
+    : ((settingsData as unknown as { whatsappApiEnabled?: boolean }).whatsappApiEnabled ?? false);
+
+  // Populate shop name once settings load
   useEffect(() => {
-    const token = localStorage.getItem("swarndesk_token");
-    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-    fetch("/api/whatsapp/config", { headers }).then(r => r.json()).then(d => {
-      setWaEnabled(d.whatsappApiEnabled ?? false);
-    }).catch(() => setWaEnabled(false));
-    fetch("/api/settings", { headers }).then(r => r.json()).then(d => {
-      if (d?.businessName) setShopName(d.businessName);
-    }).catch(() => {});
-  }, []);
+    if (settingsData?.businessName) setShopName(settingsData.businessName);
+  }, [settingsData]);
 
   const customers = (allCustomers ?? []).filter(c => c.mobile);
   const filtered = customers.filter(c => {
@@ -116,10 +114,17 @@ export default function Marketing() {
 
   const toggleAll = () => {
     if (allSelected) {
-      setSelectedIds(new Set());
+      // Remove only the filtered customers — preserve any selections outside the current filter
+      setSelectedIds(prev => {
+        const n = new Set(prev);
+        filtered.forEach(c => n.delete(c.id));
+        return n;
+      });
     } else {
-      setSelectedIds(new Set(filtered.map(c => c.id)));
+      // Add filtered customers to whatever is already selected
+      setSelectedIds(prev => new Set([...prev, ...filtered.map(c => c.id)]));
     }
+    setResults(null);
   };
 
   const toggleOne = (id: number) => {
@@ -128,6 +133,7 @@ export default function Marketing() {
       n.has(id) ? n.delete(id) : n.add(id);
       return n;
     });
+    setResults(null);
   };
 
   const applyTemplate = useCallback((t: Template) => {
@@ -153,7 +159,8 @@ export default function Marketing() {
       // Fallback: open WhatsApp links
       selectedCustomers.forEach(c => {
         const digits = c.mobile.replace(/\D/g, "");
-        window.open(`https://wa.me/91${digits}?text=${encodeURIComponent(buildMessage(c.name))}`, "_blank");
+        const fullMobile = digits.length === 10 ? `91${digits}` : digits;
+        window.open(`https://wa.me/${fullMobile}?text=${encodeURIComponent(buildMessage(c.name))}`, "_blank");
       });
       toast({ title: `Opened WhatsApp for ${selectedCustomers.length} customer(s)` });
       return;
@@ -172,8 +179,8 @@ export default function Marketing() {
         headers: getAuthHeaders(),
         body: JSON.stringify({ recipients }),
       });
-      const d = await r.json() as { sent: number; failed: number; results?: { mobile: string; success: boolean }[] };
-      if (!r.ok) throw new Error(d.failed ? "Some messages failed" : "Failed to send");
+      const d = await r.json() as { sent: number; failed: number; results?: { mobile: string; success: boolean }[]; error?: string };
+      if (!r.ok) throw new Error(d.error ?? "Failed to send");
 
       const resultMap = new Map((d.results ?? []).map(x => [x.mobile, x.success]));
       setResults(selectedCustomers.map(c => ({

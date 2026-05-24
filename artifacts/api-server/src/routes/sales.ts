@@ -45,7 +45,7 @@ function generateInvoiceNumber() {
   const now = new Date();
   const year = now.getFullYear().toString().slice(-2);
   const month = String(now.getMonth() + 1).padStart(2, "0");
-  const rand = Math.floor(Math.random() * 9000) + 1000;
+  const rand = Math.floor(Math.random() * 900000) + 100000;
   return `SD${year}${month}${rand}`;
 }
 
@@ -76,23 +76,35 @@ router.get("/stats/by-category", async (req, res) => {
 router.get("/stats/daily", async (req, res) => {
   try {
     const userId = req.user!.userId;
-    const stats = await db
-      .select({
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const [salesStats, profitStats] = await Promise.all([
+      db.select({
         date: sql<string>`DATE(${salesTable.saleDate})::text`,
         sales: sql<number>`sum(${salesTable.totalAmount})::numeric`,
       })
       .from(salesTable)
-      .where(and(
-        eq(salesTable.userId, userId),
-        gte(salesTable.saleDate, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000))
-      ))
+      .where(and(eq(salesTable.userId, userId), gte(salesTable.saleDate, cutoff)))
       .groupBy(sql`DATE(${salesTable.saleDate})`)
-      .orderBy(sql`DATE(${salesTable.saleDate})`);
-    res.json(stats.map(s => ({
+      .orderBy(sql`DATE(${salesTable.saleDate})`),
+
+      db.select({
+        date: sql<string>`DATE(${salesTable.saleDate})::text`,
+        profit: sql<number>`sum(${saleLineItemsTable.makingCharges})::numeric`,
+      })
+      .from(saleLineItemsTable)
+      .innerJoin(salesTable, and(eq(saleLineItemsTable.saleId, salesTable.id), eq(salesTable.userId, userId)))
+      .where(and(eq(saleLineItemsTable.userId, userId), gte(salesTable.saleDate, cutoff)))
+      .groupBy(sql`DATE(${salesTable.saleDate})`),
+    ]);
+
+    const profitByDate = new Map(profitStats.map(p => [p.date, parseFloat(String(p.profit)) || 0]));
+
+    res.json(salesStats.map(s => ({
       date: s.date,
       sales: parseFloat(String(s.sales)) || 0,
+      profit: profitByDate.get(s.date) ?? 0,
       purchases: 0,
-      profit: 0,
     })));
   } catch (err) {
     req.log.error({ err }, "Failed to get daily stats");

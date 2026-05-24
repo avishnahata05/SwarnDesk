@@ -38,7 +38,6 @@ export default function Settings() {
   const { data: currentRates } = useGetCurrentRates();
   const updateRates = useUpdateRates();
   const [rateForm, setRateForm] = useState({ gold22k: "", gold24k: "", gold18k: "", silver: "" });
-  const [ratesSaving, setRatesSaving] = useState(false);
 
   const [waConfig, setWaConfig] = useState<WaConfig>({ enabled: false, phoneNumberId: "", accessToken: "" });
   const [waSaving, setWaSaving] = useState(false);
@@ -67,37 +66,42 @@ export default function Settings() {
         gstRate: settings.gstRate,
         defaultBranch: settings.defaultBranch,
       });
-      setWaConfig({
+      setWaConfig(prev => ({
         enabled: (settings as unknown as { whatsappApiEnabled?: boolean }).whatsappApiEnabled ?? false,
         phoneNumberId: (settings as unknown as { whatsappPhoneNumberId?: string }).whatsappPhoneNumberId ?? "",
-        accessToken: (settings as unknown as { whatsappAccessToken?: string }).whatsappAccessToken ?? "",
-      });
+        accessToken: prev.accessToken, // never overwrite what the user typed; token is not returned by API
+      }));
     }
   }, [settings, reset]);
 
   const saveRates = () => {
     const payload: Record<string, number> = {};
-    if (rateForm.gold22k) payload.gold22k = parseFloat(rateForm.gold22k) / 10;
-    if (rateForm.gold24k) payload.gold24k = parseFloat(rateForm.gold24k) / 10;
-    if (rateForm.gold18k) payload.gold18k = parseFloat(rateForm.gold18k) / 10;
-    if (rateForm.silver) payload.silver = parseFloat(rateForm.silver) / 1000;
-    setRatesSaving(true);
+    const p22k = parseFloat(rateForm.gold22k);
+    const p24k = parseFloat(rateForm.gold24k);
+    const p18k = parseFloat(rateForm.gold18k);
+    const pSilver = parseFloat(rateForm.silver);
+    if (rateForm.gold22k && isFinite(p22k) && p22k > 0) payload.gold22k = p22k / 10;
+    if (rateForm.gold24k && isFinite(p24k) && p24k > 0) payload.gold24k = p24k / 10;
+    if (rateForm.gold18k && isFinite(p18k) && p18k > 0) payload.gold18k = p18k / 10;
+    if (rateForm.silver && isFinite(pSilver) && pSilver > 0) payload.silver = pSilver / 1000;
+    if (Object.keys(payload).length === 0) {
+      toast({ title: "Enter at least one valid rate", variant: "destructive" }); return;
+    }
     updateRates.mutate({ data: payload }, {
       onSuccess: (updated) => {
         localStorage.setItem("sd_gold22k", updated.gold22k.toString());
         localStorage.setItem("sd_silver", updated.silver.toString());
         queryClient.invalidateQueries({ queryKey: getGetCurrentRatesQueryKey() });
         toast({ title: "Metal rates updated successfully" });
-        setRatesSaving(false);
       },
-      onError: () => {
-        toast({ title: "Failed to update rates", variant: "destructive" });
-        setRatesSaving(false);
-      },
+      onError: () => toast({ title: "Failed to update rates", variant: "destructive" }),
     });
   };
 
   const onSubmit = (data: SettingsForm) => {
+    // Preserve existing branches and ensure the new default branch is included
+    const existingBranches = settings?.branches ?? [];
+    const updatedBranches = [...new Set([...existingBranches, data.defaultBranch])];
     updateSettings.mutate({
       data: {
         businessName: data.businessName,
@@ -107,7 +111,7 @@ export default function Settings() {
         email: data.email || null,
         gstRate: parseFloat(String(data.gstRate)),
         defaultBranch: data.defaultBranch,
-        branches: [data.defaultBranch],
+        branches: updatedBranches,
       }
     }, {
       onSuccess: () => {
@@ -366,9 +370,9 @@ export default function Settings() {
                 Last updated: {new Date(currentRates.updatedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
               </p>
             )}
-            <Button type="button" onClick={saveRates} disabled={ratesSaving} className="gap-2" data-testid="button-save-rates">
+            <Button type="button" onClick={saveRates} disabled={updateRates.isPending} className="gap-2" data-testid="button-save-rates">
               <Coins className="w-4 h-4" />
-              {ratesSaving ? "Saving..." : "Update Metal Rates"}
+              {updateRates.isPending ? "Saving..." : "Update Metal Rates"}
             </Button>
           </CardContent>
         </Card>
@@ -490,7 +494,9 @@ export default function Settings() {
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">
                 Permanent Access Token
-                {waConfig.accessToken && <span className="text-green-400 ml-2">● Saved</span>}
+                {(waConfig.accessToken || (settings as unknown as { hasAccessToken?: boolean }).hasAccessToken) && (
+                  <span className="text-green-400 ml-2">● Saved</span>
+                )}
               </label>
               <Input
                 type="password"

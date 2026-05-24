@@ -2,7 +2,7 @@ import { useState, useCallback } from "react";
 import { useBackClose } from "@/hooks/use-back-close";
 import { formatCurrency } from "@/lib/utils";
 import {
-  useListCustomers, useCreateCustomer, useDeleteCustomer, useGetUpcomingOccasions,
+  useListCustomers, useCreateCustomer, useGetUpcomingOccasions,
   useGetCustomer,
   getListCustomersQueryKey, getGetUpcomingOccasionsQueryKey
 } from "@workspace/api-client-react";
@@ -43,7 +43,6 @@ function CustomerLedger({ customerId, onClose }: { customerId: number; onClose: 
   if (!data) return null;
 
   const { customer, recentSales, pendingRepairs } = data;
-  const totalPaid = recentSales.filter(s => s.paymentStatus === "paid").reduce((a, s) => a + s.totalAmount, 0);
   const totalPending = recentSales.filter(s => s.paymentStatus !== "paid").reduce((a, s) => a + s.totalAmount, 0);
 
   return (
@@ -210,7 +209,6 @@ export default function Customers() {
   const { data: customers, isLoading } = useListCustomers({ ...(search ? { search } : {}) });
   const { data: occasions } = useGetUpcomingOccasions();
   const createCustomer = useCreateCustomer();
-  const deleteCustomer = useDeleteCustomer();
 
   const { register, handleSubmit, reset } = useForm<CustomerForm>();
 

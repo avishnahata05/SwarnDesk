@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import {
   AreaChart, Area, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 
 const PIE_COLORS = ["#16a34a", "#f59e0b", "#3b82f6", "#8b5cf6", "#ef4444"];
@@ -49,8 +49,8 @@ const statCards = [
     accent: "text-emerald-600",
   },
   {
-    label: "Today's Profit",
-    hint: "Net profit today",
+    label: "Making Charges",
+    hint: "Today's making charges collected",
     key: "todayProfit" as const,
     format: "currency",
     icon: TrendingUp,
@@ -205,6 +205,10 @@ export default function Dashboard() {
                   tickLine={false}
                   axisLine={false}
                   interval="preserveStartEnd"
+                  tickFormatter={(v: string) => {
+                    const d = new Date(v);
+                    return `${d.getDate()} ${d.toLocaleString("en-IN", { month: "short" })}`;
+                  }}
                 />
                 <YAxis
                   tick={{ fontSize: 10, fill: "#9ca3af", fontFamily: "Inter" }}
@@ -288,7 +292,10 @@ export default function Dashboard() {
                         <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
                         <span className="capitalize truncate text-foreground">{s.category}</span>
                       </div>
-                      <span className="text-muted-foreground ml-2 flex-shrink-0">{s.count} items</span>
+                      <div className="flex items-center gap-2 ml-2 flex-shrink-0">
+                        <span className="text-muted-foreground">{s.count} sold</span>
+                        <span className="font-medium text-foreground">{formatCurrency(s.value)}</span>
+                      </div>
                     </div>
                   ))}
                 </div>

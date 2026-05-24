@@ -19,7 +19,6 @@ const COLORS = ["#16a34a", "#d97706", "#2563eb", "#7c3aed", "#dc2626"];
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 const HSN_CODE = "7113";
-const GST_RATE = 0.03;
 
 async function downloadGSTR1(month: number, year: number, toast: ReturnType<typeof useToast>["toast"]) {
   try {
@@ -112,8 +111,11 @@ export default function Reports() {
 
   const handleExport = async () => {
     setExporting(true);
-    await downloadGSTR1(parseInt(gstrMonth), parseInt(gstrYear), toast);
-    setExporting(false);
+    try {
+      await downloadGSTR1(parseInt(gstrMonth), parseInt(gstrYear), toast);
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -299,7 +301,7 @@ export default function Reports() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {[2024, 2025, 2026].map(y => (
+                  {Array.from({ length: 4 }, (_, i) => now.getFullYear() - 2 + i).map(y => (
                     <SelectItem key={y} value={String(y)}>{y}</SelectItem>
                   ))}
                 </SelectContent>

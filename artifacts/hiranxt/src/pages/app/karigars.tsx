@@ -45,7 +45,8 @@ export default function Karigars() {
         toast({ title: "Karigar added" });
         setAddOpen(false);
         addForm.reset();
-      }
+      },
+      onError: () => toast({ title: "Failed to add karigar", variant: "destructive" }),
     });
   };
 
@@ -60,18 +61,25 @@ export default function Karigars() {
         toast({ title: "Metal issued to karigar" });
         setIssueOpen(null);
         issueForm.reset();
-      }
+      },
+      onError: () => toast({ title: "Failed to issue metal", variant: "destructive" }),
     });
   };
 
   const onReturn = (data: MetalReturnForm) => {
     if (!returnOpen) return;
+    const issuedW = parseFloat(String(data.issuedWeight));
+    const returnedW = parseFloat(String(data.returnedWeight));
+    if (isFinite(returnedW) && isFinite(issuedW) && returnedW > issuedW) {
+      toast({ title: "Returned weight cannot exceed issued weight", variant: "destructive" });
+      return;
+    }
     returnMetal.mutate({
       id: returnOpen,
       data: {
         metalType: data.metalType,
-        issuedWeight: parseFloat(String(data.issuedWeight)),
-        returnedWeight: parseFloat(String(data.returnedWeight)),
+        issuedWeight: issuedW,
+        returnedWeight: returnedW,
         wastagePercent: parseFloat(String(data.wastagePercent)),
         notes: data.notes || null
       }
@@ -81,7 +89,8 @@ export default function Karigars() {
         toast({ title: "Metal return recorded" });
         setReturnOpen(null);
         returnForm.reset();
-      }
+      },
+      onError: () => toast({ title: "Failed to record return", variant: "destructive" }),
     });
   };
 

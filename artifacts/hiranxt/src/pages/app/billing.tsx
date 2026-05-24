@@ -399,16 +399,17 @@ export default function Billing() {
     if (category === "platinum") return 3500;
     if (purity === "24K") return rates?.gold24k ?? 7900;
     if (purity === "18K") return rates?.gold18k ?? 5940;
+    if (purity === "14K") return Math.round((rates?.gold18k ?? 5940) * 14 / 18);
     return goldRate22k;
   };
   const GST_RATE = 0.03;
 
   const GOLD_PURITIES = ["24K", "22K", "18K", "14K"];
   const SILVER_PURITIES = ["999", "925"];
-  const quickMetalRate = quickMetal === "silver" ? silverRate : goldRate22k;
   const quickGrossWeight = parseFloat(quickWeight || "0");
-  const quickNetWeight = quickGrossWeight * (PURITY_MULTIPLIER[quickPurity] ?? 1);
-  const quickMetalValue = quickNetWeight * quickMetalRate;
+  const quickMetalRate = getLiveRate(quickMetal, quickPurity);
+  const quickNetWeight = quickGrossWeight;
+  const quickMetalValue = quickGrossWeight * quickMetalRate;
   const quickMakingVal = Math.round(quickMetalValue * parseFloat(quickMakingPct || "0") / 100);
   const quickStoneChargesVal = parseFloat(quickStoneCharges || "0");
   const quickUnitPrice = Math.round(quickMetalValue + quickMakingVal + quickStoneChargesVal);
@@ -442,9 +443,10 @@ export default function Billing() {
   const gstAmount = taxableBase * GST_RATE;
   const totalAmount = taxableBase + gstAmount;
 
-  const addToCart = (item: { id: number; name: string; category: string; purity: string; metalRate: number; grossWeight: number; netWeight: number; makingCharges: number; stoneValue?: number | null; totalValue: number; quantity: number }) => {
+  const addToCart = (item: { id: number; name: string; category: string; purity: string; metalRate: number; grossWeight: number; netWeight: number; stoneWeight: number; makingCharges: number; stoneValue?: number | null; totalValue: number; quantity: number }) => {
     const liveRate = getLiveRate(item.category, item.purity);
-    const liveMetalVal = item.netWeight * liveRate;
+    const pureMetalWeight = Math.max(0, item.netWeight - item.stoneWeight);
+    const liveMetalVal = pureMetalWeight * liveRate;
     const liveMakingAmt = Math.round(liveMetalVal * item.makingCharges / 100);
     const livePrice = Math.round(liveMetalVal + liveMakingAmt + (item.stoneValue ?? 0));
     setCart(prev => {
@@ -528,10 +530,11 @@ export default function Billing() {
         customerName: selectedCustomer?.name ?? "Walk-in Customer",
         totalAmount, gstAmount, discountAmount: discount,
         exchangeGoldWeight, exchangeGoldValue, paymentMode, paymentStatus,
-        paidAmount: paidNow !== "" ? parseFloat(paidNow) || 0 : totalAmount,
+        paidAmount: paymentStatus === "pending" ? 0 : (paidNow !== "" ? parseFloat(paidNow) || 0 : totalAmount),
         notes: null,
         items: cart.map(c => ({
           inventoryItemId: c.inventoryItemId > 0 ? c.inventoryItemId : 0,
+          itemName: c.itemName,
           quantity: c.quantity, unitPrice: c.unitPrice, metalRate: c.metalRate,
           goldWeight: c.grossWeight, makingCharges: c.makingCharges, discount: c.discount,
         })),
@@ -805,7 +808,7 @@ export default function Billing() {
                               <div className="text-xs text-muted-foreground">{item.category} · {item.purity} · {item.grossWeight}g</div>
                             </div>
                             <div className="text-right shrink-0">
-                              <div className="text-sm font-semibold text-primary">{formatCurrency(Math.round(item.netWeight * getLiveRate(item.category, item.purity) * (1 + item.makingCharges / 100) + (item.stoneValue ?? 0)))}</div>
+                              <div className="text-sm font-semibold text-primary">{formatCurrency(Math.round(Math.max(0, item.netWeight - item.stoneWeight) * getLiveRate(item.category, item.purity) * (1 + item.makingCharges / 100) + (item.stoneValue ?? 0)))}</div>
                               <div className="text-xs text-muted-foreground">Qty: {item.quantity}</div>
                             </div>
                           </div>

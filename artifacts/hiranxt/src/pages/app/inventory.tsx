@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { formatCurrency } from "@/lib/utils";
 import {
-  useListInventoryItems, useCreateInventoryItem, useDeleteInventoryItem,
+  useListInventoryItems, useCreateInventoryItem,
   useGetCurrentRates, useGetInventoryStatsByCategory, useGetSettings,
   getListInventoryItemsQueryKey
 } from "@workspace/api-client-react";
@@ -190,6 +190,7 @@ function ItemFormDialog({
     : cat === "platinum" ? 3500
     : pur === "24K" ? (rates?.gold24k ?? 7900)
     : pur === "18K" ? (rates?.gold18k ?? 5940)
+    : pur === "14K" ? Math.round((rates?.gold18k ?? 5940) * 14 / 18)
     : (rates?.gold22k ?? 7250);
   const metalValue = Math.max(0, netW - stoneW) * metalRate;
   const makingAmt = Math.round(metalValue * makingPct / 100);
@@ -421,7 +422,6 @@ export default function Inventory() {
   const { data: rates } = useGetCurrentRates();
   const { data: categoryStats } = useGetInventoryStatsByCategory();
   const createItem = useCreateInventoryItem();
-  const deleteItem = useDeleteInventoryItem();
   const { data: settings } = useGetSettings();
 
   // Cast to extended type
@@ -432,19 +432,16 @@ export default function Inventory() {
     if (category === "platinum") return 3500;
     if (purity === "24K") return rates?.gold24k ?? 7900;
     if (purity === "18K") return rates?.gold18k ?? 5940;
+    if (purity === "14K") return Math.round((rates?.gold18k ?? 5940) * 14 / 18);
     return rates?.gold22k ?? 7250;
   };
 
   const getLiveValue = (item: InventoryItem) => {
     const liveRate = getLiveRate(item.category, item.purity);
-    const metalVal = item.netWeight * liveRate;
+    // Subtract stone weight before applying metal rate — stones aren't gold
+    const pureMetalWeight = Math.max(0, item.netWeight - item.stoneWeight);
+    const metalVal = pureMetalWeight * liveRate;
     return Math.round(metalVal * (1 + item.makingCharges / 100) + (item.stoneValue ?? 0));
-  };
-
-  const metalRateMap: Record<string, number> = {
-    gold: rates?.gold22k ?? 7250, silver: rates?.silver ?? 95,
-    diamond: rates?.gold22k ?? 7250, kundan: rates?.gold22k ?? 7250,
-    platinum: 3500, antique: rates?.gold22k ?? 7250,
   };
 
   // Focus scan input when scan mode activates
@@ -736,15 +733,21 @@ export default function Inventory() {
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           if (!window.confirm(`Delete "${item.name}"? This cannot be undone.`)) return;
-                          deleteItem.mutate({ id: item.id }, {
-                            onSuccess: () => {
-                              queryClient.invalidateQueries({ queryKey: getListInventoryItemsQueryKey() });
-                              toast({ title: "Item deleted" });
-                            },
-                            onError: () => toast({ title: "Failed to delete item", variant: "destructive" }),
-                          });
+                          try {
+                            const r = await fetch(`/api/inventory/${item.id}`, { method: "DELETE", headers: getAuthHeaders() });
+                            if (r.status === 409) {
+                              const err = await r.json().catch(() => ({}));
+                              toast({ title: err.error ?? "Cannot delete this item", variant: "destructive" });
+                              return;
+                            }
+                            if (!r.ok) throw new Error("Failed to delete");
+                            queryClient.invalidateQueries({ queryKey: getListInventoryItemsQueryKey() });
+                            toast({ title: "Item deleted" });
+                          } catch {
+                            toast({ title: "Failed to delete item", variant: "destructive" });
+                          }
                         }}
                         className="text-muted-foreground hover:text-destructive transition-colors"
                         data-testid={`button-delete-${item.id}`} title="Delete item"
@@ -760,7 +763,7 @@ export default function Inventory() {
         </div>
         {items.length > 0 && (
           <div className="px-4 py-2 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
-            <span>{items.length} items · Total value: <strong className="text-foreground">{formatCurrency(items.reduce((s, i) => s + i.totalValue * i.quantity, 0))}</strong></span>
+            <span>{items.length} items · Total live value: <strong className="text-foreground">{formatCurrency(items.reduce((s, i) => s + getLiveValue(i) * i.quantity, 0))}</strong></span>
             <button onClick={handleExportCsv} className="flex items-center gap-1 hover:text-primary transition-colors">
               <Download className="w-3 h-3" />Export CSV
             </button>

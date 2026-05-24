@@ -19,7 +19,7 @@ function mapSettings(s: typeof businessSettingsTable.$inferSelect) {
     branches: s.branches.split(",").map(b => b.trim()).filter(Boolean),
     whatsappApiEnabled: s.whatsappApiEnabled,
     whatsappPhoneNumberId: s.whatsappPhoneNumberId ?? "",
-    whatsappAccessToken: s.whatsappAccessToken ?? "",
+    hasAccessToken: !!(s.whatsappAccessToken),
     updatedAt: s.updatedAt.toISOString(),
   };
 }
@@ -69,7 +69,11 @@ router.put("/", async (req, res) => {
     if (data.mobile !== undefined) updateData.mobile = data.mobile;
     if (data.email !== undefined) updateData.email = data.email;
     if (data.logo !== undefined) updateData.logo = data.logo;
-    if (data.gstRate !== undefined) updateData.gstRate = data.gstRate.toString();
+    if (data.gstRate !== undefined) {
+      const gstRate = parseFloat(String(data.gstRate));
+      if (!isFinite(gstRate) || gstRate < 0) return res.status(400).json({ error: "GST rate must be a non-negative number" });
+      updateData.gstRate = gstRate.toString();
+    }
     if (data.defaultBranch !== undefined) updateData.defaultBranch = data.defaultBranch;
     if (data.branches !== undefined) updateData.branches = Array.isArray(data.branches) ? data.branches.join(",") : data.branches;
     if (data.whatsappApiEnabled !== undefined) updateData.whatsappApiEnabled = data.whatsappApiEnabled;

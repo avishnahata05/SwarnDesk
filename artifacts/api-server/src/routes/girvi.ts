@@ -406,33 +406,11 @@ router.post("/:id/collect-interest", async (req, res) => {
     if (paymentType === "auto" && amt > outstandingInterest) {
       // Smart allocation: settle interest first, remainder reduces principal
       const interestPortion = Math.min(amt, outstandingInterest);
-      const principalPortion = amt - interestPortion;
+      // Cap principal portion at current principal to prevent overpayment
+      const principalPortion = Math.min(amt - interestPortion, currentPrincipal);
       const newPrincipalPaid = safeFloat((loan as any).principalPaid ?? "0") + principalPortion;
       const remainingPrincipal = Math.max(0, safeFloat(loan.loanAmount) - newPrincipalPaid);
       const newTotalInterestCollected = safeFloat(loan.totalInterestCollected) + interestPortion;
-
-      await db.transaction(async tx => {
-        // Payment record: interest portion (if any)
-        if (interestPortion > 0) {
-          await tx.insert(girviPaymentsTable).values({
-            userId, loanId: id, loanNumber: loan.loanNumber,
-            customerName: loan.customerName,
-            amount: interestPortion.toFixed(2),
-            paymentType: "interest",
-            paymentDate: now,
-            notes: resolvedNotes ? `${resolvedNotes} [auto: interest portion]` : "Auto: interest portion",
-          });
-        }
-        // Payment record: principal portion
-        await tx.insert(girviPaymentsTable).values({
-          userId, loanId: id, loanNumber: loan.loanNumber,
-          customerName: loan.customerName,
-          amount: principalPortion.toFixed(2),
-          paymentType: "principal",
-          paymentDate: now,
-          notes: resolvedNotes ? `${resolvedNotes} [auto: principal portion]` : "Auto: principal portion",
-        });
-      });
 
       const loanUpdates: Record<string, unknown> = {
         totalInterestCollected: newTotalInterestCollected.toFixed(2),
@@ -450,27 +428,51 @@ router.post("/:id/collect-interest", async (req, res) => {
         loanUpdates.redeemedAmount = amt.toFixed(2);
       }
 
-      [updated] = await db.update(girviLoansTable)
-        .set(loanUpdates as Partial<typeof girviLoansTable.$inferInsert>)
-        .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
-        .returning();
+      // Single atomic transaction: payments + loan update together
+      updated = await db.transaction(async tx => {
+        if (interestPortion > 0) {
+          await tx.insert(girviPaymentsTable).values({
+            userId, loanId: id, loanNumber: loan.loanNumber,
+            customerName: loan.customerName,
+            amount: interestPortion.toFixed(2),
+            paymentType: "interest",
+            paymentDate: now,
+            notes: resolvedNotes ? `${resolvedNotes} [auto: interest portion]` : "Auto: interest portion",
+          });
+        }
+        await tx.insert(girviPaymentsTable).values({
+          userId, loanId: id, loanNumber: loan.loanNumber,
+          customerName: loan.customerName,
+          amount: principalPortion.toFixed(2),
+          paymentType: "principal",
+          paymentDate: now,
+          notes: resolvedNotes ? `${resolvedNotes} [auto: principal portion]` : "Auto: principal portion",
+        });
+        const [u] = await tx.update(girviLoansTable)
+          .set(loanUpdates as Partial<typeof girviLoansTable.$inferInsert>)
+          .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
+          .returning();
+        return u;
+      });
 
     } else {
       // Interest-only or penalty payment — simple accumulation, no principal/clock change
       const resolvedType = paymentType === "penalty" ? "penalty" : "interest";
-      await db.insert(girviPaymentsTable).values({
-        userId, loanId: id, loanNumber: loan.loanNumber,
-        customerName: loan.customerName,
-        amount: amt.toFixed(2),
-        paymentType: resolvedType,
-        paymentDate: now,
-        notes: resolvedNotes,
+      updated = await db.transaction(async tx => {
+        await tx.insert(girviPaymentsTable).values({
+          userId, loanId: id, loanNumber: loan.loanNumber,
+          customerName: loan.customerName,
+          amount: amt.toFixed(2),
+          paymentType: resolvedType,
+          paymentDate: now,
+          notes: resolvedNotes,
+        });
+        const [u] = await tx.update(girviLoansTable)
+          .set({ totalInterestCollected: sql`COALESCE(${girviLoansTable.totalInterestCollected}, 0) + ${amt.toFixed(2)}::numeric` })
+          .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
+          .returning();
+        return u;
       });
-
-      [updated] = await db.update(girviLoansTable)
-        .set({ totalInterestCollected: sql`COALESCE(${girviLoansTable.totalInterestCollected}, 0) + ${amt.toFixed(2)}::numeric` })
-        .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
-        .returning();
     }
 
     res.json(mapLoan(updated));
@@ -574,17 +576,25 @@ router.patch("/:id", async (req, res) => {
         return res.status(400).json({ error: "Only active/extended loans can be redeemed" });
       }
       const { total: accruedInterest } = calcAccruedInterest(loan, now);
-      const outstanding = Math.max(0, accruedInterest - safeFloat(loan.totalInterestCollected));
+      const interestBaseline = safeFloat((loan as any).interestBaseline ?? "0");
+      const collectedSinceReset = Math.max(0, safeFloat(loan.totalInterestCollected) - interestBaseline);
+      const outstanding = Math.max(0, accruedInterest - collectedSinceReset);
+      const principalPaid = safeFloat((loan as any).principalPaid ?? "0");
+      const currentPrincipal = Math.max(0, safeFloat(loan.loanAmount) - principalPaid);
       updates.status = "redeemed";
       updates.redeemedDate = now;
-      updates.redeemedAmount = (safeFloat(loan.loanAmount) + outstanding).toString();
+      updates.redeemedAmount = (currentPrincipal + outstanding).toString();
     } else if (data.status === "forfeited") {
       if (loan.status !== "active" && loan.status !== "extended") {
         return res.status(400).json({ error: "Only active/extended loans can be forfeited" });
       }
       const { total: accruedInterest } = calcAccruedInterest(loan, now);
-      const outstanding = Math.max(0, accruedInterest - safeFloat(loan.totalInterestCollected));
-      const totalDue = safeFloat(loan.loanAmount) + outstanding;
+      const interestBaseline = safeFloat((loan as any).interestBaseline ?? "0");
+      const collectedSinceReset = Math.max(0, safeFloat(loan.totalInterestCollected) - interestBaseline);
+      const outstanding = Math.max(0, accruedInterest - collectedSinceReset);
+      const principalPaid = safeFloat((loan as any).principalPaid ?? "0");
+      const currentPrincipal = Math.max(0, safeFloat(loan.loanAmount) - principalPaid);
+      const totalDue = currentPrincipal + outstanding;
       const goldSaleValue = safeFloat(data.goldSaleValue, safeFloat(loan.estimatedValue));
       if (goldSaleValue < 0) return res.status(400).json({ error: "Gold sale value cannot be negative" });
       const lossAmount = Math.max(0, totalDue - goldSaleValue);

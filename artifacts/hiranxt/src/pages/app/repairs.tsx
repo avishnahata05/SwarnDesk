@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import {
-  useListRepairs, useCreateRepair, useUpdateRepair,
+  useListRepairs, useCreateRepair, useUpdateRepair, useGetSettings,
   getListRepairsQueryKey
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -42,6 +42,7 @@ export default function Repairs() {
   const { toast } = useToast();
 
   const { data: repairs, isLoading } = useListRepairs();
+  const { data: settings } = useGetSettings();
   const createRepair = useCreateRepair();
   const updateRepair = useUpdateRepair();
 
@@ -95,8 +96,12 @@ export default function Repairs() {
   };
 
   const sendWhatsAppUpdate = (repair: NonNullable<typeof repairs>[number]) => {
-    const msg = `Hello ${repair.customerName}! Your repair job (${repair.itemDescription}) is now "${STATUS_LABELS[repair.status as Status]}". Estimated cost: ${formatCurrency(repair.estimatedCost)}. Contact us at +91-99999-99999.`;
-    window.open(`https://wa.me/91${repair.customerMobile.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`, "_blank");
+    const shopMobile = settings?.mobile ?? "";
+    const contactLine = shopMobile ? ` Contact us at ${shopMobile}.` : "";
+    const msg = `Hello ${repair.customerName}! Your repair job (${repair.itemDescription}) is now "${STATUS_LABELS[repair.status as Status]}". Estimated cost: ${formatCurrency(repair.estimatedCost)}.${contactLine}`;
+    const digits = repair.customerMobile.replace(/\D/g, "");
+    const fullMobile = digits.length === 10 ? `91${digits}` : digits;
+    window.open(`https://wa.me/${fullMobile}?text=${encodeURIComponent(msg)}`, "_blank");
   };
 
   // Group by status for pipeline view
@@ -125,6 +130,10 @@ export default function Repairs() {
           </div>
         ))}
       </div>
+
+      {isLoading && (
+        <div className="text-muted-foreground text-sm py-8 text-center">Loading repairs...</div>
+      )}
 
       {/* Kanban columns */}
       <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">

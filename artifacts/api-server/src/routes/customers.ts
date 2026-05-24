@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { customersTable, salesTable, repairJobsTable } from "@workspace/db";
-import { eq, ilike, and, or, desc } from "drizzle-orm";
+import { eq, ilike, and, or, desc, inArray } from "drizzle-orm";
 
 const router = Router();
 
@@ -116,17 +116,11 @@ router.get("/", async (req, res) => {
     const userId = req.user!.userId;
     const { search } = req.query as Record<string, string>;
     const baseCondition = eq(customersTable.userId, userId);
-    const customers = search
-      ? await db.select().from(customersTable).where(
-          and(
-            baseCondition,
-            or(
-              ilike(customersTable.name, `%${search.replace(/[%_\\]/g, "\\$&")}%`),
-              ilike(customersTable.mobile, `%${search.replace(/[%_\\]/g, "\\$&")}%`)
-            )
-          )
-        )
-      : await db.select().from(customersTable).where(baseCondition);
+    const escaped = search ? search.replace(/[%_\\]/g, "\\$&") : "";
+    const where = search
+      ? and(baseCondition, or(ilike(customersTable.name, `%${escaped}%`), ilike(customersTable.mobile, `%${escaped}%`)))
+      : baseCondition;
+    const customers = await db.select().from(customersTable).where(where).orderBy(customersTable.name);
     res.json(customers.map(mapCustomer));
   } catch (err) {
     req.log.error({ err }, "Failed to list customers");
@@ -178,7 +172,7 @@ router.get("/:id", async (req, res) => {
     const [[customer], recentSales, pendingRepairs] = await Promise.all([
       db.select().from(customersTable).where(and(eq(customersTable.id, id), eq(customersTable.userId, userId))),
       db.select().from(salesTable).where(and(eq(salesTable.customerId, id), eq(salesTable.userId, userId))).orderBy(desc(salesTable.saleDate)).limit(20),
-      db.select().from(repairJobsTable).where(and(eq(repairJobsTable.customerId, id), eq(repairJobsTable.status, "in_progress"), eq(repairJobsTable.userId, userId))).limit(10),
+      db.select().from(repairJobsTable).where(and(eq(repairJobsTable.customerId, id), inArray(repairJobsTable.status, ["received", "in_progress", "ready"]), eq(repairJobsTable.userId, userId))).orderBy(repairJobsTable.promisedDate).limit(10),
     ]);
 
     if (!customer) return res.status(404).json({ error: "Not found" });
@@ -200,8 +194,16 @@ router.patch("/:id", async (req, res) => {
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
     const data = req.body;
     const updateData: Record<string, unknown> = {};
-    if (data.name !== undefined) updateData.name = String(data.name).trim() || undefined;
-    if (data.mobile !== undefined) updateData.mobile = String(data.mobile).trim() || undefined;
+    if (data.name !== undefined) {
+      const trimmedName = String(data.name).trim();
+      if (!trimmedName) return res.status(400).json({ error: "Name cannot be empty" });
+      updateData.name = trimmedName;
+    }
+    if (data.mobile !== undefined) {
+      const trimmedMobile = String(data.mobile).trim();
+      if (!trimmedMobile) return res.status(400).json({ error: "Mobile cannot be empty" });
+      updateData.mobile = trimmedMobile;
+    }
     if (data.email !== undefined) updateData.email = String(data.email).trim() || null;
     if (data.address !== undefined) updateData.address = String(data.address).trim() || null;
     if (data.birthday !== undefined) {

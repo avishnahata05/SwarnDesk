@@ -37,6 +37,32 @@ function calcDaysElapsed(startDate: string) {
   return Math.floor((Date.now() - new Date(startDate).getTime()) / 86400000);
 }
 
+// ─── Live rate helpers ────────────────────────────────────────────────────────
+
+type Rates = { gold22k: number; gold24k: number; gold18k: number; silver: number };
+
+function getLiveGirviRate(metalType: string, purity: string, rates: Rates): number {
+  if (metalType === "silver") return rates.silver;
+  if (purity === "24K") return rates.gold24k;
+  if (purity === "18K") return rates.gold18k;
+  if (purity === "14K") return Math.round(rates.gold18k * 14 / 18);
+  return rates.gold22k; // 22K default
+}
+
+// Computes today's estimated market value using current gold/silver rates.
+// Uses per-item weights/purities if items are loaded, otherwise uses loan aggregate.
+function computeLiveEstValue(
+  loan: { metalType: string; purity: string; netWeight: number },
+  items: LoanItem[] | undefined,
+  rates: Rates | undefined,
+): number | null {
+  if (!rates) return null;
+  if (items && items.length > 0) {
+    return Math.round(items.reduce((s, it) => s + it.netWeight * getLiveGirviRate(it.metalType, it.purity, rates), 0));
+  }
+  return Math.round(loan.netWeight * getLiveGirviRate(loan.metalType, loan.purity, rates));
+}
+
 // ─── Print helpers ────────────────────────────────────────────────────────────
 
 function printInterestReceipt(
@@ -92,7 +118,7 @@ ${loan.itemDescription ? `<div class="row"><span class="label">Items</span><span
   <div class="amount-label">${typeLabel[payment.paymentType] ?? "Amount Received"}</div>
   <div class="amount-value">${fmt(payment.amount)}</div>
 </div>
-<div class="row"><span class="label">Principal (Remaining)</span><span class="value">${fmt(loan.loanAmount)}</span></div>
+<div class="row"><span class="label">Principal (Remaining)</span><span class="value">${fmt(loan.currentPrincipal)}</span></div>
 <div class="row"><span class="label">Total Collected So Far</span><span class="value">${fmt(loan.totalInterestCollected)}</span></div>
 ${payment.notes ? `<div style="margin-top:8px;padding:6px;background:#f8f9fa;border-radius:4px;font-size:11px;color:#555">Note: ${payment.notes}</div>` : ""}
 <div class="sig-row">
@@ -106,10 +132,10 @@ ${payment.notes ? `<div style="margin-top:8px;padding:6px;background:#f8f9fa;bor
   if (w) { w.document.write(html); w.document.close(); }
 }
 
-function openGirviVoucher(loan: Loan, shopName: string, shopAddress: string, shopMobile: string, items?: LoanItem[]) {
+function openGirviVoucher(loan: Loan, shopName: string, shopAddress: string, shopMobile: string, items?: LoanItem[], rates?: Rates) {
   const fmt = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-  const periodDays = loan.interestPeriod === "weekly" ? 7 : loan.interestPeriod === "yearly" ? 365 : 30;
+  const periodDays = loan.interestPeriod === "daily" ? 1 : loan.interestPeriod === "weekly" ? 7 : loan.interestPeriod === "yearly" ? 365 : 30;
   const interest3m = Math.round(loan.loanAmount * (loan.interestRate / 100) * (90 / periodDays));
   const interest6m = Math.round(loan.loanAmount * (loan.interestRate / 100) * (180 / periodDays));
 
@@ -171,7 +197,8 @@ body{font-family:'Segoe UI',Arial,sans-serif;color:#111;font-size:12px;backgroun
     <div class="section-title">Collateral Details</div>
     <div class="field"><span class="field-label">Total Gross Wt</span><span class="field-value">${loan.grossWeight.toFixed(3)} g</span></div>
     <div class="field"><span class="field-label">Total Net Wt</span><span class="field-value">${loan.netWeight.toFixed(3)} g</span></div>
-    <div class="field"><span class="field-label">Est. Market Value</span><span class="field-value">${fmt(loan.estimatedValue)}</span></div>
+    <div class="field"><span class="field-label">Est. Value (at pledge)</span><span class="field-value">${fmt(loan.estimatedValue)}</span></div>
+    ${rates ? `<div class="field"><span class="field-label">Live Market Value</span><span class="field-value" style="color:#15803d">${fmt(computeLiveEstValue(loan, items, rates) ?? loan.estimatedValue)}</span></div>` : ""}
     ${loan.itemDescription ? `<div class="field" style="margin-top:4px"><span class="field-label">Items</span><span class="field-value" style="max-width:65%;text-align:right;word-break:break-word;font-size:11px">${loan.itemDescription}</span></div>` : ""}
   </div>
 </div>
@@ -526,7 +553,9 @@ export default function Girvi() {
       ? `is OVERDUE by ${Math.abs(loan.daysRemaining)} days`
       : `is due in ${loan.daysRemaining} days`;
     const msg = `Namaskar ${loan.customerName} ji,\n\nYour Girvi loan ${loan.loanNumber} ${dueText}.\n\nPrincipal: ${formatCurrency(loan.currentPrincipal)} | Interest due: ${formatCurrency(loan.outstandingInterest)} | Total due: ${formatCurrency(loan.totalDue)}\n\nKindly visit our store to redeem your ${loan.metalType} (${loan.purity}) at your earliest convenience.\n\n— ${shopName}`;
-    window.open(`https://wa.me/91${loan.customerMobile.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`, "_blank");
+    const digits = loan.customerMobile.replace(/\D/g, "");
+    const fullMobile = digits.length === 10 ? `91${digits}` : digits;
+    window.open(`https://wa.me/${fullMobile}?text=${encodeURIComponent(msg)}`, "_blank");
   };
 
   const sendBulkOverdueReminders = () => {
@@ -702,6 +731,7 @@ export default function Girvi() {
                   expanded={expandedId === loan.id}
                   payments={loanPayments[loan.id]}
                   items={loanItems[loan.id]}
+                  rates={rates}
                   calendarMode={calendarMode}
                   formatDateDisplay={formatDateDisplay}
                   shopName={shopName}
@@ -721,7 +751,10 @@ export default function Girvi() {
                       const d = new Date(); d.setDate(d.getDate() + 90);
                       setRenewNewDueDate(d.toISOString().split("T")[0]);
                     }
-                    if (type === "forfeit") setGoldSaleValue(String(Math.round(loan.estimatedValue)));
+                    if (type === "forfeit") {
+                      const liveVal = computeLiveEstValue(loan, loanItems[loan.id], rates);
+                      setGoldSaleValue(String(Math.round(liveVal ?? loan.estimatedValue)));
+                    }
                   }}
                   onWaReminder={sendWaReminder}
                 />
@@ -945,7 +978,7 @@ export default function Girvi() {
 // ─── Loan row component ───────────────────────────────────────────────────────
 
 function LoanRow({
-  loan, expanded, payments, items, calendarMode, formatDateDisplay,
+  loan, expanded, payments, items, rates, calendarMode, formatDateDisplay,
   shopName, shopAddress, shopMobile,
   onExpand, onAction, onWaReminder,
 }: {
@@ -953,6 +986,7 @@ function LoanRow({
   expanded: boolean;
   payments?: Payment[];
   items?: LoanItem[];
+  rates?: Rates;
   calendarMode: "en" | "hi";
   formatDateDisplay: (iso: string) => string;
   shopName: string;
@@ -964,6 +998,7 @@ function LoanRow({
 }) {
   const isActive = loan.status === "active" || loan.status === "extended";
   const paymentTypeLabel: Record<string, string> = { interest: "Byaj", renewal: "Renewal", penalty: "Penalty", principal: "Principal" };
+  const liveEstValue = computeLiveEstValue(loan, items, rates);
 
   return (
     <div className={`px-3 md:px-4 py-3 ${loan.isOverdue ? "bg-red-50/50 dark:bg-red-950/10" : ""}`}>
@@ -980,13 +1015,13 @@ function LoanRow({
               {loan.isOverdue ? "OVERDUE" : loan.status.toUpperCase()}
             </Badge>
             {loan.isOverdue && <Flame className="w-3.5 h-3.5 text-orange-500" />}
-            {loan.estimatedValue > 0 && isActive && (
+            {isActive && (liveEstValue ?? loan.estimatedValue) > 0 && (
               <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
-                loan.loanAmount / loan.estimatedValue > 0.8 ? "bg-red-100 text-red-700" :
-                loan.loanAmount / loan.estimatedValue > 0.6 ? "bg-amber-100 text-amber-700" :
+                loan.currentPrincipal / (liveEstValue ?? loan.estimatedValue) > 0.8 ? "bg-red-100 text-red-700" :
+                loan.currentPrincipal / (liveEstValue ?? loan.estimatedValue) > 0.6 ? "bg-amber-100 text-amber-700" :
                 "bg-green-100 text-green-700"
               }`}>
-                LTV {((loan.loanAmount / loan.estimatedValue) * 100).toFixed(0)}%
+                LTV {((loan.currentPrincipal / (liveEstValue ?? loan.estimatedValue)) * 100).toFixed(0)}%
               </span>
             )}
           </div>
@@ -1001,7 +1036,7 @@ function LoanRow({
         <div className="text-right flex-shrink-0">
           <div className="text-sm font-bold text-primary">{formatCurrency(loan.totalDue)}</div>
           <div className="text-xs text-muted-foreground hidden sm:block">
-            {formatCurrency(loan.loanAmount)} + {formatCurrency(loan.outstandingInterest)} int.
+            {formatCurrency(loan.currentPrincipal)} + {formatCurrency(loan.outstandingInterest)} int.
           </div>
           {loan.totalInterestCollected > 0 && (
             <div className="text-[10px] text-emerald-600">✓ {formatCurrency(loan.totalInterestCollected)} coll.</div>
@@ -1022,15 +1057,27 @@ function LoanRow({
               <div className="font-medium">{loan.metalType.toUpperCase()} {loan.purity}</div>
               <div>Gross: {loan.grossWeight.toFixed(3)}g</div>
               <div>Net: {loan.netWeight.toFixed(3)}g</div>
-              <div>Est. Value: {formatCurrency(loan.estimatedValue)}</div>
+              <div className="text-muted-foreground">At pledge: {formatCurrency(loan.estimatedValue)}</div>
+              {liveEstValue !== null && (
+                <div className={`font-medium ${liveEstValue < loan.estimatedValue ? "text-orange-600" : "text-emerald-600"}`}>
+                  Live rate: {formatCurrency(liveEstValue)}
+                  {liveEstValue !== loan.estimatedValue && (
+                    <span className="text-[10px] ml-1">({liveEstValue > loan.estimatedValue ? "+" : ""}{formatCurrency(liveEstValue - loan.estimatedValue)})</span>
+                  )}
+                </div>
+              )}
               {loan.itemDescription && <div className="mt-1 text-muted-foreground italic">{loan.itemDescription}</div>}
               {items && items.length > 0 && (
                 <div className="mt-2 space-y-1">
-                  {items.map(it => (
-                    <div key={it.id} className="text-[10px] text-muted-foreground">
-                      {it.quantity}× {it.itemType} ({it.metalType === "silver" ? "Ag" : "Au"} {it.purity}) · {it.grossWeight.toFixed(3)}g · {formatCurrency(it.estimatedValue)}
-                    </div>
-                  ))}
+                  {items.map(it => {
+                    const itLive = rates ? Math.round(it.netWeight * getLiveGirviRate(it.metalType, it.purity, rates)) : null;
+                    return (
+                      <div key={it.id} className="text-[10px] text-muted-foreground">
+                        {it.quantity}× {it.itemType} ({it.metalType === "silver" ? "Ag" : "Au"} {it.purity}) · {it.grossWeight.toFixed(3)}g
+                        {itLive !== null ? ` · Live: ${formatCurrency(itLive)}` : ` · ${formatCurrency(it.estimatedValue)}`}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1087,7 +1134,7 @@ function LoanRow({
               <Button size="sm" variant="destructive" className="gap-1.5" onClick={() => onAction("forfeit")}>
                 <XCircle className="w-3.5 h-3.5" />Forfeit Gold
               </Button>
-              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openGirviVoucher(loan, shopName, shopAddress, shopMobile, items)}>
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openGirviVoucher(loan, shopName, shopAddress, shopMobile, items, rates)}>
                 <PrinterIcon className="w-3.5 h-3.5" />Voucher
               </Button>
               <button
@@ -1103,7 +1150,7 @@ function LoanRow({
           {/* Print voucher for closed loans */}
           {!isActive && (
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openGirviVoucher(loan, shopName, shopAddress, shopMobile, items)}>
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openGirviVoucher(loan, shopName, shopAddress, shopMobile, items, rates)}>
                 <PrinterIcon className="w-3.5 h-3.5" />Print Voucher
               </Button>
             </div>
@@ -1113,8 +1160,8 @@ function LoanRow({
           {loan.status === "forfeited" && loan.lossAmount !== null && (
             <div className="flex items-center gap-2 text-xs p-2 rounded-lg bg-destructive/10 border border-destructive/20">
               <TrendingDown className="w-4 h-4 text-destructive flex-shrink-0" />
-              Sold for {formatCurrency(loan.goldSaleValue ?? 0)} · Due was {formatCurrency(loan.loanAmount + loan.accruedInterest)} ·{" "}
-              <strong className="text-destructive">Loss: {formatCurrency(loan.lossAmount)}</strong>
+              Sold for {formatCurrency(loan.goldSaleValue ?? 0)} · Due was {formatCurrency((loan.lossAmount ?? 0) + (loan.goldSaleValue ?? 0))} ·{" "}
+              <strong className="text-destructive">Loss: {formatCurrency(loan.lossAmount ?? 0)}</strong>
             </div>
           )}
           {loan.status === "redeemed" && (
@@ -1226,6 +1273,16 @@ function NewLoanDialog({ open, onClose, onCreated, rates }: {
         }
       }
       return updated;
+    }));
+  }, [rates]);
+
+  // Recompute estimated values when live rates change
+  useEffect(() => {
+    if (!rates) return;
+    setItems(prev => prev.map(it => {
+      const wt = parseFloat(it.netWeight || it.grossWeight) || 0;
+      if (wt <= 0) return it;
+      return { ...it, estimatedValue: String(Math.round(wt * getItemRate(it.metalType, it.purity, rates))) };
     }));
   }, [rates]);
 

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { inventoryItemsTable } from "@workspace/db";
+import { inventoryItemsTable, saleLineItemsTable } from "@workspace/db";
 import { eq, ilike, and, or, sql } from "drizzle-orm";
 
 const router = Router();
@@ -153,7 +153,11 @@ router.patch("/:id", async (req, res) => {
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
     const data = req.body;
     const updateData: Record<string, unknown> = {};
-    if (data.name !== undefined) updateData.name = String(data.name).trim() || undefined;
+    if (data.name !== undefined) {
+      const trimmedName = String(data.name).trim();
+      if (!trimmedName) return res.status(400).json({ error: "Name cannot be empty" });
+      updateData.name = trimmedName;
+    }
     if (data.category !== undefined) updateData.category = data.category;
     if (data.purity !== undefined) updateData.purity = data.purity;
     if (data.grossWeight !== undefined) updateData.grossWeight = safeFloat(data.grossWeight).toString();
@@ -184,6 +188,16 @@ router.delete("/:id", async (req, res) => {
     const userId = req.user!.userId;
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    // Prevent deleting items that appear in billing history
+    const [saleRef] = await db.select({ id: saleLineItemsTable.id })
+      .from(saleLineItemsTable)
+      .where(and(eq(saleLineItemsTable.inventoryItemId, id), eq(saleLineItemsTable.userId, userId)))
+      .limit(1);
+    if (saleRef) {
+      return res.status(409).json({ error: "Cannot delete — this item appears in sales history. Update quantity to 0 instead." });
+    }
+
     const result = await db.delete(inventoryItemsTable).where(and(eq(inventoryItemsTable.id, id), eq(inventoryItemsTable.userId, userId))).returning({ id: inventoryItemsTable.id });
     if (result.length === 0) return res.status(404).json({ error: "Not found" });
     res.status(204).send();

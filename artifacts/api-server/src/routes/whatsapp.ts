@@ -23,7 +23,8 @@ router.post("/send-bulk", async (req, res) => {
 
     for (const r of recipients) {
       const digits = r.mobile.replace(/\D/g, "");
-      const fullMobile = digits.startsWith("91") ? digits : `91${digits}`;
+      // 10-digit numbers need country code; 12-digit numbers already have it
+      const fullMobile = digits.length === 10 ? `91${digits}` : digits;
       try {
         const resp = await fetch(
           `https://graph.facebook.com/v18.0/${settings.whatsappPhoneNumberId}/messages`,

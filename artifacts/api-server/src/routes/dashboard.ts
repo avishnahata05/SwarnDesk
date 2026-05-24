@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { salesTable, inventoryItemsTable, customersTable, repairJobsTable } from "@workspace/db";
-import { sql, gte, lte, eq, and } from "drizzle-orm";
+import { salesTable, saleLineItemsTable, inventoryItemsTable, customersTable, repairJobsTable } from "@workspace/db";
+import { sql, gte, lt, eq, and } from "drizzle-orm";
 
 const router = Router();
 
@@ -15,13 +15,19 @@ router.get("/summary", async (req, res) => {
 
     const [
       [todaySalesResult],
+      [todayMakingResult],
       [totalCustomers],
       [totalInventory],
       [pendingRepairs],
     ] = await Promise.all([
       db.select({ total: sql<number>`coalesce(sum(${salesTable.totalAmount}), 0)::numeric` })
         .from(salesTable)
-        .where(and(eq(salesTable.userId, userId), gte(salesTable.saleDate, today), lte(salesTable.saleDate, tomorrow))),
+        .where(and(eq(salesTable.userId, userId), gte(salesTable.saleDate, today), lt(salesTable.saleDate, tomorrow))),
+      // Profit proxy: sum of making charges on today's bills (labour/crafting margin)
+      db.select({ total: sql<number>`coalesce(sum(${saleLineItemsTable.makingCharges}), 0)::numeric` })
+        .from(saleLineItemsTable)
+        .innerJoin(salesTable, and(eq(saleLineItemsTable.saleId, salesTable.id), eq(salesTable.userId, userId)))
+        .where(and(eq(saleLineItemsTable.userId, userId), gte(salesTable.saleDate, today), lt(salesTable.saleDate, tomorrow))),
       db.select({ count: sql<number>`count(*)::int` })
         .from(customersTable)
         .where(eq(customersTable.userId, userId)),
@@ -33,15 +39,16 @@ router.get("/summary", async (req, res) => {
         .where(eq(inventoryItemsTable.userId, userId)),
       db.select({ count: sql<number>`count(*)::int` })
         .from(repairJobsTable)
-        .where(and(eq(repairJobsTable.userId, userId), sql`${repairJobsTable.status} != 'delivered'`)),
+        .where(and(eq(repairJobsTable.userId, userId), sql`${repairJobsTable.status} IN ('received', 'in_progress', 'ready')`)),
     ]);
 
     const todaySales = parseFloat(String(todaySalesResult.total)) || 0;
+    const todayProfit = parseFloat(String(todayMakingResult.total)) || 0;
 
     res.json({
       todaySales,
       todayPurchases: 0,
-      todayProfit: 0,
+      todayProfit,
       pendingOrders: 0,
       totalCustomers: totalCustomers.count || 0,
       totalInventoryItems: totalInventory.count || 0,
