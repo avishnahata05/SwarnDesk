@@ -102,11 +102,16 @@ export default function LandingPage() {
           <div className="flex items-center gap-3">
             <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-full px-3 py-1.5 border border-border">
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-              22K Gold: <span className="text-primary font-semibold ml-1">₹{goldRate.toLocaleString("en-IN")}/g</span>
+              22K Gold: <span className="text-primary font-semibold ml-1">₹{(goldRate * 10).toLocaleString("en-IN")}/10g</span>
             </div>
-            <Link href="/app/dashboard">
+            <Link href="/login">
+              <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-foreground" data-testid="button-sign-in-nav">
+                Sign In
+              </Button>
+            </Link>
+            <Link href="/register">
               <Button size="sm" className="gap-1.5" data-testid="button-get-started">
-                Get Started <ArrowRight className="w-3.5 h-3.5" />
+                Sign Up Free <ArrowRight className="w-3.5 h-3.5" />
               </Button>
             </Link>
           </div>
@@ -135,9 +140,9 @@ export default function LandingPage() {
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Link href="/app/dashboard">
+            <Link href="/register">
               <Button size="lg" className="gap-2 px-8 text-base font-semibold" data-testid="button-free-trial">
-                Try Free for 30 Days <ArrowRight className="w-4 h-4" />
+                Sign Up Now — 7 Day Free Trial <ArrowRight className="w-4 h-4" />
               </Button>
             </Link>
             <a
@@ -152,7 +157,13 @@ export default function LandingPage() {
             </a>
           </div>
 
-          <p className="mt-6 text-xs text-muted-foreground">No credit card needed — free for 30 days, cancel anytime</p>
+          <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
+            <p className="text-xs text-muted-foreground">No credit card needed · 7-day free trial · cancel anytime</p>
+            <span className="hidden sm:block text-muted-foreground/40">|</span>
+            <Link href="/login" className="text-xs text-primary hover:underline font-medium" data-testid="link-sign-in-hero">
+              Already have an account? Sign In →
+            </Link>
+          </div>
         </div>
 
         {/* Stats */}
@@ -256,7 +267,7 @@ export default function LandingPage() {
             ))}
           </div>
           <p className="text-center text-sm text-muted-foreground mt-6">
-            All plans start with a <strong>30-day free trial</strong> — no credit card required. Pay only after your trial ends.
+            All plans start with a <strong>7-day free trial</strong> — no credit card required. Pay only after your trial ends.
           </p>
         </div>
       </section>
@@ -296,11 +307,11 @@ export default function LandingPage() {
             </div>
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">Ready to simplify your jewellery business?</h2>
             <p className="text-muted-foreground text-lg mb-8">
-              Join 2,400+ jewellers already using SwarnDesk. Your first 30 days are completely free — no setup fees, no contracts.
+              Join 2,400+ jewellers already using SwarnDesk. Your first 7 days are completely free — no setup fees, no contracts.
             </p>
-            <Link href="/app/dashboard">
+            <Link href="/register">
               <Button size="lg" className="gap-2 px-10 text-base font-semibold" data-testid="button-cta-trial">
-                Get Started Free <ArrowRight className="w-4 h-4" />
+                Sign Up Free <ArrowRight className="w-4 h-4" />
               </Button>
             </Link>
           </div>

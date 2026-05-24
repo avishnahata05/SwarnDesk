@@ -48,10 +48,10 @@ export default function Settings() {
   useEffect(() => {
     if (currentRates) {
       setRateForm({
-        gold22k: String(Math.round(currentRates.gold22k)),
-        gold24k: String(Math.round(currentRates.gold24k)),
-        gold18k: String(Math.round(currentRates.gold18k)),
-        silver: String(Math.round(currentRates.silver)),
+        gold22k: String(Math.round(currentRates.gold22k * 10)),
+        gold24k: String(Math.round(currentRates.gold24k * 10)),
+        gold18k: String(Math.round(currentRates.gold18k * 10)),
+        silver: String(Math.round(currentRates.silver * 1000)),
       });
     }
   }, [currentRates]);
@@ -77,13 +77,15 @@ export default function Settings() {
 
   const saveRates = () => {
     const payload: Record<string, number> = {};
-    if (rateForm.gold22k) payload.gold22k = parseFloat(rateForm.gold22k);
-    if (rateForm.gold24k) payload.gold24k = parseFloat(rateForm.gold24k);
-    if (rateForm.gold18k) payload.gold18k = parseFloat(rateForm.gold18k);
-    if (rateForm.silver) payload.silver = parseFloat(rateForm.silver);
+    if (rateForm.gold22k) payload.gold22k = parseFloat(rateForm.gold22k) / 10;
+    if (rateForm.gold24k) payload.gold24k = parseFloat(rateForm.gold24k) / 10;
+    if (rateForm.gold18k) payload.gold18k = parseFloat(rateForm.gold18k) / 10;
+    if (rateForm.silver) payload.silver = parseFloat(rateForm.silver) / 1000;
     setRatesSaving(true);
     updateRates.mutate({ data: payload }, {
-      onSuccess: () => {
+      onSuccess: (updated) => {
+        localStorage.setItem("sd_gold22k", updated.gold22k.toString());
+        localStorage.setItem("sd_silver", updated.silver.toString());
         queryClient.invalidateQueries({ queryKey: getGetCurrentRatesQueryKey() });
         toast({ title: "Metal rates updated successfully" });
         setRatesSaving(false);
@@ -332,17 +334,19 @@ export default function Settings() {
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
               <Coins className="w-4 h-4 text-amber-600" />
-              Today's Metal Rates (₹ per gram)
+              Today's Metal Rates
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-xs text-muted-foreground">Update daily gold and silver rates. These rates are used across billing, inventory valuation, and girvi calculations.</p>
+            <p className="text-xs text-muted-foreground">
+              Check your <strong>local sarafa / bullion market</strong> rates each morning and update here manually. Enter gold <strong>per 10 grams</strong> and silver <strong>per kg</strong>.
+            </p>
             <div className="grid grid-cols-2 gap-3">
               {[
-                { label: "Gold 22K", key: "gold22k", placeholder: "e.g. 7250" },
-                { label: "Gold 24K", key: "gold24k", placeholder: "e.g. 7950" },
-                { label: "Gold 18K", key: "gold18k", placeholder: "e.g. 5940" },
-                { label: "Silver", key: "silver", placeholder: "e.g. 95" },
+                { label: "Gold 22K (₹/10g)", key: "gold22k", placeholder: "e.g. 72500" },
+                { label: "Gold 24K (₹/10g)", key: "gold24k", placeholder: "e.g. 79500" },
+                { label: "Gold 18K (₹/10g)", key: "gold18k", placeholder: "e.g. 59400" },
+                { label: "Silver (₹/kg)", key: "silver", placeholder: "e.g. 95000" },
               ].map(({ label, key, placeholder }) => (
                 <div key={key}>
                   <label className="text-xs text-muted-foreground mb-1 block">{label}</label>

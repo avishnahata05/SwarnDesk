@@ -2,8 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import { formatCurrency } from "@/lib/utils";
 import {
   useListInventoryItems, useListCustomers, useCreateSale, useGetCurrentRates,
-  useGetSettings, useCreateCustomer, useGetCustomer,
-  getListInventoryItemsQueryKey, getListCustomersQueryKey,
+  useGetSettings, useCreateCustomer, useGetCustomer, useUpdateRates,
+  getListInventoryItemsQueryKey, getListCustomersQueryKey, getGetCurrentRatesQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,8 +13,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import {
-  Search, Plus, Trash2, PrinterIcon, MessageCircle, CheckCircle2,
-  UserPlus, ChevronDown, ChevronUp, FileText, ClipboardList, History,
+  Search, Plus, Trash2, MessageCircle, CheckCircle2,
+  UserPlus, ChevronDown, ChevronUp, FileText, ClipboardList, History, Pencil,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -329,11 +329,39 @@ export default function Billing() {
 
   // Quick entry state
   const [quickName, setQuickName] = useState("");
+  const [quickMetal, setQuickMetal] = useState<"gold" | "silver">("gold");
   const [quickPurity, setQuickPurity] = useState("22K");
   const [quickWeight, setQuickWeight] = useState("");
   const [quickMakingPct, setQuickMakingPct] = useState("10");
   const [quickStoneCharges, setQuickStoneCharges] = useState("");
   const [quickQty, setQuickQty] = useState("1");
+
+  // Rate edit dialog state
+  const [rateEditOpen, setRateEditOpen] = useState(false);
+  const [rateForm, setRateForm] = useState({ gold22k: "", silver: "" });
+  const updateRates = useUpdateRates();
+
+  const openRateEdit = () => {
+    setRateForm({
+      gold22k: String(Math.round((rates?.gold22k ?? 7250) * 10)),
+      silver: String(Math.round((rates?.silver ?? 95) * 1000)),
+    });
+    setRateEditOpen(true);
+  };
+
+  const saveRateEdit = () => {
+    const payload: Record<string, number> = {};
+    if (rateForm.gold22k) payload.gold22k = parseFloat(rateForm.gold22k) / 10;
+    if (rateForm.silver) payload.silver = parseFloat(rateForm.silver) / 1000;
+    updateRates.mutate({ data: payload }, {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getGetCurrentRatesQueryKey() });
+        setRateEditOpen(false);
+        toast({ title: "Rates updated" });
+      },
+      onError: () => toast({ title: "Failed to update rates", variant: "destructive" }),
+    });
+  };
 
   const customerDropdownRef = useRef<HTMLDivElement>(null);
   const itemDropdownRef = useRef<HTMLDivElement>(null);
@@ -366,10 +394,12 @@ export default function Billing() {
   const silverRate = rates?.silver ?? 95;
   const GST_RATE = 0.03;
 
-  const quickGoldRate = goldRate22k;
+  const GOLD_PURITIES = ["24K", "22K", "18K", "14K"];
+  const SILVER_PURITIES = ["999", "925"];
+  const quickMetalRate = quickMetal === "silver" ? silverRate : goldRate22k;
   const quickGrossWeight = parseFloat(quickWeight || "0");
   const quickNetWeight = quickGrossWeight * (PURITY_MULTIPLIER[quickPurity] ?? 1);
-  const quickMetalValue = quickNetWeight * quickGoldRate;
+  const quickMetalValue = quickNetWeight * quickMetalRate;
   const quickMakingVal = Math.round(quickMetalValue * parseFloat(quickMakingPct || "0") / 100);
   const quickStoneChargesVal = parseFloat(quickStoneCharges || "0");
   const quickUnitPrice = Math.round(quickMetalValue + quickMakingVal + quickStoneChargesVal);
@@ -382,18 +412,18 @@ export default function Billing() {
     const tempId = -(Date.now());
     setCart(prev => [...prev, {
       inventoryItemId: tempId,
-      itemName: `${quickName} (${quickPurity}, ${quickWeight}g)`,
+      itemName: `${quickName} (${quickMetal === "gold" ? "Gold" : "Silver"} ${quickPurity}, ${parseFloat(quickWeight).toFixed(3)}g)`,
       quantity: qty,
       availableQty: Infinity,
       unitPrice: quickUnitPrice,
-      metalRate: quickGoldRate,
+      metalRate: quickMetalRate,
       grossWeight: quickGrossWeight,
       netWeight: quickNetWeight,
       makingCharges: quickMakingVal,
       stoneCharges: quickStoneChargesVal,
       discount: 0,
     }]);
-    setQuickName(""); setQuickWeight(""); setQuickMakingPct("10"); setQuickStoneCharges(""); setQuickQty("1");
+    setQuickName(""); setQuickWeight(""); setQuickMakingPct("10"); setQuickStoneCharges(""); setQuickQty("1"); setQuickMetal("gold"); setQuickPurity("22K");
     toast({ title: "Added to cart" });
   };
 
@@ -778,10 +808,30 @@ export default function Billing() {
                       <Input placeholder="e.g. Gold Bangle, Old Necklace" value={quickName} onChange={e => setQuickName(e.target.value)} data-testid="input-quick-name" />
                     </div>
                     <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Metal *</label>
+                      <Select
+                        value={quickMetal}
+                        onValueChange={(v: "gold" | "silver") => {
+                          setQuickMetal(v);
+                          setQuickPurity(v === "silver" ? "925" : "22K");
+                        }}
+                      >
+                        <SelectTrigger data-testid="select-quick-metal"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="gold">Gold</SelectItem>
+                          <SelectItem value="silver">Silver</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
                       <label className="text-xs text-muted-foreground mb-1 block">Purity</label>
                       <Select value={quickPurity} onValueChange={setQuickPurity}>
                         <SelectTrigger data-testid="select-quick-purity"><SelectValue /></SelectTrigger>
-                        <SelectContent>{PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                        <SelectContent>
+                          {(quickMetal === "gold" ? GOLD_PURITIES : SILVER_PURITIES).map(p => (
+                            <SelectItem key={p} value={p}>{p}</SelectItem>
+                          ))}
+                        </SelectContent>
                       </Select>
                     </div>
                     <div>
@@ -800,20 +850,32 @@ export default function Billing() {
                       <label className="text-xs text-muted-foreground mb-1 block">Stone/Other (₹)</label>
                       <Input type="number" placeholder="e.g. 500" value={quickStoneCharges} onChange={e => setQuickStoneCharges(e.target.value)} data-testid="input-quick-stone" />
                     </div>
-                    <div>
-                      {parseFloat(quickWeight || "0") > 0 && (
-                        <div className="h-full flex flex-col justify-end">
-                          <div className="p-2.5 rounded-lg bg-primary/10 border border-primary/20 text-xs">
+                    {parseFloat(quickWeight || "0") > 0 && (
+                      <div className="col-span-2 sm:col-span-3">
+                        <div className="p-2.5 rounded-lg bg-primary/10 border border-primary/20 text-xs flex gap-4 flex-wrap">
+                          <div>
+                            <div className="text-muted-foreground">Rate ({quickMetal === "gold" ? "Gold" : "Silver"} {quickPurity})</div>
+                            <div className="font-semibold text-primary">
+                              {quickMetal === "gold"
+                                ? `₹${Math.round(quickMetalRate * 10).toLocaleString("en-IN")}/10g`
+                                : `₹${Math.round(quickMetalRate * 1000).toLocaleString("en-IN")}/kg`}
+                            </div>
+                          </div>
+                          <div>
                             <div className="text-muted-foreground">Metal value</div>
                             <div className="font-semibold text-primary">{formatCurrency(quickMetalValue)}</div>
-                            <div className="text-muted-foreground mt-1">Making ({quickMakingPct}%)</div>
+                          </div>
+                          <div>
+                            <div className="text-muted-foreground">Making ({quickMakingPct}%)</div>
                             <div className="font-semibold text-primary">{formatCurrency(quickMakingVal)}</div>
-                            <div className="text-muted-foreground mt-1">Unit price</div>
+                          </div>
+                          <div>
+                            <div className="text-muted-foreground">Unit price</div>
                             <div className="font-bold text-primary text-sm">{formatCurrency(quickUnitPrice)}</div>
                           </div>
                         </div>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                   <Button
                     onClick={addQuickItemToCart}
@@ -828,12 +890,26 @@ export default function Billing() {
               )}
 
               <div className="flex gap-2 flex-wrap text-xs">
-                <div className="px-3 py-1.5 bg-primary/10 rounded-lg border border-primary/20">
-                  22K Gold: <span className="font-semibold text-primary">₹{goldRate22k.toLocaleString("en-IN")}/g</span>
-                </div>
-                <div className="px-3 py-1.5 bg-muted rounded-lg border border-border">
-                  Silver: <span className="font-semibold">₹{Math.round(silverRate)}/g</span>
-                </div>
+                <button
+                  type="button"
+                  onClick={openRateEdit}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors group"
+                  data-testid="button-edit-gold-rate"
+                >
+                  <span className="text-amber-700">22K Gold</span>
+                  <span className="font-semibold text-amber-800">₹{Math.round(goldRate22k * 10).toLocaleString("en-IN")}/10g</span>
+                  <Pencil className="w-3 h-3 text-amber-400 group-hover:text-amber-600 transition-colors" />
+                </button>
+                <button
+                  type="button"
+                  onClick={openRateEdit}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-muted border border-border rounded-lg hover:bg-muted/80 transition-colors group"
+                  data-testid="button-edit-silver-rate"
+                >
+                  <span className="text-muted-foreground">Silver</span>
+                  <span className="font-semibold">₹{Math.round(silverRate * 1000).toLocaleString("en-IN")}/kg</span>
+                  <Pencil className="w-3 h-3 text-muted-foreground group-hover:text-foreground transition-colors" />
+                </button>
               </div>
             </CardContent>
           </Card>
@@ -988,6 +1064,53 @@ export default function Billing() {
           </Card>
         </div>
       </div>
+
+      {/* Rate Edit Dialog */}
+      <Dialog open={rateEditOpen} onOpenChange={setRateEditOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="w-4 h-4 text-amber-600" />
+              Update Today's Metal Rates
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Gold rate <strong>per 10 grams</strong> · Silver rate <strong>per kg</strong>
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Gold 22K (₹ per 10g)</label>
+                <Input
+                  type="number"
+                  step="1"
+                  value={rateForm.gold22k}
+                  onChange={e => setRateForm(f => ({ ...f, gold22k: e.target.value }))}
+                  placeholder="e.g. 72500"
+                  data-testid="input-billing-rate-gold"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Silver (₹ per kg)</label>
+                <Input
+                  type="number"
+                  step="1"
+                  value={rateForm.silver}
+                  onChange={e => setRateForm(f => ({ ...f, silver: e.target.value }))}
+                  placeholder="e.g. 95000"
+                  data-testid="input-billing-rate-silver"
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRateEditOpen(false)}>Cancel</Button>
+            <Button onClick={saveRateEdit} disabled={updateRates.isPending}>
+              {updateRates.isPending ? "Saving..." : "Update Rates"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Quick Add Customer Dialog */}
       <Dialog open={quickAddOpen} onOpenChange={setQuickAddOpen}>

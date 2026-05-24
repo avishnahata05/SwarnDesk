@@ -37,7 +37,11 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const [location] = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user, logout } = useAuth();
-  const [goldRate, setGoldRate] = useState(7250);
+  // Seed from localStorage so rate shows immediately on refresh (before API responds)
+  const [goldRate, setGoldRate] = useState(() => {
+    const cached = parseFloat(localStorage.getItem("sd_gold22k") || "");
+    return isFinite(cached) ? Math.round(cached * 10) : 72500;
+  });
 
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
   useBackClose(sidebarOpen, closeSidebar);
@@ -52,24 +56,26 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   useEffect(() => {
     if (rates) {
-      setGoldRate(rates.gold22k);
+      setGoldRate(Math.round(rates.gold22k * 10));
+      // Persist to localStorage so rates survive page refresh
+      localStorage.setItem("sd_gold22k", rates.gold22k.toString());
+      localStorage.setItem("sd_silver", rates.silver.toString());
       setRateForm({
-        gold22k: String(Math.round(rates.gold22k)),
-        gold24k: String(Math.round(rates.gold24k)),
-        gold18k: String(Math.round(rates.gold18k)),
-        silver: String(Math.round(rates.silver)),
+        gold22k: String(Math.round(rates.gold22k * 10)),
+        gold24k: String(Math.round(rates.gold24k * 10)),
+        gold18k: String(Math.round(rates.gold18k * 10)),
+        silver: String(Math.round(rates.silver * 1000)),
       });
     }
   }, [rates]);
 
-
   const openRateDialog = () => {
     if (rates) {
       setRateForm({
-        gold22k: String(Math.round(rates.gold22k)),
-        gold24k: String(Math.round(rates.gold24k)),
-        gold18k: String(Math.round(rates.gold18k)),
-        silver: String(Math.round(rates.silver)),
+        gold22k: String(Math.round(rates.gold22k * 10)),
+        gold24k: String(Math.round(rates.gold24k * 10)),
+        gold18k: String(Math.round(rates.gold18k * 10)),
+        silver: String(Math.round(rates.silver * 1000)),
       });
     }
     setRateDialogOpen(true);
@@ -77,14 +83,16 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   const saveRates = () => {
     const payload: Record<string, number> = {};
-    if (rateForm.gold22k) payload.gold22k = parseFloat(rateForm.gold22k);
-    if (rateForm.gold24k) payload.gold24k = parseFloat(rateForm.gold24k);
-    if (rateForm.gold18k) payload.gold18k = parseFloat(rateForm.gold18k);
-    if (rateForm.silver) payload.silver = parseFloat(rateForm.silver);
+    if (rateForm.gold22k) payload.gold22k = parseFloat(rateForm.gold22k) / 10;
+    if (rateForm.gold24k) payload.gold24k = parseFloat(rateForm.gold24k) / 10;
+    if (rateForm.gold18k) payload.gold18k = parseFloat(rateForm.gold18k) / 10;
+    if (rateForm.silver) payload.silver = parseFloat(rateForm.silver) / 1000;
 
     updateRates.mutate({ data: payload }, {
       onSuccess: (updated) => {
-        setGoldRate(updated.gold22k);
+        setGoldRate(Math.round(updated.gold22k * 10));
+        localStorage.setItem("sd_gold22k", updated.gold22k.toString());
+        localStorage.setItem("sd_silver", updated.silver.toString());
         queryClient.invalidateQueries({ queryKey: getGetCurrentRatesQueryKey() });
         setRateDialogOpen(false);
         toast({ title: "Metal rates updated successfully" });
@@ -165,14 +173,14 @@ export default function AppLayout({ children }: AppLayoutProps) {
               <span className="text-[11px] text-white/60 font-medium">22K Gold</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="text-[12px] font-bold text-amber-300">₹{goldRate.toLocaleString("en-IN")}/g</span>
+              <span className="text-[12px] font-bold text-amber-300">₹{goldRate.toLocaleString("en-IN")}/10g</span>
               <Pencil className="w-2.5 h-2.5 text-white/30 group-hover:text-white/60 transition-colors" />
             </div>
           </div>
           <div className="flex items-center justify-between mt-1.5">
             <span className="text-[11px] text-white/60 font-medium">Silver</span>
             <span className="text-[11px] font-semibold text-white/70">
-              ₹{rates?.silver ? Math.round(rates.silver).toLocaleString("en-IN") : "95"}/g
+              ₹{rates?.silver ? Math.round(rates.silver * 1000).toLocaleString("en-IN") : "95000"}/kg
             </span>
           </div>
           <div className="text-[9px] text-white/30 mt-1 text-right">Click to update rates</div>
@@ -243,13 +251,19 @@ export default function AppLayout({ children }: AppLayoutProps) {
             >
               <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse flex-shrink-0" />
               <span className="text-amber-700 font-medium">22K Gold</span>
-              <span className="font-bold text-amber-800">₹{goldRate.toLocaleString("en-IN")}/g</span>
+              <span className="font-bold text-amber-800">₹{goldRate.toLocaleString("en-IN")}/10g</span>
               <Pencil className="w-3 h-3 text-amber-500 group-hover:text-amber-700 transition-colors" />
             </button>
-            <div className="hidden md:flex items-center gap-2 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs">
+            <button
+              className="hidden md:flex items-center gap-2 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs hover:bg-muted/80 transition-colors group cursor-pointer"
+              onClick={openRateDialog}
+              data-testid="button-header-silver-rate"
+              title="Click to update today's rates"
+            >
               <span className="text-muted-foreground">Silver</span>
-              <span className="font-semibold text-foreground">₹{rates?.silver ? Math.round(rates.silver).toLocaleString("en-IN") : "95"}/g</span>
-            </div>
+              <span className="font-semibold text-foreground">₹{rates?.silver ? Math.round(rates.silver * 1000).toLocaleString("en-IN") : "95000"}/kg</span>
+              <Pencil className="w-3 h-3 text-muted-foreground group-hover:text-foreground transition-colors" />
+            </button>
           </div>
 
           {/* Language toggle */}
@@ -319,14 +333,14 @@ export default function AppLayout({ children }: AppLayoutProps) {
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              Enter today's market rates (₹ per gram). These rates will be used for all new bills and inventory valuation.
+              Check your <strong>local sarafa / bullion market</strong> rates every morning and update manually. Enter gold <strong>per 10 grams</strong> and silver <strong>per kg</strong>.
             </p>
             <div className="space-y-3">
               {[
-                { label: "Gold 22K (₹/g)", key: "gold22k", placeholder: "e.g. 7250" },
-                { label: "Gold 24K (₹/g)", key: "gold24k", placeholder: "e.g. 7950" },
-                { label: "Gold 18K (₹/g)", key: "gold18k", placeholder: "e.g. 5940" },
-                { label: "Silver (₹/g)", key: "silver", placeholder: "e.g. 95" },
+                { label: "Gold 22K (₹ per 10g)", key: "gold22k", placeholder: "e.g. 72500" },
+                { label: "Gold 24K (₹ per 10g)", key: "gold24k", placeholder: "e.g. 79500" },
+                { label: "Gold 18K (₹ per 10g)", key: "gold18k", placeholder: "e.g. 59400" },
+                { label: "Silver (₹ per kg)", key: "silver", placeholder: "e.g. 95000" },
               ].map(({ label, key, placeholder }) => (
                 <div key={key}>
                   <label className="text-xs text-muted-foreground mb-1 block font-medium">{label}</label>
