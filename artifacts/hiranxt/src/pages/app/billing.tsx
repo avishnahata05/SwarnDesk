@@ -317,6 +317,7 @@ export default function Billing() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMode, setPaymentMode] = useState("cash");
   const [paymentStatus, setPaymentStatus] = useState("paid");
+  const [paidNow, setPaidNow] = useState<string>("");
   const [discount, setDiscount] = useState(0);
   const [exchangeGoldWeight, setExchangeGoldWeight] = useState(0);
   const [saleComplete, setSaleComplete] = useState<SaleComplete | null>(null);
@@ -392,6 +393,14 @@ export default function Billing() {
 
   const goldRate22k = rates?.gold22k ?? 7250;
   const silverRate = rates?.silver ?? 95;
+
+  const getLiveRate = (category: string, purity: string) => {
+    if (category === "silver") return silverRate;
+    if (category === "platinum") return 3500;
+    if (purity === "24K") return rates?.gold24k ?? 7900;
+    if (purity === "18K") return rates?.gold18k ?? 5940;
+    return goldRate22k;
+  };
   const GST_RATE = 0.03;
 
   const GOLD_PURITIES = ["24K", "22K", "18K", "14K"];
@@ -433,16 +442,20 @@ export default function Billing() {
   const gstAmount = taxableBase * GST_RATE;
   const totalAmount = taxableBase + gstAmount;
 
-  const addToCart = (item: { id: number; name: string; metalRate: number; grossWeight: number; netWeight: number; makingCharges: number; stoneValue?: number | null; totalValue: number; quantity: number }) => {
+  const addToCart = (item: { id: number; name: string; category: string; purity: string; metalRate: number; grossWeight: number; netWeight: number; makingCharges: number; stoneValue?: number | null; totalValue: number; quantity: number }) => {
+    const liveRate = getLiveRate(item.category, item.purity);
+    const liveMetalVal = item.netWeight * liveRate;
+    const liveMakingAmt = Math.round(liveMetalVal * item.makingCharges / 100);
+    const livePrice = Math.round(liveMetalVal + liveMakingAmt + (item.stoneValue ?? 0));
     setCart(prev => {
       const existing = prev.find(c => c.inventoryItemId === item.id);
       if (existing) return prev.map(c => c.inventoryItemId === item.id ? { ...c, quantity: c.quantity + 1 } : c);
       return [...prev, {
         inventoryItemId: item.id, itemName: item.name, quantity: 1,
         availableQty: item.quantity,
-        unitPrice: item.totalValue, metalRate: item.metalRate,
+        unitPrice: livePrice, metalRate: liveRate,
         grossWeight: item.grossWeight, netWeight: item.netWeight,
-        makingCharges: item.makingCharges, stoneCharges: item.stoneValue ?? 0, discount: 0,
+        makingCharges: liveMakingAmt, stoneCharges: item.stoneValue ?? 0, discount: 0,
       }];
     });
     setItemSearch("");
@@ -514,7 +527,9 @@ export default function Billing() {
         customerId: selectedCustomer?.id && selectedCustomer.id > 0 ? selectedCustomer.id : null,
         customerName: selectedCustomer?.name ?? "Walk-in Customer",
         totalAmount, gstAmount, discountAmount: discount,
-        exchangeGoldWeight, exchangeGoldValue, paymentMode, paymentStatus, notes: null,
+        exchangeGoldWeight, exchangeGoldValue, paymentMode, paymentStatus,
+        paidAmount: paidNow !== "" ? parseFloat(paidNow) || 0 : totalAmount,
+        notes: null,
         items: cart.map(c => ({
           inventoryItemId: c.inventoryItemId > 0 ? c.inventoryItemId : 0,
           quantity: c.quantity, unitPrice: c.unitPrice, metalRate: c.metalRate,
@@ -537,6 +552,7 @@ export default function Billing() {
         setSelectedCustomer(null);
         setDiscount(0);
         setExchangeGoldWeight(0);
+        setPaidNow("");
         queryClient.invalidateQueries({ queryKey: getListInventoryItemsQueryKey() });
         toast({ title: "Sale completed!", description: `Invoice: ${sale.invoiceNumber}` });
       },
@@ -789,7 +805,7 @@ export default function Billing() {
                               <div className="text-xs text-muted-foreground">{item.category} · {item.purity} · {item.grossWeight}g</div>
                             </div>
                             <div className="text-right shrink-0">
-                              <div className="text-sm font-semibold text-primary">{formatCurrency(item.totalValue)}</div>
+                              <div className="text-sm font-semibold text-primary">{formatCurrency(Math.round(item.netWeight * getLiveRate(item.category, item.purity) * (1 + item.makingCharges / 100) + (item.stoneValue ?? 0)))}</div>
                               <div className="text-xs text-muted-foreground">Qty: {item.quantity}</div>
                             </div>
                           </div>
@@ -1030,7 +1046,7 @@ export default function Billing() {
               <div className="space-y-3">
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">Payment Mode</label>
-                  <Select value={paymentMode} onValueChange={setPaymentMode}>
+                  <Select value={paymentMode} onValueChange={v => { setPaymentMode(v); if (v === "partial") { setPaidNow(""); } }}>
                     <SelectTrigger data-testid="select-payment-mode"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {["cash", "upi", "card", "credit", "partial"].map(m => (
@@ -1039,6 +1055,33 @@ export default function Billing() {
                     </SelectContent>
                   </Select>
                 </div>
+
+                {(paymentMode === "partial" || paymentStatus === "partial" || paymentStatus === "pending") && (
+                  <div className="space-y-2 p-3 rounded-lg bg-orange-50 border border-orange-200">
+                    <div>
+                      <label className="text-xs font-medium text-orange-800 mb-1 block">Amount Paid Now (₹)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max={totalAmount}
+                        step="1"
+                        value={paidNow}
+                        onChange={e => setPaidNow(e.target.value)}
+                        placeholder={`e.g. ${Math.round(totalAmount / 2)}`}
+                        className="w-full text-right bg-white border border-orange-300 rounded px-2 py-1.5 text-sm focus:border-orange-500 outline-none"
+                        data-testid="input-paid-now"
+                      />
+                    </div>
+                    {paidNow !== "" && parseFloat(paidNow) < totalAmount && (
+                      <div className="flex justify-between text-xs font-semibold text-orange-800">
+                        <span>Balance Due</span>
+                        <span>{formatCurrency(Math.max(0, totalAmount - (parseFloat(paidNow) || 0)))}</span>
+                      </div>
+                    )}
+                    <p className="text-[10px] text-orange-600">Remaining balance will go to Pending Payments.</p>
+                  </div>
+                )}
+
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">Payment Status</label>
                   <Select value={paymentStatus} onValueChange={setPaymentStatus}>
@@ -1046,7 +1089,7 @@ export default function Billing() {
                     <SelectContent>
                       <SelectItem value="paid">Paid</SelectItem>
                       <SelectItem value="partial">Partial</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="pending">Pending (₹0 now)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

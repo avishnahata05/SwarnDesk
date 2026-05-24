@@ -106,7 +106,7 @@ ${payment.notes ? `<div style="margin-top:8px;padding:6px;background:#f8f9fa;bor
   if (w) { w.document.write(html); w.document.close(); }
 }
 
-function openGirviVoucher(loan: Loan, shopName: string, shopAddress: string, shopMobile: string) {
+function openGirviVoucher(loan: Loan, shopName: string, shopAddress: string, shopMobile: string, items?: LoanItem[]) {
   const fmt = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
   const periodDays = loan.interestPeriod === "weekly" ? 7 : loan.interestPeriod === "yearly" ? 365 : 30;
@@ -169,13 +169,36 @@ body{font-family:'Segoe UI',Arial,sans-serif;color:#111;font-size:12px;backgroun
   </div>
   <div class="section">
     <div class="section-title">Collateral Details</div>
-    <div class="field"><span class="field-label">Metal</span><span class="field-value">${loan.metalType.toUpperCase()} ${loan.purity}</span></div>
-    <div class="field"><span class="field-label">Gross Weight</span><span class="field-value">${loan.grossWeight.toFixed(3)} g</span></div>
-    <div class="field"><span class="field-label">Net Weight</span><span class="field-value">${loan.netWeight.toFixed(3)} g</span></div>
+    <div class="field"><span class="field-label">Total Gross Wt</span><span class="field-value">${loan.grossWeight.toFixed(3)} g</span></div>
+    <div class="field"><span class="field-label">Total Net Wt</span><span class="field-value">${loan.netWeight.toFixed(3)} g</span></div>
     <div class="field"><span class="field-label">Est. Market Value</span><span class="field-value">${fmt(loan.estimatedValue)}</span></div>
-    ${loan.itemDescription ? `<div class="field"><span class="field-label">Item Desc.</span><span class="field-value" style="max-width:55%;text-align:right;word-break:break-word">${loan.itemDescription}</span></div>` : ""}
+    ${loan.itemDescription ? `<div class="field" style="margin-top:4px"><span class="field-label">Items</span><span class="field-value" style="max-width:65%;text-align:right;word-break:break-word;font-size:11px">${loan.itemDescription}</span></div>` : ""}
   </div>
 </div>
+${items && items.length > 0 ? `
+<div class="section" style="margin-bottom:12px">
+  <div class="section-title">Pledged Items Breakdown</div>
+  <table style="width:100%;border-collapse:collapse;font-size:11px">
+    <thead><tr style="background:#f8f9fa">
+      <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #dee2e6">Item</th>
+      <th style="text-align:center;padding:4px 6px;border-bottom:1px solid #dee2e6">Qty</th>
+      <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #dee2e6">Metal / Purity</th>
+      <th style="text-align:right;padding:4px 6px;border-bottom:1px solid #dee2e6">Gross Wt</th>
+      <th style="text-align:right;padding:4px 6px;border-bottom:1px solid #dee2e6">Net Wt</th>
+      <th style="text-align:right;padding:4px 6px;border-bottom:1px solid #dee2e6">Est. Value</th>
+    </tr></thead>
+    <tbody>
+      ${items.map(it => `<tr style="border-bottom:1px solid #f0f0f0">
+        <td style="padding:4px 6px;font-weight:600">${it.itemType}</td>
+        <td style="padding:4px 6px;text-align:center">${it.quantity}</td>
+        <td style="padding:4px 6px">${it.metalType === "silver" ? "Silver" : "Gold"} ${it.purity}</td>
+        <td style="padding:4px 6px;text-align:right">${it.grossWeight.toFixed(3)} g</td>
+        <td style="padding:4px 6px;text-align:right">${it.netWeight.toFixed(3)} g</td>
+        <td style="padding:4px 6px;text-align:right">${fmt(it.estimatedValue)}</td>
+      </tr>`).join("")}
+    </tbody>
+  </table>
+</div>` : ""}
 <div class="section" style="margin-bottom:12px">
   <div class="section-title">Loan Terms</div>
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
@@ -242,10 +265,14 @@ type Loan = {
   grossWeight: number;
   netWeight: number;
   estimatedValue: number;
-  loanAmount: number;
+  loanAmount: number;       // original loan amount
+  principalPaid: number;    // cumulative principal repaid
+  currentPrincipal: number; // loanAmount - principalPaid (what interest accrues on)
   interestRate: number;
   penaltyRate: number;
   interestPeriod: string;
+  periodDays: number;
+  dailyRate: number;
   startDate: string;
   dueDate: string;
   status: string;
@@ -253,6 +280,7 @@ type Loan = {
   penaltyInterest: number;
   accruedInterest: number;
   totalInterestCollected: number;
+  collectedSinceReset: number;
   outstandingInterest: number;
   totalDue: number;
   daysRemaining: number;
@@ -262,6 +290,17 @@ type Loan = {
   goldSaleValue: number | null;
   lossAmount: number | null;
   notes: string | null;
+};
+
+type LoanItem = {
+  id: number;
+  itemType: string;
+  quantity: number;
+  metalType: string;
+  purity: string;
+  grossWeight: number;
+  netWeight: number;
+  estimatedValue: number;
 };
 
 type Summary = {
@@ -293,6 +332,7 @@ export default function Girvi() {
   const [calendarMode, setCalendarMode] = useState<"en" | "hi">("en");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [loanPayments, setLoanPayments] = useState<Record<number, Payment[]>>({});
+  const [loanItems, setLoanItems] = useState<Record<number, LoanItem[]>>({});
 
   // Dialog state
   const [showNewLoan, setShowNewLoan] = useState(false);
@@ -301,7 +341,7 @@ export default function Girvi() {
   const [goldSaleValue, setGoldSaleValue] = useState("");
   const [newDueDate, setNewDueDate] = useState("");
   const [collectAmount, setCollectAmount] = useState("");
-  const [collectType, setCollectType] = useState("interest");
+  const [collectType, setCollectType] = useState("auto");
   const [collectNotes, setCollectNotes] = useState("");
   const [renewInterestPaid, setRenewInterestPaid] = useState("");
   const [renewNewDueDate, setRenewNewDueDate] = useState("");
@@ -356,9 +396,17 @@ export default function Girvi() {
     } catch { /* silent */ }
   };
 
+  const loadItems = async (loanId: number) => {
+    if (loanItems[loanId]) return;
+    try {
+      const r = await fetch(`${API}/${loanId}/items`, { headers: { Authorization: `Bearer ${localStorage.getItem("swarndesk_token")}` } });
+      if (r.ok) { const data = await r.json(); setLoanItems(prev => ({ ...prev, [loanId]: data })); }
+    } catch { /* silent */ }
+  };
+
   const handleExpand = (id: number) => {
     setExpandedId(expandedId === id ? null : id);
-    if (expandedId !== id) loadPayments(id);
+    if (expandedId !== id) { loadPayments(id); loadItems(id); }
   };
 
   const filteredLoans = useMemo(() => {
@@ -466,7 +514,7 @@ export default function Girvi() {
 
       setActionLoan(null); setActionType(null);
       setGoldSaleValue(""); setNewDueDate("");
-      setCollectAmount(""); setCollectNotes(""); setCollectType("interest");
+      setCollectAmount(""); setCollectNotes(""); setCollectType("auto");
       setRenewInterestPaid(""); setRenewNewDueDate(""); setRenewNotes("");
     } catch (err) {
       toast({ title: (err as Error).message || "Failed", variant: "destructive" });
@@ -477,7 +525,7 @@ export default function Girvi() {
     const dueText = type === "overdue"
       ? `is OVERDUE by ${Math.abs(loan.daysRemaining)} days`
       : `is due in ${loan.daysRemaining} days`;
-    const msg = `Namaskar ${loan.customerName} ji,\n\nYour Girvi loan ${loan.loanNumber} ${dueText}.\n\nPrincipal: ${formatCurrency(loan.loanAmount)} | Interest: ${formatCurrency(loan.outstandingInterest)} | Total due: ${formatCurrency(loan.totalDue)}\n\nKindly visit our store to redeem your ${loan.metalType} (${loan.purity}) at your earliest convenience.\n\n— ${shopName}`;
+    const msg = `Namaskar ${loan.customerName} ji,\n\nYour Girvi loan ${loan.loanNumber} ${dueText}.\n\nPrincipal: ${formatCurrency(loan.currentPrincipal)} | Interest due: ${formatCurrency(loan.outstandingInterest)} | Total due: ${formatCurrency(loan.totalDue)}\n\nKindly visit our store to redeem your ${loan.metalType} (${loan.purity}) at your earliest convenience.\n\n— ${shopName}`;
     window.open(`https://wa.me/91${loan.customerMobile.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`, "_blank");
   };
 
@@ -653,6 +701,7 @@ export default function Girvi() {
                   loan={loan}
                   expanded={expandedId === loan.id}
                   payments={loanPayments[loan.id]}
+                  items={loanItems[loan.id]}
                   calendarMode={calendarMode}
                   formatDateDisplay={formatDateDisplay}
                   shopName={shopName}
@@ -710,27 +759,68 @@ export default function Girvi() {
                 <div className="flex justify-between"><span className="text-muted-foreground">Loan #</span><span className="font-mono">{actionLoan.loanNumber}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Collateral</span><span>{actionLoan.metalType.toUpperCase()} {actionLoan.purity} · {actionLoan.grossWeight.toFixed(3)}g</span></div>
                 {actionLoan.itemDescription && <div className="flex justify-between"><span className="text-muted-foreground">Items</span><span className="text-right max-w-[55%]">{actionLoan.itemDescription}</span></div>}
-                <div className="flex justify-between"><span className="text-muted-foreground">Principal</span><span>{formatCurrency(actionLoan.loanAmount)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Interest accrued</span><span>{formatCurrency(actionLoan.accruedInterest)}</span></div>
+                <div className="flex justify-between border-t border-border pt-1"><span className="text-muted-foreground">Original loan</span><span>{formatCurrency(actionLoan.loanAmount)}</span></div>
+                {actionLoan.principalPaid > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Principal repaid</span><span className="text-emerald-600">−{formatCurrency(actionLoan.principalPaid)}</span></div>}
+                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Current principal</span><span>{formatCurrency(actionLoan.currentPrincipal)}</span></div>
+                <div className="flex justify-between border-t border-border pt-1"><span className="text-muted-foreground">Interest accrued</span><span>{formatCurrency(actionLoan.accruedInterest)}</span></div>
                 {actionLoan.penaltyInterest > 0 && <div className="flex justify-between text-orange-600"><span>Penalty interest</span><span>{formatCurrency(actionLoan.penaltyInterest)}</span></div>}
-                <div className="flex justify-between"><span className="text-muted-foreground">Already collected</span><span className="text-emerald-600">−{formatCurrency(actionLoan.totalInterestCollected)}</span></div>
-                <div className="flex justify-between border-t border-border pt-1 font-semibold text-sm"><span>Outstanding interest</span><span className="text-primary">{formatCurrency(actionLoan.outstandingInterest)}</span></div>
-                <div className="flex justify-between font-bold text-sm text-primary"><span>Total due (principal + int.)</span><span>{formatCurrency(actionLoan.totalDue)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Collected (this cycle)</span><span className="text-emerald-600">−{formatCurrency(actionLoan.collectedSinceReset)}</span></div>
+                <div className="flex justify-between font-semibold text-sm"><span>Outstanding interest</span><span className="text-primary">{formatCurrency(actionLoan.outstandingInterest)}</span></div>
+                <div className="flex justify-between font-bold text-sm text-primary border-t border-border pt-1"><span>Total due (principal + int.)</span><span>{formatCurrency(actionLoan.totalDue)}</span></div>
+                <div className="text-[10px] text-muted-foreground pt-0.5">
+                  Rate: {actionLoan.interestRate}% per {actionLoan.interestPeriod} · ≈ {(actionLoan.dailyRate * 100).toFixed(4)}%/day · ≈ {formatCurrency(Math.round(actionLoan.currentPrincipal * actionLoan.dailyRate))}/day
+                </div>
               </div>
 
-              {/* Collect interest */}
+              {/* Collect payment — smart allocation */}
               {actionType === "collect" && (
                 <div className="space-y-3">
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">Amount received (₹)</label>
-                    <Input type="number" value={collectAmount} onChange={e => setCollectAmount(e.target.value)} placeholder="Enter amount" className="h-9" autoFocus />
+                    <Input type="number" value={collectAmount} onChange={e => setCollectAmount(e.target.value)} placeholder="Any amount, any time" className="h-9" autoFocus />
                   </div>
+
+                  {/* Smart allocation preview */}
+                  {collectAmount !== "" && parseFloat(collectAmount) > 0 && collectType === "auto" && (() => {
+                    const amt = parseFloat(collectAmount);
+                    const outstanding = actionLoan.outstandingInterest;
+                    const principal = actionLoan.currentPrincipal;
+                    if (amt <= outstanding) {
+                      return (
+                        <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-xs space-y-0.5">
+                          <div className="font-medium text-emerald-800">Interest payment</div>
+                          <div className="text-emerald-700">₹{amt.toLocaleString("en-IN")} → reduces outstanding interest</div>
+                          <div className="text-emerald-600">After payment: {formatCurrency(outstanding - amt)} interest remaining</div>
+                        </div>
+                      );
+                    } else {
+                      const interestPortion = outstanding;
+                      const principalPortion = amt - interestPortion;
+                      const newPrincipal = principal - principalPortion;
+                      const fullySettled = newPrincipal <= 0;
+                      return (
+                        <div className={`p-2 rounded-lg border text-xs space-y-1 ${fullySettled ? "bg-green-50 border-green-300" : "bg-blue-50 border-blue-200"}`}>
+                          <div className={`font-medium ${fullySettled ? "text-green-800" : "text-blue-800"}`}>
+                            {fullySettled ? "Loan fully settled!" : "Auto-allocation"}
+                          </div>
+                          {interestPortion > 0 && <div className="text-blue-700">₹{interestPortion.toLocaleString("en-IN")} → settles outstanding interest</div>}
+                          <div className={fullySettled ? "text-green-700 font-semibold" : "text-blue-700"}>
+                            ₹{principalPortion.toLocaleString("en-IN")} → reduces principal ({formatCurrency(principal)} → {formatCurrency(Math.max(0, newPrincipal))})
+                          </div>
+                          {!fullySettled && <div className="text-muted-foreground text-[10px]">Interest clock resets on new principal of {formatCurrency(Math.max(0, newPrincipal))}</div>}
+                          {fullySettled && <div className="text-green-700 font-medium">Gold can be returned to customer</div>}
+                        </div>
+                      );
+                    }
+                  })()}
+
                   <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Payment type</label>
+                    <label className="text-xs text-muted-foreground block mb-1">Payment mode</label>
                     <Select value={collectType} onValueChange={setCollectType}>
                       <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="interest">Interest (Byaj)</SelectItem>
+                        <SelectItem value="auto">Auto-allocate (interest first, then principal)</SelectItem>
+                        <SelectItem value="interest">Interest only (Byaj)</SelectItem>
                         <SelectItem value="penalty">Penalty / Overdue charge</SelectItem>
                       </SelectContent>
                     </Select>
@@ -739,7 +829,9 @@ export default function Girvi() {
                     <label className="text-xs text-muted-foreground block mb-1">Notes (optional)</label>
                     <Input value={collectNotes} onChange={e => setCollectNotes(e.target.value)} placeholder="e.g. Cash paid, hand receipt" className="h-9" />
                   </div>
-                  <p className="text-xs text-muted-foreground">The loan stays active. Interest clock is NOT reset. Use "Renew Loan" to reset the clock.</p>
+                  {collectType !== "auto" && (
+                    <p className="text-xs text-muted-foreground">Interest-only or penalty payments do not change the principal or reset the clock.</p>
+                  )}
                 </div>
               )}
 
@@ -766,8 +858,12 @@ export default function Girvi() {
 
               {/* Redeem */}
               {actionType === "redeem" && (
-                <div className="p-3 rounded-lg bg-green-50 border border-green-200 text-xs text-green-800">
-                  Collect <strong>{formatCurrency(actionLoan.totalDue)}</strong> from the customer and return the pledged {actionLoan.metalType} ornament(s).
+                <div className="p-3 rounded-lg bg-green-50 border border-green-200 text-xs text-green-800 space-y-1">
+                  <div>Collect <strong>{formatCurrency(actionLoan.totalDue)}</strong> from the customer and return the pledged {actionLoan.metalType} ornament(s).</div>
+                  <div className="text-[10px] space-y-0.5">
+                    <div>Principal: {formatCurrency(actionLoan.currentPrincipal)}</div>
+                    <div>Interest due: {formatCurrency(actionLoan.outstandingInterest)}</div>
+                  </div>
                   {actionLoan.itemDescription && <div className="mt-1 font-medium">Items: {actionLoan.itemDescription}</div>}
                 </div>
               )}
@@ -849,13 +945,14 @@ export default function Girvi() {
 // ─── Loan row component ───────────────────────────────────────────────────────
 
 function LoanRow({
-  loan, expanded, payments, calendarMode, formatDateDisplay,
+  loan, expanded, payments, items, calendarMode, formatDateDisplay,
   shopName, shopAddress, shopMobile,
   onExpand, onAction, onWaReminder,
 }: {
   loan: Loan;
   expanded: boolean;
   payments?: Payment[];
+  items?: LoanItem[];
   calendarMode: "en" | "hi";
   formatDateDisplay: (iso: string) => string;
   shopName: string;
@@ -866,7 +963,7 @@ function LoanRow({
   onWaReminder: (loan: Loan, type: "due" | "overdue") => void;
 }) {
   const isActive = loan.status === "active" || loan.status === "extended";
-  const paymentTypeLabel: Record<string, string> = { interest: "Byaj", renewal: "Renewal", penalty: "Penalty" };
+  const paymentTypeLabel: Record<string, string> = { interest: "Byaj", renewal: "Renewal", penalty: "Penalty", principal: "Principal" };
 
   return (
     <div className={`px-3 md:px-4 py-3 ${loan.isOverdue ? "bg-red-50/50 dark:bg-red-950/10" : ""}`}>
@@ -895,7 +992,8 @@ function LoanRow({
           </div>
           <div className="text-xs text-muted-foreground mt-0.5 truncate">
             {loan.metalType.toUpperCase()} {loan.purity} · {loan.grossWeight.toFixed(3)}g ·{" "}
-            {loan.interestRate}%{loan.penaltyRate > 0 ? `+${loan.penaltyRate}%OD` : ""} {loan.interestPeriod}
+            {loan.interestRate}%/{loan.interestPeriod}{loan.penaltyRate > 0 ? `+${loan.penaltyRate}%OD` : ""}
+            {loan.principalPaid > 0 && <span className="text-emerald-600"> · bal {formatCurrency(loan.currentPrincipal)}</span>}
             {loan.itemDescription && <span className="hidden md:inline"> · {loan.itemDescription}</span>}
             <span className="hidden sm:inline"> · Due: {formatDateDisplay(loan.dueDate)}</span>
           </div>
@@ -926,21 +1024,33 @@ function LoanRow({
               <div>Net: {loan.netWeight.toFixed(3)}g</div>
               <div>Est. Value: {formatCurrency(loan.estimatedValue)}</div>
               {loan.itemDescription && <div className="mt-1 text-muted-foreground italic">{loan.itemDescription}</div>}
+              {items && items.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {items.map(it => (
+                    <div key={it.id} className="text-[10px] text-muted-foreground">
+                      {it.quantity}× {it.itemType} ({it.metalType === "silver" ? "Ag" : "Au"} {it.purity}) · {it.grossWeight.toFixed(3)}g · {formatCurrency(it.estimatedValue)}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div>
               <div className="text-muted-foreground mb-1 font-medium">Loan Terms</div>
-              <div className="font-medium">{formatCurrency(loan.loanAmount)} principal</div>
-              <div>{loan.interestRate}%{loan.penaltyRate > 0 ? ` (+${loan.penaltyRate}% OD penalty)` : ""} / {loan.interestPeriod}</div>
-              <div>Start: {formatDateDisplay(loan.startDate)}</div>
+              <div className="font-medium">{formatCurrency(loan.loanAmount)} original</div>
+              {loan.principalPaid > 0 && <div className="text-emerald-600">−{formatCurrency(loan.principalPaid)} repaid</div>}
+              {loan.principalPaid > 0 && <div className="font-semibold text-primary">{formatCurrency(loan.currentPrincipal)} current principal</div>}
+              <div className="mt-1">{loan.interestRate}%/{loan.interestPeriod}{loan.penaltyRate > 0 ? ` +${loan.penaltyRate}% OD` : ""}</div>
+              <div className="text-[10px] text-muted-foreground">{(loan.dailyRate * 100).toFixed(4)}%/day · {formatCurrency(Math.round(loan.currentPrincipal * loan.dailyRate))}/day</div>
+              <div className="mt-1">Start: {formatDateDisplay(loan.startDate)}</div>
               <div>Due: {formatDateDisplay(loan.dueDate)}</div>
-              <div className="mt-1">KYC: {loan.kycDocType ? loan.kycDocType.replace(/_/g, " ").toUpperCase() : "—"} {loan.kycDocNumber ?? ""}</div>
+              <div className="mt-1 text-[10px]">KYC: {loan.kycDocType ? loan.kycDocType.replace(/_/g, " ").toUpperCase() : "—"} {loan.kycDocNumber ?? ""}</div>
             </div>
             <div>
               <div className="text-muted-foreground mb-1 font-medium">Interest Breakdown</div>
               <div>Normal int.: {formatCurrency(loan.normalInterest)}</div>
               {loan.penaltyInterest > 0 && <div className="text-orange-600">Penalty int.: {formatCurrency(loan.penaltyInterest)}</div>}
               <div>Total accrued: {formatCurrency(loan.accruedInterest)}</div>
-              <div className="text-emerald-600">Collected: −{formatCurrency(loan.totalInterestCollected)}</div>
+              <div className="text-emerald-600">Collected (cycle): −{formatCurrency(loan.collectedSinceReset)}</div>
               <div className={`font-semibold mt-1 ${loan.isOverdue ? "text-destructive" : "text-primary"}`}>
                 Outstanding: {formatCurrency(loan.outstandingInterest)}
               </div>
@@ -977,7 +1087,7 @@ function LoanRow({
               <Button size="sm" variant="destructive" className="gap-1.5" onClick={() => onAction("forfeit")}>
                 <XCircle className="w-3.5 h-3.5" />Forfeit Gold
               </Button>
-              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openGirviVoucher(loan, shopName, shopAddress, shopMobile)}>
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openGirviVoucher(loan, shopName, shopAddress, shopMobile, items)}>
                 <PrinterIcon className="w-3.5 h-3.5" />Voucher
               </Button>
               <button
@@ -993,7 +1103,7 @@ function LoanRow({
           {/* Print voucher for closed loans */}
           {!isActive && (
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openGirviVoucher(loan, shopName, shopAddress, shopMobile)}>
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openGirviVoucher(loan, shopName, shopAddress, shopMobile, items)}>
                 <PrinterIcon className="w-3.5 h-3.5" />Print Voucher
               </Button>
             </div>
@@ -1019,7 +1129,7 @@ function LoanRow({
             <div>
               <div className="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
                 <ArrowUpRight className="w-3.5 h-3.5" />
-                Payment History ({payments.length} collection{payments.length !== 1 ? "s" : ""} · Total: {formatCurrency(loan.totalInterestCollected)})
+                Payment History ({payments.length} record{payments.length !== 1 ? "s" : ""} · Interest collected: {formatCurrency(loan.totalInterestCollected)}{loan.principalPaid > 0 ? ` · Principal repaid: ${formatCurrency(loan.principalPaid)}` : ""})
               </div>
               <div className="rounded-lg border border-border overflow-hidden">
                 {payments.map(p => (
@@ -1028,6 +1138,7 @@ function LoanRow({
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
                         p.paymentType === "renewal" ? "bg-blue-100 text-blue-700" :
                         p.paymentType === "penalty" ? "bg-orange-100 text-orange-700" :
+                        p.paymentType === "principal" ? "bg-purple-100 text-purple-700" :
                         "bg-emerald-100 text-emerald-700"
                       }`}>{paymentTypeLabel[p.paymentType] ?? p.paymentType}</span>
                       <span className="text-muted-foreground">{new Date(p.paymentDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
@@ -1054,6 +1165,35 @@ function LoanRow({
 
 // ─── New Loan Dialog ──────────────────────────────────────────────────────────
 
+type ItemRow = {
+  key: string;
+  itemType: string;
+  quantity: number;
+  metalType: string;
+  purity: string;
+  grossWeight: string;
+  netWeight: string;
+  estimatedValue: string;
+};
+
+const ITEM_TYPES = ["Necklace","Bangle","Ring","Chain","Earring","Pendant","Bracelet","Mangalsutra","Payal","Tikka","Nose Ring","Other"];
+
+function makeItem(): ItemRow {
+  return { key: Math.random().toString(36).slice(2), itemType: "Necklace", quantity: 1, metalType: "gold", purity: "22K", grossWeight: "", netWeight: "", estimatedValue: "" };
+}
+
+function getItemRate(metalType: string, purity: string, rates?: { gold22k: number; gold24k: number; gold18k: number; silver: number }) {
+  if (metalType === "silver") return rates?.silver ?? 95;
+  const map: Record<string, number> = {
+    "24K": rates?.gold24k ?? 7950,
+    "22K": rates?.gold22k ?? 7250,
+    "18K": rates?.gold18k ?? 5940,
+    "14K": Math.round((rates?.gold18k ?? 5940) * 14 / 18),
+    "925": rates?.silver ?? 95,
+  };
+  return map[purity] ?? rates?.gold22k ?? 7250;
+}
+
 function NewLoanDialog({ open, onClose, onCreated, rates }: {
   open: boolean;
   onClose: () => void;
@@ -1064,45 +1204,48 @@ function NewLoanDialog({ open, onClose, onCreated, rates }: {
   const [form, setForm] = useState({
     customerName: "", customerMobile: "",
     kycDocType: "aadhaar", kycDocNumber: "",
-    itemDescription: "",
-    metalType: "gold", purity: "22K",
-    grossWeight: "", netWeight: "", estimatedValue: "",
     loanAmount: "", interestRate: "2", penaltyRate: "1", interestPeriod: "monthly",
     dueDate: new Date(Date.now() + 90 * 86400000).toISOString().split("T")[0],
     notes: "",
   });
+  const [items, setItems] = useState<ItemRow[]>([makeItem()]);
   const [submitting, setSubmitting] = useState(false);
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
-  useEffect(() => {
-    const netWt = parseFloat(form.netWeight || form.grossWeight || "0");
-    if (netWt <= 0) return;
-    let rate: number;
-    if (form.metalType === "silver") {
-      rate = rates?.silver ?? 95;
-    } else {
-      const rateMap: Record<string, number> = {
-        "24K": rates?.gold24k ?? 7950,
-        "22K": rates?.gold22k ?? 7250,
-        "18K": rates?.gold18k ?? 5940,
-        "14K": Math.round((rates?.gold18k ?? 5940) * 14 / 18),
-        "925": rates?.silver ?? 95,
-      };
-      rate = rateMap[form.purity] ?? rates?.gold22k ?? 7250;
-    }
-    set("estimatedValue", String(Math.round(netWt * rate)));
-  }, [form.netWeight, form.grossWeight, form.metalType, form.purity, rates]);
+  const updateItem = useCallback((key: string, field: keyof ItemRow, value: string | number) => {
+    setItems(prev => prev.map(it => {
+      if (it.key !== key) return it;
+      const updated = { ...it, [field]: value };
+      if (field === "grossWeight" || field === "netWeight" || field === "metalType" || field === "purity") {
+        const wt = parseFloat(String(field === "netWeight" ? value : (updated.netWeight || (field === "grossWeight" ? value : updated.grossWeight))) || "0");
+        if (wt > 0) {
+          const mt = field === "metalType" ? String(value) : updated.metalType;
+          const pu = field === "purity" ? String(value) : updated.purity;
+          updated.estimatedValue = String(Math.round(wt * getItemRate(mt, pu, rates)));
+        }
+      }
+      return updated;
+    }));
+  }, [rates]);
+
+  const addItem = () => setItems(prev => [...prev, makeItem()]);
+  const removeItem = (key: string) => setItems(prev => prev.length > 1 ? prev.filter(it => it.key !== key) : prev);
+
+  const totalGross = items.reduce((s, it) => s + (parseFloat(it.grossWeight) || 0) * it.quantity, 0);
+  const totalNet = items.reduce((s, it) => s + (parseFloat(it.netWeight || it.grossWeight) || 0) * it.quantity, 0);
+  const totalEst = items.reduce((s, it) => s + (parseFloat(it.estimatedValue) || 0) * it.quantity, 0);
 
   const loanAmt = parseFloat(form.loanAmount || "0");
-  const estVal = parseFloat(form.estimatedValue || "0");
-  const ltv = estVal > 0 ? (loanAmt / estVal) * 100 : 0;
+  const ltv = totalEst > 0 ? (loanAmt / totalEst) * 100 : 0;
 
   const handleSubmit = async () => {
     if (!form.customerName.trim()) { toast({ title: "Customer name is required", variant: "destructive" }); return; }
     if (!form.customerMobile.trim()) { toast({ title: "Customer mobile is required", variant: "destructive" }); return; }
-    const gw = parseFloat(form.grossWeight);
-    if (!isFinite(gw) || gw <= 0) { toast({ title: "Gross weight must be a positive number", variant: "destructive" }); return; }
+    for (const it of items) {
+      const gw = parseFloat(it.grossWeight);
+      if (!isFinite(gw) || gw <= 0) { toast({ title: `Enter gross weight for ${it.itemType}`, variant: "destructive" }); return; }
+    }
     const la = parseFloat(form.loanAmount);
     if (!isFinite(la) || la <= 0) { toast({ title: "Loan amount must be a positive number", variant: "destructive" }); return; }
     const ir = parseFloat(form.interestRate);
@@ -1113,20 +1256,28 @@ function NewLoanDialog({ open, onClose, onCreated, rates }: {
 
     setSubmitting(true);
     try {
-      const nw = parseFloat(form.netWeight);
       const r = await fetch(API, {
         method: "POST", headers: getAuthHeaders(),
         body: JSON.stringify({
-          ...form,
-          grossWeight: gw,
-          netWeight: isFinite(nw) && nw > 0 ? nw : gw,
-          estimatedValue: parseFloat(form.estimatedValue) || 0,
+          customerName: form.customerName,
+          customerMobile: form.customerMobile,
+          kycDocType: form.kycDocType || null,
+          kycDocNumber: form.kycDocNumber.trim() || null,
           loanAmount: la,
           interestRate: ir,
           penaltyRate: parseFloat(form.penaltyRate) || 0,
+          interestPeriod: form.interestPeriod,
           dueDate: dueD.toISOString(),
-          itemDescription: form.itemDescription.trim() || null,
-          kycDocNumber: form.kycDocNumber.trim() || null,
+          notes: form.notes.trim() || null,
+          items: items.map(it => ({
+            itemType: it.itemType,
+            quantity: it.quantity,
+            metalType: it.metalType,
+            purity: it.purity,
+            grossWeight: parseFloat(it.grossWeight),
+            netWeight: parseFloat(it.netWeight || it.grossWeight) || parseFloat(it.grossWeight),
+            estimatedValue: parseFloat(it.estimatedValue) || 0,
+          })),
         }),
       });
       if (!r.ok) {
@@ -1135,7 +1286,8 @@ function NewLoanDialog({ open, onClose, onCreated, rates }: {
       }
       toast({ title: "Girvi loan created!" });
       onCreated();
-      setForm({ customerName: "", customerMobile: "", kycDocType: "aadhaar", kycDocNumber: "", itemDescription: "", metalType: "gold", purity: "22K", grossWeight: "", netWeight: "", estimatedValue: "", loanAmount: "", interestRate: "2", penaltyRate: "1", interestPeriod: "monthly", dueDate: new Date(Date.now() + 90 * 86400000).toISOString().split("T")[0], notes: "" });
+      setForm({ customerName: "", customerMobile: "", kycDocType: "aadhaar", kycDocNumber: "", loanAmount: "", interestRate: "2", penaltyRate: "1", interestPeriod: "monthly", dueDate: new Date(Date.now() + 90 * 86400000).toISOString().split("T")[0], notes: "" });
+      setItems([makeItem()]);
     } catch (err) {
       toast({ title: (err as Error).message || "Failed to create loan", variant: "destructive" });
     } finally { setSubmitting(false); }
@@ -1146,7 +1298,7 @@ function NewLoanDialog({ open, onClose, onCreated, rates }: {
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>New Girvi Loan</DialogTitle></DialogHeader>
         <div className="space-y-4">
 
@@ -1173,37 +1325,88 @@ function NewLoanDialog({ open, onClose, onCreated, rates }: {
             </div>
           </div>
 
-          {/* Collateral */}
+          {/* Pledged Items */}
           <div className="p-3 rounded-xl bg-muted/20 border border-border space-y-3">
-            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Gold / Silver Collateral</div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className={lbl}>Metal Type</label>
-                <Select value={form.metalType} onValueChange={v => set("metalType", v)}>
-                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                  <SelectContent><SelectItem value="gold">Gold</SelectItem><SelectItem value="silver">Silver</SelectItem></SelectContent>
-                </Select>
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pledged Items</div>
+              <Button type="button" size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={addItem}>
+                <Plus className="w-3 h-3" />Add Item
+              </Button>
+            </div>
+
+            {items.map((it, idx) => (
+              <div key={it.key} className="p-3 rounded-lg bg-background border border-border space-y-2 relative">
+                {items.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeItem(it.key)}
+                    className="absolute top-2 right-2 text-muted-foreground hover:text-destructive transition-colors"
+                    title="Remove item"
+                  >
+                    <XCircle className="w-4 h-4" />
+                  </button>
+                )}
+                <div className="text-xs font-medium text-muted-foreground">Item {idx + 1}</div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="sm:col-span-1">
+                    <label className={lbl}>Type</label>
+                    <Select value={it.itemType} onValueChange={v => updateItem(it.key, "itemType", v)}>
+                      <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                      <SelectContent>{ITEM_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className={lbl}>Qty</label>
+                    <input className={inp} type="number" min="1" value={it.quantity}
+                      onChange={e => updateItem(it.key, "quantity", Math.max(1, parseInt(e.target.value) || 1))} />
+                  </div>
+                  <div>
+                    <label className={lbl}>Metal</label>
+                    <Select value={it.metalType} onValueChange={v => updateItem(it.key, "metalType", v)}>
+                      <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="gold">Gold</SelectItem>
+                        <SelectItem value="silver">Silver</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className={lbl}>Purity</label>
+                    <Select value={it.purity} onValueChange={v => updateItem(it.key, "purity", v)}>
+                      <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="24K">24K</SelectItem>
+                        <SelectItem value="22K">22K</SelectItem>
+                        <SelectItem value="18K">18K</SelectItem>
+                        <SelectItem value="14K">14K</SelectItem>
+                        <SelectItem value="925">Silver 925</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className={lbl}>Gross Wt (g/pc) *</label>
+                    <input className={inp} type="number" step="0.001" value={it.grossWeight}
+                      onChange={e => updateItem(it.key, "grossWeight", e.target.value)} placeholder="0.000" />
+                  </div>
+                  <div>
+                    <label className={lbl}>Net Wt (g/pc)</label>
+                    <input className={inp} type="number" step="0.001" value={it.netWeight}
+                      onChange={e => updateItem(it.key, "netWeight", e.target.value)} placeholder="Same as gross" />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className={lbl}>Est. Value (₹) <span className="text-muted-foreground/60">auto · editable</span></label>
+                    <input className={inp} type="number" value={it.estimatedValue}
+                      onChange={e => updateItem(it.key, "estimatedValue", e.target.value)} placeholder="0" />
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className={lbl}>Purity</label>
-                <Select value={form.purity} onValueChange={v => set("purity", v)}>
-                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="24K">24K</SelectItem>
-                    <SelectItem value="22K">22K</SelectItem>
-                    <SelectItem value="18K">18K</SelectItem>
-                    <SelectItem value="14K">14K</SelectItem>
-                    <SelectItem value="925">Silver 925</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div><label className={lbl}>Gross Weight (g) *</label><input className={inp} type="number" step="0.001" value={form.grossWeight} onChange={e => set("grossWeight", e.target.value)} placeholder="0.000" /></div>
-              <div><label className={lbl}>Net Weight (g) <span className="text-muted-foreground/60">after stone deduction</span></label><input className={inp} type="number" step="0.001" value={form.netWeight} onChange={e => set("netWeight", e.target.value)} placeholder="Leave blank if same as gross" /></div>
-              <div className="sm:col-span-2"><label className={lbl}>Estimated Market Value (₹)</label><input className={inp} type="number" value={form.estimatedValue} onChange={e => set("estimatedValue", e.target.value)} /></div>
-              <div className="sm:col-span-2">
-                <label className={lbl}>Item Description <span className="text-muted-foreground/60">list all pieces (e.g. 1 necklace, 2 bangles, 3 rings)</span></label>
-                <input className={inp} value={form.itemDescription} onChange={e => set("itemDescription", e.target.value)} placeholder="e.g. Gold necklace 22K + 2 gold bangles + 1 ring" />
-              </div>
+            ))}
+
+            {/* Totals */}
+            <div className="flex flex-wrap gap-4 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-xs">
+              <div><span className="text-muted-foreground">Total Gross: </span><strong>{totalGross.toFixed(3)} g</strong></div>
+              <div><span className="text-muted-foreground">Total Net: </span><strong>{totalNet.toFixed(3)} g</strong></div>
+              <div><span className="text-muted-foreground">Total Est. Value: </span><strong className="text-primary">{formatCurrency(totalEst)}</strong></div>
             </div>
           </div>
 
@@ -1217,6 +1420,7 @@ function NewLoanDialog({ open, onClose, onCreated, rates }: {
                 <Select value={form.interestPeriod} onValueChange={v => set("interestPeriod", v)}>
                   <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="daily">Per Day</SelectItem>
                     <SelectItem value="weekly">Per Week</SelectItem>
                     <SelectItem value="monthly">Per Month</SelectItem>
                     <SelectItem value="yearly">Per Year</SelectItem>
@@ -1226,15 +1430,15 @@ function NewLoanDialog({ open, onClose, onCreated, rates }: {
               <div><label className={lbl}>Interest Rate (%) per period</label><input className={inp} type="number" step="0.1" value={form.interestRate} onChange={e => set("interestRate", e.target.value)} /></div>
               <div>
                 <label className={lbl}>Penalty Rate (%) <span className="text-muted-foreground/60">extra if overdue</span></label>
-                <input className={inp} type="number" step="0.1" value={form.penaltyRate} onChange={e => set("penaltyRate", e.target.value)} placeholder="e.g. 1 = extra 1% per period when overdue" />
+                <input className={inp} type="number" step="0.1" value={form.penaltyRate} onChange={e => set("penaltyRate", e.target.value)} placeholder="e.g. 1" />
               </div>
               <div><label className={lbl}>Due Date *</label><input className={inp} type="date" value={form.dueDate} min={new Date().toISOString().split("T")[0]} onChange={e => set("dueDate", e.target.value)} /></div>
-              <div className="sm:col-span-1"><label className={lbl}>Notes</label><input className={inp} value={form.notes} onChange={e => set("notes", e.target.value)} placeholder="Remarks, conditions, etc." /></div>
+              <div><label className={lbl}>Notes</label><input className={inp} value={form.notes} onChange={e => set("notes", e.target.value)} placeholder="Remarks, conditions, etc." /></div>
             </div>
           </div>
 
           {/* LTV warning */}
-          {loanAmt > 0 && estVal > 0 && (
+          {loanAmt > 0 && totalEst > 0 && (
             <div className={`p-3 rounded-xl border text-xs ${ltv > 80 ? "bg-red-50 border-red-200 text-red-700" : ltv > 60 ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-green-50 border-green-200 text-green-700"}`}>
               <strong>LTV: {ltv.toFixed(0)}%</strong> — {ltv > 80 ? "⚠ High risk" : ltv > 60 ? "Moderate risk" : "Good — comfortable margin"}
             </div>
@@ -1243,17 +1447,29 @@ function NewLoanDialog({ open, onClose, onCreated, rates }: {
           {/* Interest preview */}
           {form.loanAmount && form.interestRate && (
             <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 text-xs space-y-1">
-              <div className="font-semibold text-primary mb-2">Interest Preview</div>
-              {[{ label: "1 month", days: 30 }, { label: "3 months", days: 90 }, { label: "6 months", days: 180 }].map(({ label, days }) => {
-                const pd = form.interestPeriod === "weekly" ? 7 : form.interestPeriod === "yearly" ? 365 : 30;
-                const interest = Math.round(parseFloat(form.loanAmount || "0") * (parseFloat(form.interestRate || "0") / 100) * (days / pd));
+              <div className="font-semibold text-primary mb-1">Interest Preview</div>
+              {(() => {
+                const principal = parseFloat(form.loanAmount || "0");
+                const rate = parseFloat(form.interestRate || "0");
+                const pd = form.interestPeriod === "daily" ? 1 : form.interestPeriod === "weekly" ? 7 : form.interestPeriod === "yearly" ? 365 : 30;
+                const dailyRate = (rate / 100) / pd;
                 return (
-                  <div key={label} className="flex justify-between">
-                    <span className="text-muted-foreground">{label}</span>
-                    <span>Interest: {formatCurrency(interest)} · Total: {formatCurrency(parseFloat(form.loanAmount || "0") + interest)}</span>
-                  </div>
+                  <>
+                    <div className="text-muted-foreground mb-1">
+                      {rate}% per {form.interestPeriod} = <strong>{(dailyRate * 100).toFixed(4)}%/day</strong> = {formatCurrency(Math.round(principal * dailyRate))}/day
+                    </div>
+                    {[{ label: "1 month (30d)", days: 30 }, { label: "3 months (90d)", days: 90 }, { label: "6 months (180d)", days: 180 }].map(({ label, days }) => {
+                      const interest = Math.round(principal * (rate / 100) * (days / pd));
+                      return (
+                        <div key={label} className="flex justify-between">
+                          <span className="text-muted-foreground">{label}</span>
+                          <span>Interest: {formatCurrency(interest)} · Total: {formatCurrency(principal + interest)}</span>
+                        </div>
+                      );
+                    })}
+                  </>
                 );
-              })}
+              })()}
             </div>
           )}
 

@@ -25,6 +25,8 @@ export const girviLoansTable = pgTable("girvi_loans", {
   dueDate: timestamp("due_date").notNull(),
   status: text("status").notNull().default("active"),
   totalInterestCollected: numeric("total_interest_collected", { precision: 12, scale: 2 }).notNull().default("0"),
+  interestBaseline: numeric("interest_baseline", { precision: 12, scale: 2 }).notNull().default("0"), // interest collected at last clock reset
+  principalPaid: numeric("principal_paid", { precision: 12, scale: 2 }).notNull().default("0"),       // cumulative principal repaid
   redeemedDate: timestamp("redeemed_date"),
   redeemedAmount: numeric("redeemed_amount", { precision: 12, scale: 2 }),
   goldSaleValue: numeric("gold_sale_value", { precision: 12, scale: 2 }),
@@ -37,6 +39,23 @@ export const girviLoansTable = pgTable("girvi_loans", {
   index("girvi_user_due_idx").on(t.userId, t.dueDate),
   index("girvi_mobile_idx").on(t.customerMobile),
   index("girvi_loan_num_idx").on(t.loanNumber),
+]);
+
+// Individual items pledged under a girvi loan
+export const girviLoanItemsTable = pgTable("girvi_loan_items", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(0),
+  loanId: integer("loan_id").notNull(),
+  itemType: text("item_type").notNull(),      // necklace, bangle, ring, etc.
+  quantity: integer("quantity").notNull().default(1),
+  metalType: text("metal_type").notNull().default("gold"),
+  purity: text("purity").notNull().default("22K"),
+  grossWeight: numeric("gross_weight", { precision: 10, scale: 3 }).notNull(),
+  netWeight: numeric("net_weight", { precision: 10, scale: 3 }).notNull(),
+  estimatedValue: numeric("estimated_value", { precision: 12, scale: 2 }).notNull().default("0"),
+}, (t) => [
+  index("girvi_item_loan_idx").on(t.loanId),
+  index("girvi_item_user_idx").on(t.userId),
 ]);
 
 // Records each interest / penalty / principal payment against a loan
@@ -59,8 +78,11 @@ export const girviPaymentsTable = pgTable("girvi_payments", {
 
 export const insertGirviLoanSchema = createInsertSchema(girviLoansTable).omit({ id: true, createdAt: true });
 export const insertGirviPaymentSchema = createInsertSchema(girviPaymentsTable).omit({ id: true, createdAt: true });
+export const insertGirviLoanItemSchema = createInsertSchema(girviLoanItemsTable).omit({ id: true });
 
 export type InsertGirviLoan = z.infer<typeof insertGirviLoanSchema>;
 export type InsertGirviPayment = z.infer<typeof insertGirviPaymentSchema>;
+export type InsertGirviLoanItem = z.infer<typeof insertGirviLoanItemSchema>;
 export type GirviLoan = typeof girviLoansTable.$inferSelect;
 export type GirviPayment = typeof girviPaymentsTable.$inferSelect;
+export type GirviLoanItem = typeof girviLoanItemsTable.$inferSelect;

@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboard, Package, ShoppingCart, Users, Hammer, Wrench,
   TruckIcon, BarChart3, Settings, Menu, X, MessageCircle, Globe, Banknote,
-  ChevronRight, Pencil, LogOut, ShieldCheck, Megaphone,
+  ChevronRight, Pencil, LogOut, ShieldCheck, Megaphone, Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -25,6 +25,7 @@ const navItems = [
   { href: "/app/girvi", label: "Girvi", labelHi: "गिरवी", icon: Banknote },
   { href: "/app/purchases", label: "Purchases", labelHi: "खरीद", icon: TruckIcon },
   { href: "/app/marketing", label: "Marketing", labelHi: "मार्केटिंग", icon: Megaphone },
+  { href: "/app/pending-payments", label: "Pending Payments", labelHi: "बकाया भुगतान", icon: Clock },
   { href: "/app/reports", label: "Reports", labelHi: "रिपोर्ट", icon: BarChart3 },
   { href: "/app/settings", label: "Settings", labelHi: "सेटिंग्स", icon: Settings },
 ];
@@ -159,32 +160,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
             );
           })}
         </nav>
-
-        {/* Gold rate strip — clickable to update */}
-        <button
-          className="mx-3 mb-3 rounded-xl bg-white/10 px-3 py-2.5 border border-white/10 hover:bg-white/15 transition-colors text-left group"
-          onClick={openRateDialog}
-          data-testid="button-sidebar-rates"
-          title="Click to update metal rates"
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse flex-shrink-0" />
-              <span className="text-[11px] text-white/60 font-medium">22K Gold</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[12px] font-bold text-amber-300">₹{goldRate.toLocaleString("en-IN")}/10g</span>
-              <Pencil className="w-2.5 h-2.5 text-white/30 group-hover:text-white/60 transition-colors" />
-            </div>
-          </div>
-          <div className="flex items-center justify-between mt-1.5">
-            <span className="text-[11px] text-white/60 font-medium">Silver</span>
-            <span className="text-[11px] font-semibold text-white/70">
-              ₹{rates?.silver ? Math.round(rates.silver * 1000).toLocaleString("en-IN") : "95000"}/kg
-            </span>
-          </div>
-          <div className="text-[9px] text-white/30 mt-1 text-right">Click to update rates</div>
-        </button>
 
         {/* Bottom */}
         <div className="p-3 border-t border-white/10 space-y-1">

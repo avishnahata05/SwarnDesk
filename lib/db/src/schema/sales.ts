@@ -8,6 +8,7 @@ export const salesTable = pgTable("sales", {
   customerId: integer("customer_id"),
   customerName: text("customer_name").notNull(),
   totalAmount: numeric("total_amount", { precision: 12, scale: 2 }).notNull(),
+  paidAmount: numeric("paid_amount", { precision: 12, scale: 2 }).notNull().default("0"),
   gstAmount: numeric("gst_amount", { precision: 10, scale: 2 }).notNull().default("0"),
   discountAmount: numeric("discount_amount", { precision: 10, scale: 2 }).notNull().default("0"),
   exchangeGoldWeight: numeric("exchange_gold_weight", { precision: 10, scale: 3 }).notNull().default("0"),
@@ -43,8 +44,25 @@ export const saleLineItemsTable = pgTable("sale_line_items", {
   index("sale_items_inv_idx").on(t.inventoryItemId),
 ]);
 
+export const paymentTransactionsTable = pgTable("payment_transactions", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(0),
+  saleId: integer("sale_id").notNull(),
+  customerId: integer("customer_id"),
+  customerName: text("customer_name").notNull(),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  paymentMode: text("payment_mode").notNull().default("cash"),
+  paidAt: timestamp("paid_at").defaultNow().notNull(),
+  notes: text("notes"),
+}, (t) => [
+  index("pt_sale_idx").on(t.saleId),
+  index("pt_user_idx").on(t.userId),
+  index("pt_user_date_idx").on(t.userId, t.paidAt),
+]);
+
 export const insertSaleSchema = createInsertSchema(salesTable).omit({ id: true, createdAt: true, invoiceNumber: true });
 export const insertSaleLineItemSchema = createInsertSchema(saleLineItemsTable).omit({ id: true });
 export type InsertSale = z.infer<typeof insertSaleSchema>;
 export type Sale = typeof salesTable.$inferSelect;
 export type SaleLineItem = typeof saleLineItemsTable.$inferSelect;
+export type PaymentTransaction = typeof paymentTransactionsTable.$inferSelect;

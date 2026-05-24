@@ -1,16 +1,20 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { salesTable, saleLineItemsTable, inventoryItemsTable, customersTable } from "@workspace/db";
-import { eq, and, gte, lte, sql, desc } from "drizzle-orm";
+import { salesTable, saleLineItemsTable, inventoryItemsTable, customersTable, paymentTransactionsTable } from "@workspace/db";
+import { eq, and, gte, lte, sql, desc, inArray } from "drizzle-orm";
 
 const router = Router();
 
 function mapSale(s: typeof salesTable.$inferSelect) {
+  const total = parseFloat(s.totalAmount) || 0;
+  const paid = parseFloat(s.paidAmount) || 0;
   return {
     id: s.id,
     customerId: s.customerId,
     customerName: s.customerName,
-    totalAmount: parseFloat(s.totalAmount) || 0,
+    totalAmount: total,
+    paidAmount: paid,
+    balanceAmount: Math.max(0, total - paid),
     gstAmount: parseFloat(s.gstAmount) || 0,
     discountAmount: parseFloat(s.discountAmount) || 0,
     exchangeGoldWeight: parseFloat(s.exchangeGoldWeight) || 0,
@@ -21,6 +25,19 @@ function mapSale(s: typeof salesTable.$inferSelect) {
     saleDate: s.saleDate.toISOString(),
     notes: s.notes,
     createdAt: s.createdAt.toISOString(),
+  };
+}
+
+function mapTransaction(t: typeof paymentTransactionsTable.$inferSelect) {
+  return {
+    id: t.id,
+    saleId: t.saleId,
+    customerId: t.customerId,
+    customerName: t.customerName,
+    amount: parseFloat(t.amount) || 0,
+    paymentMode: t.paymentMode,
+    paidAt: t.paidAt.toISOString(),
+    notes: t.notes,
   };
 }
 
@@ -137,6 +154,11 @@ router.post("/", async (req, res) => {
       if (!isFinite(unitPrice) || unitPrice < 0) return res.status(400).json({ error: "Invalid unit price" });
     }
 
+    // Determine paid amount and auto-derive status
+    const rawPaid = parseFloat(data.paidAmount);
+    const paidAmount = isFinite(rawPaid) && rawPaid >= 0 ? rawPaid : totalAmount;
+    const autoStatus = paidAmount >= totalAmount ? "paid" : paidAmount > 0 ? "partial" : "pending";
+
     const sale = await db.transaction(async (tx) => {
       // 1. Lock inventory rows and check stock atomically
       for (const item of items) {
@@ -163,12 +185,13 @@ router.post("/", async (req, res) => {
         customerId: data.customerId ?? null,
         customerName: data.customerName.trim(),
         totalAmount: totalAmount.toString(),
+        paidAmount: paidAmount.toString(),
         gstAmount: (parseFloat(data.gstAmount) || 0).toString(),
         discountAmount: (parseFloat(data.discountAmount) || 0).toString(),
         exchangeGoldWeight: (parseFloat(data.exchangeGoldWeight) || 0).toString(),
         exchangeGoldValue: (parseFloat(data.exchangeGoldValue) || 0).toString(),
         paymentMode: data.paymentMode ?? "cash",
-        paymentStatus: data.paymentStatus ?? "paid",
+        paymentStatus: autoStatus,
         invoiceNumber,
         notes: data.notes ?? null,
       }).returning();
@@ -214,6 +237,19 @@ router.post("/", async (req, res) => {
                 WHERE id = ${custId} AND user_id = ${userId}`
           );
         }
+      }
+
+      // 5. Record first payment transaction (even for ₹0 credit/pending)
+      if (paidAmount > 0) {
+        await tx.insert(paymentTransactionsTable).values({
+          userId,
+          saleId: newSale.id,
+          customerId: data.customerId ? parseInt(data.customerId) || null : null,
+          customerName: data.customerName.trim(),
+          amount: paidAmount.toString(),
+          paymentMode: data.paymentMode ?? "cash",
+          notes: "Initial payment at time of sale",
+        });
       }
 
       return newSale;
@@ -281,6 +317,98 @@ router.patch("/:id", async (req, res) => {
     res.json(mapSale(sale));
   } catch (err) {
     req.log.error({ err }, "Failed to update sale");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /sales/pending — all sales with outstanding balance
+router.get("/pending/list", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const { search } = req.query as Record<string, string>;
+    let sales = await db.select().from(salesTable)
+      .where(and(
+        eq(salesTable.userId, userId),
+        inArray(salesTable.paymentStatus, ["partial", "pending"])
+      ))
+      .orderBy(desc(salesTable.saleDate))
+      .limit(200);
+
+    if (search) {
+      const q = search.toLowerCase();
+      sales = sales.filter(s => s.customerName.toLowerCase().includes(q) || s.invoiceNumber.toLowerCase().includes(q));
+    }
+
+    res.json(sales.map(mapSale));
+  } catch (err) {
+    req.log.error({ err }, "Failed to list pending sales");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /sales/:id/payments — payment history for a sale
+router.get("/:id/payments", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const txns = await db.select().from(paymentTransactionsTable)
+      .where(and(eq(paymentTransactionsTable.saleId, id), eq(paymentTransactionsTable.userId, userId)))
+      .orderBy(desc(paymentTransactionsTable.paidAt));
+    res.json(txns.map(mapTransaction));
+  } catch (err) {
+    req.log.error({ err }, "Failed to get payment history");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /sales/:id/payments — record a new payment against a sale
+router.post("/:id/payments", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const amount = parseFloat(req.body.amount);
+    if (!isFinite(amount) || amount <= 0) return res.status(400).json({ error: "Invalid payment amount" });
+
+    const allowedModes = ["cash", "upi", "card", "credit", "partial"];
+    const paymentMode = allowedModes.includes(req.body.paymentMode) ? req.body.paymentMode : "cash";
+    const notes = req.body.notes ? String(req.body.notes).slice(0, 500) : null;
+
+    const updated = await db.transaction(async (tx) => {
+      const [sale] = await tx.select().from(salesTable)
+        .where(and(eq(salesTable.id, id), eq(salesTable.userId, userId)));
+      if (!sale) throw Object.assign(new Error("Sale not found"), { statusCode: 404 });
+
+      const total = parseFloat(sale.totalAmount) || 0;
+      const alreadyPaid = parseFloat(sale.paidAmount) || 0;
+      const newPaid = Math.min(total, alreadyPaid + amount);
+      const newStatus = newPaid >= total ? "paid" : newPaid > 0 ? "partial" : "pending";
+
+      await tx.insert(paymentTransactionsTable).values({
+        userId,
+        saleId: id,
+        customerId: sale.customerId,
+        customerName: sale.customerName,
+        amount: amount.toString(),
+        paymentMode,
+        notes,
+      });
+
+      const [updated] = await tx.update(salesTable)
+        .set({ paidAmount: newPaid.toString(), paymentStatus: newStatus })
+        .where(and(eq(salesTable.id, id), eq(salesTable.userId, userId)))
+        .returning();
+
+      return updated;
+    });
+
+    res.json(mapSale(updated));
+  } catch (err: unknown) {
+    const e = err as { statusCode?: number; message?: string };
+    if (e.statusCode === 404) return res.status(404).json({ error: e.message });
+    req.log.error({ err }, "Failed to record payment");
     res.status(500).json({ error: "Internal server error" });
   }
 });

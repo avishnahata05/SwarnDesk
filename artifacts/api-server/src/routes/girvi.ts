@@ -1,13 +1,13 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { girviLoansTable, girviPaymentsTable } from "@workspace/db";
+import { girviLoansTable, girviPaymentsTable, girviLoanItemsTable } from "@workspace/db";
 import { eq, and, desc, sql } from "drizzle-orm";
 
 const router = Router();
 
 const VALID_METAL_TYPES = new Set(["gold", "silver"]);
 const VALID_STATUSES = new Set(["active", "redeemed", "forfeited", "extended"]);
-const VALID_PERIODS = new Set(["weekly", "monthly", "yearly"]);
+const VALID_PERIODS = new Set(["daily", "weekly", "monthly", "yearly"]);
 const MAX_NOTES_LEN = 1000;
 
 function safeFloat(val: unknown, fallback = 0): number {
@@ -15,30 +15,35 @@ function safeFloat(val: unknown, fallback = 0): number {
   return isFinite(n) ? n : fallback;
 }
 
+function getPeriodDays(period: string): number {
+  if (period === "daily") return 1;
+  if (period === "weekly") return 7;
+  if (period === "yearly") return 365;
+  return 30; // monthly default
+}
+
+// Interest accrues on currentPrincipal (= loanAmount - principalPaid) from startDate.
+// Two phases: normal (startDate → dueDate) + penalty (dueDate → now, at rate+penaltyRate).
 function calcAccruedInterest(loan: typeof girviLoansTable.$inferSelect, asOf = new Date()) {
-  const principal = safeFloat(loan.loanAmount);
+  const originalPrincipal = safeFloat(loan.loanAmount);
+  const principalPaid = safeFloat((loan as any).principalPaid ?? "0");
+  const principal = Math.max(0, originalPrincipal - principalPaid);
   const rate = safeFloat(loan.interestRate);
   const penaltyRate = safeFloat(loan.penaltyRate);
   const startDate = new Date(loan.startDate);
   const dueDate = new Date(loan.dueDate);
+  const periodDays = getPeriodDays(loan.interestPeriod);
+
   const daysElapsed = Math.max(0, Math.floor((asOf.getTime() - startDate.getTime()) / 86400000));
-
-  let periodDays = 30;
-  if (loan.interestPeriod === "weekly") periodDays = 7;
-  else if (loan.interestPeriod === "yearly") periodDays = 365;
-
-  // Normal interest accrues only up to the due date
   const normalDays = Math.min(daysElapsed, Math.max(0, Math.floor((dueDate.getTime() - startDate.getTime()) / 86400000)));
-  // Penalty accrues only for days past due date
   const overdueDays = Math.max(0, Math.floor((asOf.getTime() - dueDate.getTime()) / 86400000));
 
   const normalInterest = Math.round(principal * (rate / 100) * (normalDays / periodDays));
-  // Overdue: charge (rate + penaltyRate) for overdue period — no double-counting since normal stops at dueDate
   const penaltyInterest = overdueDays > 0
     ? Math.round(principal * ((rate + penaltyRate) / 100) * (overdueDays / periodDays))
     : 0;
 
-  return { normalInterest, penaltyInterest, total: normalInterest + penaltyInterest };
+  return { normalInterest, penaltyInterest, total: normalInterest + penaltyInterest, periodDays };
 }
 
 function generateLoanNumber() {
@@ -49,13 +54,27 @@ function generateLoanNumber() {
 
 function mapLoan(l: typeof girviLoansTable.$inferSelect, asOf = new Date()) {
   const loanAmount = safeFloat(l.loanAmount);
-  const { normalInterest, penaltyInterest, total: accruedInterest } =
-    (l.status === "active" || l.status === "extended") ? calcAccruedInterest(l, asOf) : { normalInterest: 0, penaltyInterest: 0, total: 0 };
+  const principalPaid = safeFloat((l as any).principalPaid ?? "0");
+  const currentPrincipal = Math.max(0, loanAmount - principalPaid);
+  // interestBaseline = interest already collected at time of last startDate reset.
+  // Outstanding = accrued(from startDate) - (totalCollected - baseline).
+  // This fixes the renewal bug where cumulative totalInterestCollected exceeded
+  // fresh-start accruedInterest and showed 0 outstanding forever.
+  const interestBaseline = safeFloat((l as any).interestBaseline ?? "0");
   const totalInterestCollected = safeFloat(l.totalInterestCollected);
-  const outstandingInterest = Math.max(0, accruedInterest - totalInterestCollected);
-  const totalDue = loanAmount + outstandingInterest;
+  const collectedSinceReset = Math.max(0, totalInterestCollected - interestBaseline);
+
+  const isActive = l.status === "active" || l.status === "extended";
+  const { normalInterest, penaltyInterest, total: accruedInterest, periodDays } =
+    isActive ? calcAccruedInterest(l, asOf) : { normalInterest: 0, penaltyInterest: 0, total: 0, periodDays: getPeriodDays(l.interestPeriod) };
+
+  const outstandingInterest = Math.max(0, accruedInterest - collectedSinceReset);
+  const totalDue = currentPrincipal + outstandingInterest;
   const dueDate = new Date(l.dueDate);
   const daysRemaining = Math.floor((dueDate.getTime() - asOf.getTime()) / 86400000);
+
+  // Daily rate for display
+  const dailyRate = (safeFloat(l.interestRate) / 100) / periodDays;
 
   return {
     id: l.id,
@@ -71,10 +90,14 @@ function mapLoan(l: typeof girviLoansTable.$inferSelect, asOf = new Date()) {
     grossWeight: safeFloat(l.grossWeight),
     netWeight: safeFloat(l.netWeight),
     estimatedValue: safeFloat(l.estimatedValue),
-    loanAmount,
+    loanAmount,         // original loan amount
+    principalPaid,      // cumulative principal repaid
+    currentPrincipal,   // effective principal for interest calc
     interestRate: safeFloat(l.interestRate),
     penaltyRate: safeFloat(l.penaltyRate),
     interestPeriod: l.interestPeriod,
+    periodDays,
+    dailyRate: Math.round(dailyRate * 1e6) / 1e6, // equivalent daily rate fraction
     startDate: l.startDate.toISOString(),
     dueDate: l.dueDate.toISOString(),
     status: l.status,
@@ -82,10 +105,11 @@ function mapLoan(l: typeof girviLoansTable.$inferSelect, asOf = new Date()) {
     penaltyInterest,
     accruedInterest,
     totalInterestCollected,
+    collectedSinceReset,
     outstandingInterest,
     totalDue,
     daysRemaining,
-    isOverdue: daysRemaining < 0 && (l.status === "active" || l.status === "extended"),
+    isOverdue: daysRemaining < 0 && isActive,
     redeemedDate: l.redeemedDate?.toISOString() ?? null,
     redeemedAmount: l.redeemedAmount ? safeFloat(l.redeemedAmount) : null,
     goldSaleValue: l.goldSaleValue ? safeFloat(l.goldSaleValue) : null,
@@ -119,7 +143,10 @@ router.get("/stats/summary", async (req, res) => {
     const now = new Date();
     const active = loans.filter(l => l.status === "active" || l.status === "extended");
     const overdue = active.filter(l => new Date(l.dueDate) < now);
-    const totalLent = active.reduce((s, l) => s + safeFloat(l.loanAmount), 0);
+    const totalLent = active.reduce((s, l) => {
+      const principalPaid = safeFloat((l as any).principalPaid ?? "0");
+      return s + Math.max(0, safeFloat(l.loanAmount) - principalPaid);
+    }, 0);
     const totalInterest = active.reduce((s, l) => s + calcAccruedInterest(l, now).total, 0);
     const totalLoss = loans.filter(l => l.status === "forfeited").reduce((s, l) => s + safeFloat(l.lossAmount), 0);
     const totalCollected = loans.reduce((s, l) => s + safeFloat(l.totalInterestCollected), 0);
@@ -182,61 +209,110 @@ router.post("/", async (req, res) => {
     const userId = req.user!.userId;
     const data = req.body;
 
-    // Input validation
     const customerName = String(data.customerName ?? "").trim();
     const customerMobile = String(data.customerMobile ?? "").trim();
     if (!customerName) return res.status(400).json({ error: "Customer name is required" });
     if (!customerMobile) return res.status(400).json({ error: "Customer mobile is required" });
 
-    const grossWeight = safeFloat(data.grossWeight);
-    const netWeight = safeFloat(data.netWeight ?? data.grossWeight, grossWeight);
     const loanAmount = safeFloat(data.loanAmount);
     const interestRate = safeFloat(data.interestRate, 2);
     const penaltyRate = safeFloat(data.penaltyRate, 0);
-    const estimatedValue = safeFloat(data.estimatedValue);
-
-    if (grossWeight <= 0) return res.status(400).json({ error: "Gross weight must be positive" });
     if (loanAmount <= 0) return res.status(400).json({ error: "Loan amount must be positive" });
     if (interestRate < 0 || interestRate > 100) return res.status(400).json({ error: "Interest rate must be 0–100" });
     if (penaltyRate < 0 || penaltyRate > 100) return res.status(400).json({ error: "Penalty rate must be 0–100" });
 
-    const metalType = VALID_METAL_TYPES.has(data.metalType) ? data.metalType : "gold";
     const interestPeriod = VALID_PERIODS.has(data.interestPeriod) ? data.interestPeriod : "monthly";
-
     const startDate = data.startDate ? new Date(data.startDate) : new Date();
     const dueDate = data.dueDate ? new Date(data.dueDate) : new Date(Date.now() + 90 * 86400000);
     if (isNaN(startDate.getTime())) return res.status(400).json({ error: "Invalid start date" });
     if (isNaN(dueDate.getTime())) return res.status(400).json({ error: "Invalid due date" });
     if (dueDate <= startDate) return res.status(400).json({ error: "Due date must be after start date" });
 
-    const purity = String(data.purity ?? "22K").trim() || "22K";
     const notes = data.notes ? String(data.notes).slice(0, MAX_NOTES_LEN) : null;
-    const itemDescription = data.itemDescription ? String(data.itemDescription).slice(0, 500) : null;
 
-    const [loan] = await db.insert(girviLoansTable).values({
-      userId,
-      loanNumber: generateLoanNumber(),
-      customerId: data.customerId ? parseInt(data.customerId) || null : null,
-      customerName,
-      customerMobile,
-      kycDocType: data.kycDocType ? String(data.kycDocType).trim() || null : null,
-      kycDocNumber: data.kycDocNumber ? String(data.kycDocNumber).trim() || null : null,
-      itemDescription,
-      metalType,
-      purity,
-      grossWeight: grossWeight.toString(),
-      netWeight: netWeight.toString(),
-      estimatedValue: estimatedValue.toString(),
-      loanAmount: loanAmount.toString(),
-      interestRate: interestRate.toString(),
-      penaltyRate: penaltyRate.toString(),
-      interestPeriod,
-      startDate,
-      dueDate,
-      status: "active",
-      totalInterestCollected: "0",
-      notes,
-    }).returning();
+    // Parse items array
+    type ItemInput = { itemType: string; quantity: number; metalType: string; purity: string; grossWeight: number; netWeight: number; estimatedValue: number };
+    const rawItems: ItemInput[] = Array.isArray(data.items) ? data.items : [];
+    if (rawItems.length === 0) return res.status(400).json({ error: "At least one item is required" });
+
+    const items = rawItems.map(it => ({
+      itemType: String(it.itemType ?? "Item").trim() || "Item",
+      quantity: Math.max(1, parseInt(String(it.quantity)) || 1),
+      metalType: VALID_METAL_TYPES.has(it.metalType) ? it.metalType : "gold",
+      purity: String(it.purity ?? "22K").trim() || "22K",
+      grossWeight: safeFloat(it.grossWeight),
+      netWeight: safeFloat(it.netWeight ?? it.grossWeight, safeFloat(it.grossWeight)),
+      estimatedValue: safeFloat(it.estimatedValue),
+    }));
+
+    const invalidItem = items.find(it => it.grossWeight <= 0);
+    if (invalidItem) return res.status(400).json({ error: `Item "${invalidItem.itemType}" must have a positive gross weight` });
+
+    // Aggregate totals across all items
+    const totalGrossWeight = items.reduce((s, it) => s + it.grossWeight * it.quantity, 0);
+    const totalNetWeight = items.reduce((s, it) => s + it.netWeight * it.quantity, 0);
+    const totalEstimatedValue = items.reduce((s, it) => s + it.estimatedValue * it.quantity, 0);
+
+    // Primary metal type = most common among items by gross weight
+    const metalTotals: Record<string, number> = {};
+    items.forEach(it => { metalTotals[it.metalType] = (metalTotals[it.metalType] ?? 0) + it.grossWeight * it.quantity; });
+    const primaryMetal = Object.entries(metalTotals).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "gold";
+
+    // Primary purity = purity of primary metal item with most weight
+    const primaryItems = items.filter(it => it.metalType === primaryMetal);
+    const purityTotals: Record<string, number> = {};
+    primaryItems.forEach(it => { purityTotals[it.purity] = (purityTotals[it.purity] ?? 0) + it.grossWeight * it.quantity; });
+    const primaryPurity = Object.entries(purityTotals).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "22K";
+
+    // Auto-generate description: "1 Necklace (Gold 22K), 2 Bangles (Gold 22K), 3 Rings (Silver 925)"
+    const autoDesc = items.map(it =>
+      `${it.quantity} ${it.itemType}${it.quantity > 1 ? "s" : ""} (${it.metalType === "silver" ? "Silver" : "Gold"} ${it.purity})`
+    ).join(", ");
+
+    const loan = await db.transaction(async tx => {
+      const [newLoan] = await tx.insert(girviLoansTable).values({
+        userId,
+        loanNumber: generateLoanNumber(),
+        customerId: data.customerId ? parseInt(data.customerId) || null : null,
+        customerName,
+        customerMobile,
+        kycDocType: data.kycDocType ? String(data.kycDocType).trim() || null : null,
+        kycDocNumber: data.kycDocNumber ? String(data.kycDocNumber).trim() || null : null,
+        itemDescription: autoDesc,
+        metalType: primaryMetal,
+        purity: primaryPurity,
+        grossWeight: totalGrossWeight.toFixed(3),
+        netWeight: totalNetWeight.toFixed(3),
+        estimatedValue: totalEstimatedValue.toFixed(2),
+        loanAmount: loanAmount.toString(),
+        interestRate: interestRate.toString(),
+        penaltyRate: penaltyRate.toString(),
+        interestPeriod,
+        startDate,
+        dueDate,
+        status: "active",
+        totalInterestCollected: "0",
+        notes,
+      }).returning();
+
+      // Insert individual items
+      for (const it of items) {
+        await tx.insert(girviLoanItemsTable).values({
+          userId,
+          loanId: newLoan.id,
+          itemType: it.itemType,
+          quantity: it.quantity,
+          metalType: it.metalType,
+          purity: it.purity,
+          grossWeight: (it.grossWeight * it.quantity).toFixed(3),
+          netWeight: (it.netWeight * it.quantity).toFixed(3),
+          estimatedValue: (it.estimatedValue * it.quantity).toFixed(2),
+        });
+      }
+
+      return newLoan;
+    });
+
     res.status(201).json(mapLoan(loan));
   } catch (err) {
     req.log.error({ err }, "Failed to create girvi loan");
@@ -261,48 +337,145 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// Collect interest — loan stays active, interest clock does NOT reset
+router.get("/:id/items", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const [loan] = await db.select({ id: girviLoansTable.id }).from(girviLoansTable)
+      .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)));
+    if (!loan) return res.status(404).json({ error: "Not found" });
+    const items = await db.select().from(girviLoanItemsTable)
+      .where(and(eq(girviLoanItemsTable.loanId, id), eq(girviLoanItemsTable.userId, userId)));
+    res.json(items.map(it => ({
+      id: it.id,
+      itemType: it.itemType,
+      quantity: it.quantity,
+      metalType: it.metalType,
+      purity: it.purity,
+      grossWeight: safeFloat(it.grossWeight),
+      netWeight: safeFloat(it.netWeight),
+      estimatedValue: safeFloat(it.estimatedValue),
+    })));
+  } catch (err) {
+    req.log.error({ err }, "Failed to get girvi items");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Record a payment — supports interest, penalty, and smart auto-allocation.
+// paymentType: "auto" (default) | "interest" | "penalty"
+//
+// "auto" logic:
+//   - If amount ≤ outstanding interest → pure interest payment, clock unchanged
+//   - If amount > outstanding interest:
+//       interest portion = outstanding interest
+//       principal portion = amount - outstandingInterest
+//       → totalInterestCollected += interestPortion
+//       → principalPaid += principalPortion
+//       → startDate reset to now (interest restarts on reduced principal)
+//       → interestBaseline set to new totalInterestCollected (fixes post-reset calc)
+//       → if currentPrincipal - principalPortion ≤ 0: auto-redeem
+//
+// "interest" / "penalty" → simple accumulation, no principal change.
 router.post("/:id/collect-interest", async (req, res) => {
   try {
     const userId = req.user!.userId;
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
-    const [loan] = await db.select().from(girviLoansTable).where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)));
+    const [loan] = await db.select().from(girviLoansTable)
+      .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)));
     if (!loan) return res.status(404).json({ error: "Not found" });
     if (loan.status !== "active" && loan.status !== "extended") {
-      return res.status(400).json({ error: "Can only collect interest on active or extended loans" });
+      return res.status(400).json({ error: "Can only collect payments on active or extended loans" });
     }
 
-    const { amount, paymentType = "interest", notes } = req.body;
+    const { amount, paymentType = "auto", notes } = req.body;
     const amt = safeFloat(amount);
     if (amt <= 0 || !isFinite(amt)) return res.status(400).json({ error: "Amount must be a positive number" });
-
-    const validPaymentTypes = new Set(["interest", "penalty"]);
-    const resolvedType = validPaymentTypes.has(paymentType) ? paymentType : "interest";
     const resolvedNotes = notes ? String(notes).slice(0, MAX_NOTES_LEN) : null;
+    const now = new Date();
 
-    // Insert payment record and atomically increment totalInterestCollected
-    await db.insert(girviPaymentsTable).values({
-      userId,
-      loanId: id,
-      loanNumber: loan.loanNumber,
-      customerName: loan.customerName,
-      amount: amt.toString(),
-      paymentType: resolvedType,
-      paymentDate: new Date(),
-      notes: resolvedNotes,
-    });
+    const mappedLoan = mapLoan(loan, now);
+    const outstandingInterest = mappedLoan.outstandingInterest;
+    const currentPrincipal = mappedLoan.currentPrincipal;
 
-    // Atomic increment — safe under concurrent requests
-    const [updated] = await db.update(girviLoansTable)
-      .set({ totalInterestCollected: sql`COALESCE(${girviLoansTable.totalInterestCollected}, 0) + ${amt.toString()}::numeric` })
-      .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
-      .returning();
+    let updated: typeof girviLoansTable.$inferSelect;
+
+    if (paymentType === "auto" && amt > outstandingInterest) {
+      // Smart allocation: settle interest first, remainder reduces principal
+      const interestPortion = Math.min(amt, outstandingInterest);
+      const principalPortion = amt - interestPortion;
+      const newPrincipalPaid = safeFloat((loan as any).principalPaid ?? "0") + principalPortion;
+      const remainingPrincipal = Math.max(0, safeFloat(loan.loanAmount) - newPrincipalPaid);
+      const newTotalInterestCollected = safeFloat(loan.totalInterestCollected) + interestPortion;
+
+      await db.transaction(async tx => {
+        // Payment record: interest portion (if any)
+        if (interestPortion > 0) {
+          await tx.insert(girviPaymentsTable).values({
+            userId, loanId: id, loanNumber: loan.loanNumber,
+            customerName: loan.customerName,
+            amount: interestPortion.toFixed(2),
+            paymentType: "interest",
+            paymentDate: now,
+            notes: resolvedNotes ? `${resolvedNotes} [auto: interest portion]` : "Auto: interest portion",
+          });
+        }
+        // Payment record: principal portion
+        await tx.insert(girviPaymentsTable).values({
+          userId, loanId: id, loanNumber: loan.loanNumber,
+          customerName: loan.customerName,
+          amount: principalPortion.toFixed(2),
+          paymentType: "principal",
+          paymentDate: now,
+          notes: resolvedNotes ? `${resolvedNotes} [auto: principal portion]` : "Auto: principal portion",
+        });
+      });
+
+      const loanUpdates: Record<string, unknown> = {
+        totalInterestCollected: newTotalInterestCollected.toFixed(2),
+        principalPaid: newPrincipalPaid.toFixed(2),
+        // Reset interest clock so future interest accrues on reduced principal
+        startDate: now,
+        // Baseline = new totalInterestCollected so outstanding correctly starts at 0 post-reset
+        interestBaseline: newTotalInterestCollected.toFixed(2),
+      };
+
+      if (remainingPrincipal <= 0) {
+        // Loan fully repaid
+        loanUpdates.status = "redeemed";
+        loanUpdates.redeemedDate = now;
+        loanUpdates.redeemedAmount = amt.toFixed(2);
+      }
+
+      [updated] = await db.update(girviLoansTable)
+        .set(loanUpdates as Partial<typeof girviLoansTable.$inferInsert>)
+        .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
+        .returning();
+
+    } else {
+      // Interest-only or penalty payment — simple accumulation, no principal/clock change
+      const resolvedType = paymentType === "penalty" ? "penalty" : "interest";
+      await db.insert(girviPaymentsTable).values({
+        userId, loanId: id, loanNumber: loan.loanNumber,
+        customerName: loan.customerName,
+        amount: amt.toFixed(2),
+        paymentType: resolvedType,
+        paymentDate: now,
+        notes: resolvedNotes,
+      });
+
+      [updated] = await db.update(girviLoansTable)
+        .set({ totalInterestCollected: sql`COALESCE(${girviLoansTable.totalInterestCollected}, 0) + ${amt.toFixed(2)}::numeric` })
+        .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
+        .returning();
+    }
 
     res.json(mapLoan(updated));
   } catch (err) {
-    req.log.error({ err }, "Failed to collect interest");
+    req.log.error({ err }, "Failed to collect payment");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -345,13 +518,16 @@ router.post("/:id/renew", async (req, res) => {
       });
     }
 
-    // Atomic increment + reset clock
+    // Reset clock + set interestBaseline = new totalInterestCollected so that
+    // outstanding interest correctly restarts at 0 after renewal.
+    const newTotalCollected = safeFloat(loan.totalInterestCollected) + paid;
     const [updated] = await db.update(girviLoansTable)
       .set({
         startDate: new Date(),
         dueDate: renewedDueDate,
         status: "active",
-        totalInterestCollected: sql`COALESCE(${girviLoansTable.totalInterestCollected}, 0) + ${paid.toString()}::numeric`,
+        totalInterestCollected: newTotalCollected.toFixed(2),
+        interestBaseline: newTotalCollected.toFixed(2),
         notes: mergedNotes ?? null,
       })
       .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))

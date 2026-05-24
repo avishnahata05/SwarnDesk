@@ -49,7 +49,7 @@ type InventoryItem = {
 function exportToCsv(items: InventoryItem[], filename = "inventory.csv") {
   const headers = [
     "ID", "Name", "Category", "Purity", "Gross Weight (g)", "Net Weight (g)",
-    "Stone Weight (g)", "Stone Value (₹)", "Making Charges (₹)", "Metal Rate (₹/g)",
+    "Stone Weight (g)", "Stone Value (₹)", "Making Charges (%)", "Metal Rate (₹/g)",
     "Total Value (₹)", "Quantity", "Branch", "HUID", "Barcode",
     "Low Stock Threshold", "Karigar", "Created At",
   ];
@@ -180,19 +180,20 @@ function ItemFormDialog({
   const { register, handleSubmit, reset, setValue, control } = useForm<ItemForm>({
     defaultValues: { category: "gold", purity: "22K", quantity: 1, branch: "Main", stoneWeight: 0, lowStockThreshold: 2, itemType: "Ring", ...defaultValues },
   });
-  const metalRateMap = {
-    gold: rates?.gold22k ?? 7250, silver: rates?.silver ?? 95,
-    diamond: rates?.gold22k ?? 7250, kundan: rates?.gold22k ?? 7250,
-    platinum: 3500, antique: rates?.gold22k ?? 7250,
-  };
   const watchedValues = useWatch({ control });
   const netW = parseFloat(String(watchedValues.netWeight || 0));
   const stoneW = parseFloat(String(watchedValues.stoneWeight || 0));
-  const making = parseFloat(String(watchedValues.makingCharges || 0));
+  const makingPct = parseFloat(String(watchedValues.makingCharges || 0));
   const cat = watchedValues.category ?? "gold";
-  const metalRate = metalRateMap[cat as keyof typeof metalRateMap] ?? 7250;
+  const pur = watchedValues.purity ?? "22K";
+  const metalRate = cat === "silver" ? (rates?.silver ?? 95)
+    : cat === "platinum" ? 3500
+    : pur === "24K" ? (rates?.gold24k ?? 7900)
+    : pur === "18K" ? (rates?.gold18k ?? 5940)
+    : (rates?.gold22k ?? 7250);
   const metalValue = Math.max(0, netW - stoneW) * metalRate;
-  const previewTotal = Math.round(metalValue + making);
+  const makingAmt = Math.round(metalValue * makingPct / 100);
+  const previewTotal = Math.round(metalValue + makingAmt);
 
   return (
     <Dialog open={open} onOpenChange={v => { onOpenChange(v); if (!v) reset(); }}>
@@ -238,8 +239,8 @@ function ItemFormDialog({
               <Input type="number" step="0.001" {...register("stoneWeight")} data-testid={`${testIdPrefix}-stone-weight`} />
             </div>
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Making Charges (₹) *</label>
-              <Input type="number" {...register("makingCharges", { required: true })} data-testid={`${testIdPrefix}-making-charges`} />
+              <label className="text-xs text-muted-foreground mb-1 block">Making Charges (%) *</label>
+              <Input type="number" step="0.01" placeholder="e.g. 12" {...register("makingCharges", { required: true })} data-testid={`${testIdPrefix}-making-charges`} />
             </div>
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Quantity</label>
@@ -267,7 +268,7 @@ function ItemFormDialog({
               <div className="font-semibold text-primary mb-1">Price Preview (at current rates)</div>
               <div className="flex justify-between"><span className="text-muted-foreground">Metal rate ({cat})</span><span>₹{metalRate.toLocaleString("en-IN")}/g</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Metal value ({Math.max(0, netW - stoneW).toFixed(3)}g)</span><span>{formatCurrency(metalValue)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Making charges</span><span>{formatCurrency(making)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Making charges ({makingPct}%)</span><span>{formatCurrency(makingAmt)}</span></div>
               <div className="flex justify-between font-bold text-sm text-primary border-t border-primary/20 pt-1.5"><span>Total Value</span><span>{formatCurrency(previewTotal)}</span></div>
             </div>
           )}
@@ -426,6 +427,20 @@ export default function Inventory() {
   // Cast to extended type
   const items = (rawItems ?? []) as InventoryItem[];
 
+  const getLiveRate = (category: string, purity: string) => {
+    if (category === "silver") return rates?.silver ?? 95;
+    if (category === "platinum") return 3500;
+    if (purity === "24K") return rates?.gold24k ?? 7900;
+    if (purity === "18K") return rates?.gold18k ?? 5940;
+    return rates?.gold22k ?? 7250;
+  };
+
+  const getLiveValue = (item: InventoryItem) => {
+    const liveRate = getLiveRate(item.category, item.purity);
+    const metalVal = item.netWeight * liveRate;
+    return Math.round(metalVal * (1 + item.makingCharges / 100) + (item.stoneValue ?? 0));
+  };
+
   const metalRateMap: Record<string, number> = {
     gold: rates?.gold22k ?? 7250, silver: rates?.silver ?? 95,
     diamond: rates?.gold22k ?? 7250, kundan: rates?.gold22k ?? 7250,
@@ -448,17 +463,18 @@ export default function Inventory() {
   }, [toast]);
 
   const buildPayload = (data: ItemForm) => {
-    const metalRate = metalRateMap[data.category] ?? 7250;
+    const metalRate = getLiveRate(data.category, data.purity);
     const netW = parseFloat(String(data.netWeight));
     const stoneW = parseFloat(String(data.stoneWeight || 0));
-    const making = parseFloat(String(data.makingCharges));
-    const totalValue = Math.max(0, netW - stoneW) * metalRate + making;
+    const makingPct = parseFloat(String(data.makingCharges));
+    const metalVal = Math.max(0, netW - stoneW) * metalRate;
+    const totalValue = metalVal + metalVal * makingPct / 100;
     return {
       ...data,
       grossWeight: parseFloat(String(data.grossWeight)),
       netWeight: netW,
       stoneWeight: stoneW,
-      makingCharges: making,
+      makingCharges: makingPct,
       metalRate,
       totalValue: Math.round(totalValue),
       quantity: parseInt(String(data.quantity)),
@@ -675,8 +691,8 @@ export default function Inventory() {
                   <td className="px-4 py-3 text-muted-foreground text-xs">{item.purity}</td>
                   <td className="px-4 py-3 text-right text-muted-foreground text-xs">{item.grossWeight.toFixed(3)}g</td>
                   <td className="px-4 py-3 text-right text-muted-foreground text-xs hidden md:table-cell">{item.netWeight.toFixed(3)}g</td>
-                  <td className="px-4 py-3 text-right text-muted-foreground text-xs hidden md:table-cell">{formatCurrency(item.makingCharges)}</td>
-                  <td className="px-4 py-3 text-right font-medium text-primary">{formatCurrency(item.totalValue)}</td>
+                  <td className="px-4 py-3 text-right text-muted-foreground text-xs hidden md:table-cell">{item.makingCharges.toFixed(2)}%</td>
+                  <td className="px-4 py-3 text-right font-medium text-primary">{formatCurrency(getLiveValue(item))}</td>
                   <td className="px-4 py-3 text-center font-medium hidden sm:table-cell">{item.quantity}</td>
                   <td className="px-4 py-3 text-center">{getStatusBadge(item.quantity, item.lowStockThreshold ?? 2)}</td>
                   <td className="px-4 py-3 text-center">

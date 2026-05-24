@@ -186,6 +186,8 @@ export interface Sale {
   customerId: number | null;
   customerName: string;
   totalAmount: number;
+  paidAmount: number;
+  balanceAmount: number;
   gstAmount: number;
   discountAmount: number;
   exchangeGoldWeight: number;
@@ -253,6 +255,7 @@ export interface SaleInput {
   customerId?: number | null;
   customerName: string;
   totalAmount: number;
+  paidAmount?: number;
   gstAmount: number;
   discountAmount: number;
   exchangeGoldWeight: number;
