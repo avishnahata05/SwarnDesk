@@ -485,7 +485,7 @@ export default function Customers() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <MessageCircle className="w-5 h-5 text-green-600" />
-              Bulk WhatsApp — {selectedIds.size} Recipient{selectedIds.size > 1 ? "s" : ""}
+              Bulk WhatsApp ({selectedIds.size} Recipient{selectedIds.size > 1 ? "s" : ""})
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
@@ -497,7 +497,7 @@ export default function Customers() {
 
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">
-                Message Template — use <code className="bg-muted px-1 rounded">{"{name}"}</code> for customer name
+                Message Template — use <code className="bg-muted px-1 rounded">{"{name}"}</code> to insert customer name
               </label>
               <textarea
                 className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary resize-none"

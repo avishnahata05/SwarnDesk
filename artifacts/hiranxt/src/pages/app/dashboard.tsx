@@ -17,8 +17,8 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 
-const PIE_COLORS = ["#7c3aed", "#f59e0b", "#3b82f6", "#ec4899", "#ef4444"];
-const CHART_PURPLE = "#7c3aed";
+const PIE_COLORS = ["#16a34a", "#f59e0b", "#3b82f6", "#8b5cf6", "#ef4444"];
+const CHART_GREEN = "#16a34a";
 
 const AI_RESPONSES: Record<string, string> = {
   "low stock": "You have items with low stock. Check the Inventory page for details and reorder alerts.",
@@ -194,8 +194,8 @@ export default function Dashboard() {
               <AreaChart data={dailyStats ?? []} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={CHART_PURPLE} stopOpacity={0.12} />
-                    <stop offset="95%" stopColor={CHART_PURPLE} stopOpacity={0} />
+                    <stop offset="5%" stopColor={CHART_GREEN} stopOpacity={0.12} />
+                    <stop offset="95%" stopColor={CHART_GREEN} stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" vertical={false} />
@@ -231,11 +231,11 @@ export default function Dashboard() {
                 <Area
                   type="monotone"
                   dataKey="sales"
-                  stroke={CHART_PURPLE}
+                  stroke={CHART_GREEN}
                   strokeWidth={2.5}
                   fill="url(#salesGrad)"
                   dot={false}
-                  activeDot={{ r: 4, fill: CHART_PURPLE, stroke: "#fff", strokeWidth: 2 }}
+                  activeDot={{ r: 4, fill: CHART_GREEN, stroke: "#fff", strokeWidth: 2 }}
                 />
               </AreaChart>
             </ResponsiveContainer>

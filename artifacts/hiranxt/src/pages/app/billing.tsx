@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { formatCurrency } from "@/lib/utils";
 import {
   useListInventoryItems, useListCustomers, useCreateSale, useGetCurrentRates,
@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import {
   Search, Plus, Trash2, MessageCircle, CheckCircle2,
   UserPlus, ChevronDown, ChevronUp, FileText, ClipboardList, History, Pencil,
+  ScanLine, CheckCircle, XCircle, Zap,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -309,8 +310,15 @@ export default function Billing() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const [tab, setTab] = useState<"stock" | "quick">("stock");
+  const [tab, setTab] = useState<"stock" | "quick" | "scan">("stock");
   const [customerSearch, setCustomerSearch] = useState("");
+
+  // Barcode scan state
+  const [scanInput, setScanInput] = useState("");
+  const [scanPending, setScanPending] = useState<string | null>(null);
+  const [lastScanned, setLastScanned] = useState<{ name: string; success: boolean } | null>(null);
+  const [scanLog, setScanLog] = useState<{ name: string; price: number; qty: number }[]>([]);
+  const scanInputRef = useRef<HTMLInputElement>(null);
   const [itemSearch, setItemSearch] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState<{ id: number; name: string; mobile: string } | null>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -380,10 +388,31 @@ export default function Billing() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  // Auto-focus scan input when entering scan tab
+  useEffect(() => {
+    if (tab === "scan") {
+      setScanPending(null);
+      setTimeout(() => scanInputRef.current?.focus(), 80);
+    }
+  }, [tab]);
+
+  // Global keydown: while scan tab is active, any printable keypress redirects to scan input
+  useEffect(() => {
+    if (tab !== "scan") return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.target === scanInputRef.current) return;
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      if (e.key.length === 1) scanInputRef.current?.focus();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [tab]);
+
+
   const { data: rates } = useGetCurrentRates();
   const { data: settings } = useGetSettings();
   const { data: customers } = useListCustomers({ ...(customerSearch ? { search: customerSearch } : {}) });
-  const { data: items } = useListInventoryItems({ ...(itemSearch ? { search: itemSearch } : {}) });
+  const { data: items, isFetching: itemsFetching } = useListInventoryItems({ ...(itemSearch ? { search: itemSearch } : {}) });
   const { data: customerDetail } = useGetCustomer(
     selectedCustomer?.id ?? 0,
     { query: { enabled: !!(selectedCustomer?.id && selectedCustomer.id > 0), queryKey: [] as unknown[] } }
@@ -402,6 +431,43 @@ export default function Billing() {
     if (purity === "14K") return Math.round((rates?.gold18k ?? 5940) * 14 / 18);
     return goldRate22k;
   };
+
+  // Process scan results once the API returns data for the pending barcode query
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!scanPending || itemsFetching) return;
+    const available = (items ?? []).filter(i => i.quantity > 0);
+    const exactBarcode = available.find(i => i.barcode && i.barcode.toLowerCase() === scanPending.toLowerCase());
+    const exactHuid = available.find(i => i.huid && i.huid.toLowerCase() === scanPending.toLowerCase());
+    const target = exactBarcode ?? exactHuid ?? (available.length === 1 ? available[0] : null);
+    setScanPending(null);
+    setItemSearch("");
+    if (target) {
+      const liveRate = getLiveRate(target.category, target.purity);
+      const pureMetalWeight = Math.max(0, target.netWeight - target.stoneWeight);
+      const liveMetalVal = pureMetalWeight * liveRate;
+      const liveMakingAmt = Math.round(liveMetalVal * target.makingCharges / 100);
+      const livePrice = Math.round(liveMetalVal + liveMakingAmt + (target.stoneValue ?? 0));
+      setCart(prev => {
+        const existing = prev.find(c => c.inventoryItemId === target.id);
+        if (existing) return prev.map(c => c.inventoryItemId === target.id ? { ...c, quantity: c.quantity + 1 } : c);
+        return [...prev, {
+          inventoryItemId: target.id, itemName: target.name, quantity: 1,
+          availableQty: target.quantity, unitPrice: livePrice, metalRate: liveRate,
+          grossWeight: target.grossWeight, netWeight: target.netWeight,
+          makingCharges: liveMakingAmt, stoneCharges: target.stoneValue ?? 0, discount: 0,
+        }];
+      });
+      setLastScanned({ name: target.name, success: true });
+      setScanLog(prev => [{ name: target.name, price: livePrice, qty: 1 }, ...prev].slice(0, 10));
+    } else {
+      setLastScanned({ name: scanPending, success: false });
+      toast({ title: `"${scanPending}" not found or out of stock`, variant: "destructive", duration: 2000 });
+    }
+    setScanInput("");
+    setTimeout(() => scanInputRef.current?.focus(), 50);
+  }, [scanPending, itemsFetching, items]); // getLiveRate intentionally omitted — stable within render
+
   const GST_RATE = 0.03;
 
   const GOLD_PURITIES = ["24K", "22K", "18K", "14K"];
@@ -442,6 +508,14 @@ export default function Billing() {
   const taxableBase = Math.max(0, subTotal - discount - exchangeGoldValue);
   const gstAmount = taxableBase * GST_RATE;
   const totalAmount = taxableBase + gstAmount;
+
+  const handleScanEnter = useCallback(() => {
+    const q = scanInput.trim();
+    if (!q) return;
+    setItemSearch(q);
+    setScanPending(q);
+    setScanInput("");
+  }, [scanInput]);
 
   const addToCart = (item: { id: number; name: string; category: string; purity: string; metalRate: number; grossWeight: number; netWeight: number; stoneWeight: number; makingCharges: number; stoneValue?: number | null; totalValue: number; quantity: number }) => {
     const liveRate = getLiveRate(item.category, item.purity);
@@ -621,7 +695,7 @@ export default function Billing() {
     <div className="max-w-7xl">
       <div className="mb-4">
         <h1 className="text-2xl font-bold">Billing & POS</h1>
-        <p className="text-muted-foreground text-sm">Create GST invoice · {shopInfo.name}</p>
+        <p className="text-muted-foreground text-sm">{shopInfo.name}</p>
       </div>
 
       <div className="grid xl:grid-cols-3 gap-5">
@@ -758,13 +832,22 @@ export default function Billing() {
           {/* ── Item entry section ── */}
           <Card className="border-border">
             <CardContent className="p-4 space-y-3">
-              <div className="flex gap-1 bg-muted rounded-lg p-1 w-fit">
+              <div className="flex gap-1 bg-muted rounded-lg p-1 w-fit flex-wrap">
                 <button
                   onClick={() => setTab("stock")}
                   className={`px-4 py-1.5 rounded-md text-xs font-medium transition-all ${tab === "stock" ? "bg-white shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
                   data-testid="tab-stock-items"
                 >
                   From Stock
+                </button>
+                <button
+                  onClick={() => setTab("scan")}
+                  className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-medium transition-all ${tab === "scan" ? "bg-white shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                  data-testid="tab-scan"
+                >
+                  <ScanLine className="w-3.5 h-3.5" />
+                  Barcode Scan
+                  {tab === "scan" && <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />}
                 </button>
                 <button
                   onClick={() => setTab("quick")}
@@ -775,7 +858,89 @@ export default function Billing() {
                 </button>
               </div>
 
-              {tab === "stock" ? (
+              {tab === "scan" ? (
+                <>
+                  {/* Scan mode — ready to receive barcode scanner input */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-sm font-medium flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                          Ready to Scan
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">Point scanner at any barcode or HUID tag. Press Enter to confirm.</p>
+                      </div>
+                      {scanLog.length > 0 && (
+                        <button onClick={() => setScanLog([])} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+                          Clear log
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Scan input */}
+                    <div className="relative">
+                      <ScanLine className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-primary" />
+                      <input
+                        ref={scanInputRef}
+                        value={scanInput}
+                        onChange={e => setScanInput(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); handleScanEnter(); } }}
+                        placeholder="Scan barcode here — scanner sends Enter automatically"
+                        className="w-full pl-10 pr-4 py-3 text-sm bg-background border-2 border-primary/30 focus:border-primary rounded-xl outline-none transition-colors placeholder:text-muted-foreground/50 font-mono tracking-wide"
+                        autoComplete="off"
+                        data-testid="input-barcode-scan"
+                      />
+                      {scanPending && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <span className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                          Looking up...
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Last scan result feedback */}
+                    {lastScanned && (
+                      <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
+                        lastScanned.success
+                          ? "bg-green-50 border border-green-200 text-green-800"
+                          : "bg-red-50 border border-red-200 text-red-800"
+                      }`}>
+                        {lastScanned.success
+                          ? <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
+                          : <XCircle className="w-4 h-4 text-red-500 flex-shrink-0" />}
+                        <span className="font-medium truncate">{lastScanned.name}</span>
+                        <span className="text-xs ml-auto shrink-0">{lastScanned.success ? "added to cart" : "not found"}</span>
+                      </div>
+                    )}
+
+                    {/* Scan log for this session */}
+                    {scanLog.length > 0 && (
+                      <div className="rounded-xl border border-border overflow-hidden">
+                        <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b border-border bg-muted/20 flex items-center gap-1.5">
+                          <Zap className="w-3 h-3" />
+                          Scan Log ({scanLog.length})
+                        </div>
+                        <div className="divide-y divide-border/50">
+                          {scanLog.map((entry, i) => (
+                            <div key={i} className="flex items-center justify-between px-3 py-2 text-xs">
+                              <span className="font-medium truncate">{entry.name}</span>
+                              <span className="text-primary font-semibold shrink-0 ml-2">{formatCurrency(entry.price)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="p-3 rounded-xl bg-primary/5 border border-primary/15 text-xs text-muted-foreground space-y-1">
+                      <div className="font-semibold text-foreground mb-1.5">How to use the barcode scanner:</div>
+                      <div className="flex items-start gap-2"><span className="text-primary font-bold shrink-0">1.</span> Click the "Barcode Scan" tab — the input activates automatically.</div>
+                      <div className="flex items-start gap-2"><span className="text-primary font-bold shrink-0">2.</span> Point your USB/Bluetooth scanner at the barcode or HUID sticker on the jewellery.</div>
+                      <div className="flex items-start gap-2"><span className="text-primary font-bold shrink-0">3.</span> The scanner beeps and the item is added to cart instantly.</div>
+                      <div className="flex items-start gap-2"><span className="text-primary font-bold shrink-0">4.</span> Scan multiple items one by one — each appears in the cart and the log above.</div>
+                    </div>
+                  </div>
+                </>
+              ) : tab === "stock" ? (
                 <>
                   <div className="text-sm font-medium">Add from Inventory</div>
                   <div className="relative" ref={itemDropdownRef}>
@@ -821,7 +986,7 @@ export default function Billing() {
                 </>
               ) : (
                 <>
-                  <div className="text-sm font-medium">Quick Entry — Untagged / Weight-based Item</div>
+                  <div className="text-sm font-medium">Quick Entry by Weight</div>
                   <p className="text-xs text-muted-foreground -mt-1">For items not in stock. Will NOT deduct from inventory.</p>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     <div className="col-span-2 sm:col-span-3">
@@ -1106,7 +1271,7 @@ export default function Billing() {
                 disabled={createSale.isPending || cart.length === 0}
                 data-testid="button-complete-sale"
               >
-                {createSale.isPending ? "Processing..." : cart.length === 0 ? "Add items to cart" : `Complete Sale · ${formatCurrency(totalAmount)}`}
+                {createSale.isPending ? "Processing..." : cart.length === 0 ? "Add items to cart" : `Complete Sale (${formatCurrency(totalAmount)})`}
               </Button>
             </CardContent>
           </Card>
@@ -1124,7 +1289,7 @@ export default function Billing() {
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              Gold rate <strong>per 10 grams</strong> · Silver rate <strong>per kg</strong>
+              Gold rate <strong>per 10 grams</strong>, Silver rate <strong>per kg</strong>
             </p>
             <div className="space-y-3">
               <div>

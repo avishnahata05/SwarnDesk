@@ -148,7 +148,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 className={cn(
                   "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all duration-150 group",
                   isActive
-                    ? "bg-white text-[hsl(220,55%,13%)] shadow-sm"
+                    ? "bg-white text-sidebar shadow-sm"
                     : "text-white/70 hover:bg-white/[0.09] hover:text-white font-medium"
                 )}
                 onClick={() => setSidebarOpen(false)}
@@ -216,30 +216,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <Menu className="w-5 h-5" />
           </button>
 
-          {/* Gold ticker — clickable */}
-          <div className="flex items-center gap-2 flex-1">
-            <button
-              className="hidden sm:flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 text-xs hover:bg-amber-100 transition-colors group cursor-pointer"
-              onClick={openRateDialog}
-              data-testid="button-header-gold-rate"
-              title="Click to update today's rates"
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse flex-shrink-0" />
-              <span className="text-amber-700 font-medium">22K Gold</span>
-              <span className="font-bold text-amber-800">₹{goldRate.toLocaleString("en-IN")}/10g</span>
-              <Pencil className="w-3 h-3 text-amber-500 group-hover:text-amber-700 transition-colors" />
-            </button>
-            <button
-              className="hidden md:flex items-center gap-2 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs hover:bg-muted/80 transition-colors group cursor-pointer"
-              onClick={openRateDialog}
-              data-testid="button-header-silver-rate"
-              title="Click to update today's rates"
-            >
-              <span className="text-muted-foreground">Silver</span>
-              <span className="font-semibold text-foreground">₹{rates?.silver ? Math.round(rates.silver * 1000).toLocaleString("en-IN") : "95000"}/kg</span>
-              <Pencil className="w-3 h-3 text-muted-foreground group-hover:text-foreground transition-colors" />
-            </button>
-          </div>
+          <div className="flex-1" />
 
           {/* Language toggle */}
           <Button

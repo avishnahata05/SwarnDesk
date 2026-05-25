@@ -763,7 +763,7 @@ export default function Inventory() {
         </div>
         {items.length > 0 && (
           <div className="px-4 py-2 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
-            <span>{items.length} items · Total live value: <strong className="text-foreground">{formatCurrency(items.reduce((s, i) => s + getLiveValue(i) * i.quantity, 0))}</strong></span>
+            <span>{items.length} items, Total live value: <strong className="text-foreground">{formatCurrency(items.reduce((s, i) => s + getLiveValue(i) * i.quantity, 0))}</strong></span>
             <button onClick={handleExportCsv} className="flex items-center gap-1 hover:text-primary transition-colors">
               <Download className="w-3 h-3" />Export CSV
             </button>
@@ -781,7 +781,7 @@ export default function Inventory() {
       {/* Edit item dialog */}
       {editItem && (
         <ItemFormDialog
-          open={!!editItem} onOpenChange={v => !v && setEditItem(null)} title={`Edit — ${editItem.name}`}
+          open={!!editItem} onOpenChange={v => !v && setEditItem(null)} title={`Edit: ${editItem.name}`}
           defaultValues={{
             name: editItem.name, category: editItem.category, purity: editItem.purity,
             itemType: editItem.itemType ?? "Ring", grossWeight: editItem.grossWeight,

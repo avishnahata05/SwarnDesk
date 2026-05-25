@@ -132,7 +132,7 @@ ${payment.notes ? `<div style="margin-top:8px;padding:6px;background:#f8f9fa;bor
   if (w) { w.document.write(html); w.document.close(); }
 }
 
-function openGirviVoucher(loan: Loan, shopName: string, shopAddress: string, shopMobile: string, items?: LoanItem[], rates?: Rates) {
+function openGirviVoucher(loan: Loan, shopName: string, shopAddress: string, shopMobile: string, items?: LoanItem[], rates?: Rates, payments?: Payment[]) {
   const fmt = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
   const periodDays = loan.interestPeriod === "daily" ? 1 : loan.interestPeriod === "weekly" ? 7 : loan.interestPeriod === "yearly" ? 365 : 30;
@@ -255,6 +255,46 @@ ${items && items.length > 0 ? `
   </ol>
 </div>
 ${loan.notes ? `<div style="font-size:11px;color:#666;margin-bottom:12px;padding:8px;background:#f8f9fa;border-radius:4px;border-left:3px solid #1a3e6e">Notes: ${loan.notes}</div>` : ""}
+${payments && payments.length > 0 ? (() => {
+  const typeLabel: Record<string, string> = { interest: "Byaj (Interest)", renewal: "Loan Renewal", penalty: "Penalty", principal: "Principal Repayment" };
+  const totalCollected = payments.reduce((s, p) => s + p.amount, 0);
+  let running = loan.loanAmount;
+  const rows = payments.map(p => {
+    if (p.paymentType === "principal") running -= p.amount;
+    const rowHtml = `<tr style="border-bottom:1px solid #f0f0f0">
+      <td style="padding:5px 8px">${fmtDate(p.paymentDate)}</td>
+      <td style="padding:5px 8px">${typeLabel[p.paymentType] ?? p.paymentType}</td>
+      <td style="padding:5px 8px;text-align:right;color:#15803d;font-weight:600">${fmt(p.amount)}</td>
+      <td style="padding:5px 8px;text-align:right">${fmt(running)}</td>
+      <td style="padding:5px 8px;color:#666;font-style:italic;font-size:10px">${p.notes ?? ""}</td>
+    </tr>`;
+    return rowHtml;
+  });
+  return `<div class="section" style="margin-bottom:12px">
+  <div class="section-title">Payment History (${payments.length} record${payments.length !== 1 ? "s" : ""})</div>
+  <table style="width:100%;border-collapse:collapse;font-size:11px">
+    <thead><tr style="background:#1a3e6e;color:#fff">
+      <th style="padding:6px 8px;text-align:left;font-weight:600">Date</th>
+      <th style="padding:6px 8px;text-align:left;font-weight:600">Type</th>
+      <th style="padding:6px 8px;text-align:right;font-weight:600">Amount</th>
+      <th style="padding:6px 8px;text-align:right;font-weight:600">Principal Balance</th>
+      <th style="padding:6px 8px;text-align:left;font-weight:600">Notes</th>
+    </tr></thead>
+    <tbody>${rows.join("")}</tbody>
+    <tfoot><tr style="background:#f0fdf4;font-weight:700">
+      <td style="padding:6px 8px" colspan="2">Total Collected</td>
+      <td style="padding:6px 8px;text-align:right;color:#15803d">${fmt(totalCollected)}</td>
+      <td style="padding:6px 8px;text-align:right">${fmt(loan.currentPrincipal)}</td>
+      <td style="padding:6px 8px"></td>
+    </tr></tfoot>
+  </table>
+  <div style="display:flex;gap:20px;padding:8px 0 0;font-size:11px;flex-wrap:wrap">
+    <div><span style="color:#666">Outstanding Interest: </span><strong style="color:${loan.outstandingInterest > 0 ? "#c0392b" : "#15803d"}">${fmt(loan.outstandingInterest)}</strong></div>
+    <div><span style="color:#666">Current Principal: </span><strong style="color:#1a3e6e">${fmt(loan.currentPrincipal)}</strong></div>
+    <div><span style="color:#666">Total Due Today: </span><strong style="color:#c0392b">${fmt(loan.totalDue)}</strong></div>
+  </div>
+</div>`;
+})() : ""}
 <div class="sig-row">
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Customer Signature</div><div style="font-size:10px;color:#999;margin-top:2px">${loan.customerName}</div></div>
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised Signatory</div><div style="font-size:10px;color:#999;margin-top:2px">${shopName}</div></div>
@@ -592,7 +632,7 @@ export default function Girvi() {
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Banknote className="w-6 h-6 text-primary" />
-            Girvi — Money Lending
+            Girvi Loans
           </h1>
           <p className="text-muted-foreground text-sm mt-0.5">Gold & silver collateral loans with live interest</p>
         </div>
@@ -660,7 +700,7 @@ export default function Girvi() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2 text-amber-800">
               <AlertTriangle className="w-4 h-4" />
-              High-Exposure Customers — multiple active loans
+              High-Exposure Customers (multiple active loans)
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -1134,7 +1174,7 @@ function LoanRow({
               <Button size="sm" variant="destructive" className="gap-1.5" onClick={() => onAction("forfeit")}>
                 <XCircle className="w-3.5 h-3.5" />Forfeit Gold
               </Button>
-              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openGirviVoucher(loan, shopName, shopAddress, shopMobile, items, rates)}>
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openGirviVoucher(loan, shopName, shopAddress, shopMobile, items, rates, payments)}>
                 <PrinterIcon className="w-3.5 h-3.5" />Voucher
               </Button>
               <button
@@ -1150,7 +1190,7 @@ function LoanRow({
           {/* Print voucher for closed loans */}
           {!isActive && (
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openGirviVoucher(loan, shopName, shopAddress, shopMobile, items, rates)}>
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openGirviVoucher(loan, shopName, shopAddress, shopMobile, items, rates, payments)}>
                 <PrinterIcon className="w-3.5 h-3.5" />Print Voucher
               </Button>
             </div>
@@ -1257,6 +1297,23 @@ function NewLoanDialog({ open, onClose, onCreated, rates }: {
   });
   const [items, setItems] = useState<ItemRow[]>([makeItem()]);
   const [submitting, setSubmitting] = useState(false);
+  const [existingLoans, setExistingLoans] = useState<{ loanNumber: string; loanAmount: number; startDate: string; status: string }[]>([]);
+
+  // Detect existing active loans when mobile is entered
+  useEffect(() => {
+    const digits = form.customerMobile.replace(/\D/g, "");
+    if (digits.length < 10) { setExistingLoans([]); return; }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API}?search=${encodeURIComponent(digits)}&status=active`, { headers: getAuthHeaders() });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled) setExistingLoans((data.loans ?? []).slice(0, 5));
+      } catch { /* ignore */ }
+    }, 500);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [form.customerMobile]);
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
@@ -1345,6 +1402,7 @@ function NewLoanDialog({ open, onClose, onCreated, rates }: {
       onCreated();
       setForm({ customerName: "", customerMobile: "", kycDocType: "aadhaar", kycDocNumber: "", loanAmount: "", interestRate: "2", penaltyRate: "1", interestPeriod: "monthly", dueDate: new Date(Date.now() + 90 * 86400000).toISOString().split("T")[0], notes: "" });
       setItems([makeItem()]);
+      setExistingLoans([]);
     } catch (err) {
       toast({ title: (err as Error).message || "Failed to create loan", variant: "destructive" });
     } finally { setSubmitting(false); }
@@ -1365,6 +1423,28 @@ function NewLoanDialog({ open, onClose, onCreated, rates }: {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><label className={lbl}>Customer Name *</label><input className={inp} value={form.customerName} onChange={e => set("customerName", e.target.value)} placeholder="Full name" /></div>
               <div><label className={lbl}>Mobile *</label><input className={inp} value={form.customerMobile} onChange={e => set("customerMobile", e.target.value)} placeholder="+91 XXXXX XXXXX" /></div>
+            </div>
+
+            {/* Existing loans for this mobile — shown when a customer has prior active loans */}
+            {existingLoans.length > 0 && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-2">
+                <div className="flex items-center gap-2 text-xs font-semibold text-amber-800">
+                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                  This customer already has {existingLoans.length} active loan{existingLoans.length !== 1 ? "s" : ""}. You can still create a new loan for additional jewellery.
+                </div>
+                <div className="space-y-1">
+                  {existingLoans.map(el => (
+                    <div key={el.loanNumber} className="flex items-center justify-between text-xs bg-white rounded px-2 py-1.5 border border-amber-200">
+                      <span className="font-mono font-semibold text-amber-900">{el.loanNumber}</span>
+                      <span className="text-muted-foreground">Started {new Date(el.startDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
+                      <span className="font-semibold text-primary">{formatCurrency(el.loanAmount)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className={lbl}>KYC Document Type</label>
                 <Select value={form.kycDocType} onValueChange={v => set("kycDocType", v)}>
