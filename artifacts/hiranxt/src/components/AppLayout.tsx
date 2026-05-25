@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboard, Package, ShoppingCart, Users, Hammer, Wrench,
   TruckIcon, BarChart3, Settings, Menu, X, MessageCircle, Globe, Banknote,
-  ChevronRight, Pencil, LogOut, ShieldCheck, Megaphone, Clock,
+  ChevronRight, Pencil, LogOut, ShieldCheck, Megaphone, Clock, ClipboardList,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -23,6 +23,7 @@ const navItems = [
   { href: "/app/karigars", label: "Karigars", labelHi: "कारीगर", icon: Hammer },
   { href: "/app/repairs", label: "Repairs", labelHi: "मरम्मत", icon: Wrench },
   { href: "/app/girvi", label: "Girvi", labelHi: "गिरवी", icon: Banknote },
+  { href: "/app/custom-orders", label: "Custom Orders", labelHi: "कस्टम ऑर्डर", icon: ClipboardList },
   { href: "/app/purchases", label: "Purchases", labelHi: "खरीद", icon: TruckIcon },
   { href: "/app/marketing", label: "Marketing", labelHi: "मार्केटिंग", icon: Megaphone },
   { href: "/app/pending-payments", label: "Pending Payments", labelHi: "बकाया भुगतान", icon: Clock },
@@ -217,6 +218,32 @@ export default function AppLayout({ children }: AppLayoutProps) {
           </button>
 
           <div className="flex-1" />
+
+          {/* Gold & Silver rate ticker — click to edit */}
+          {rates && (
+            <div className="hidden sm:flex items-center gap-2">
+              <button
+                onClick={openRateDialog}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 hover:bg-amber-100 transition-colors text-xs group"
+                data-testid="button-gold-rate-ticker"
+                title="Click to update today's metal rates"
+              >
+                <span className="text-amber-700 font-medium">22K Gold</span>
+                <span className="font-bold text-amber-800">₹{Math.round(rates.gold22k * 10).toLocaleString("en-IN")}/10g</span>
+                <Pencil className="w-3 h-3 text-amber-400 group-hover:text-amber-600 transition-colors" />
+              </button>
+              <button
+                onClick={openRateDialog}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted border border-border hover:bg-muted/80 transition-colors text-xs group"
+                data-testid="button-silver-rate-ticker"
+                title="Click to update today's metal rates"
+              >
+                <span className="text-muted-foreground font-medium">Silver</span>
+                <span className="font-bold">₹{Math.round(rates.silver * 1000).toLocaleString("en-IN")}/kg</span>
+                <Pencil className="w-3 h-3 text-muted-foreground group-hover:text-foreground transition-colors" />
+              </button>
+            </div>
+          )}
 
           {/* Language toggle */}
           <Button

@@ -91,14 +91,34 @@ router.patch("/:id", async (req, res) => {
       if (!VALID_STATUSES.includes(data.status)) return res.status(400).json({ error: "Invalid status value" });
       updateData.status = data.status;
     }
-    if (data.actualCost !== undefined) updateData.actualCost = data.actualCost?.toString();
+    if (data.actualCost !== undefined) updateData.actualCost = data.actualCost?.toString() ?? null;
     if (data.deliveredDate !== undefined) updateData.deliveredDate = data.deliveredDate ? new Date(data.deliveredDate) : null;
     if (data.notes !== undefined) updateData.notes = data.notes ? String(data.notes).slice(0, 500) : null;
+    if (data.customerName !== undefined) updateData.customerName = String(data.customerName).trim();
+    if (data.customerMobile !== undefined) updateData.customerMobile = String(data.customerMobile).trim();
+    if (data.itemDescription !== undefined) updateData.itemDescription = String(data.itemDescription).trim();
+    if (data.issue !== undefined) updateData.issue = String(data.issue).trim();
+    if (data.estimatedCost !== undefined) updateData.estimatedCost = parseFloat(String(data.estimatedCost)).toString();
+    if (data.promisedDate !== undefined) updateData.promisedDate = new Date(data.promisedDate);
     const [repair] = await db.update(repairJobsTable).set(updateData).where(and(eq(repairJobsTable.id, parseInt(req.params.id)), eq(repairJobsTable.userId, userId))).returning();
     if (!repair) return res.status(404).json({ error: "Not found" });
     res.json(mapRepair(repair));
   } catch (err) {
     req.log.error({ err }, "Failed to update repair");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.delete("/:id", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const [deleted] = await db.delete(repairJobsTable)
+      .where(and(eq(repairJobsTable.id, parseInt(req.params.id)), eq(repairJobsTable.userId, userId)))
+      .returning();
+    if (!deleted) return res.status(404).json({ error: "Not found" });
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "Failed to delete repair");
     res.status(500).json({ error: "Internal server error" });
   }
 });

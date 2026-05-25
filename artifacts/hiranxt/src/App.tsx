@@ -17,6 +17,7 @@ import Settings from "@/pages/app/settings";
 import Girvi from "@/pages/app/girvi";
 import Marketing from "@/pages/app/marketing";
 import PendingPayments from "@/pages/app/pending-payments";
+import CustomOrders from "@/pages/app/custom-orders";
 import LoginPage from "@/pages/auth/login";
 import RegisterPage from "@/pages/auth/register";
 import PaymentPage from "@/pages/auth/payment";
@@ -89,6 +90,7 @@ function Router() {
               <Route path="/app/girvi" component={Girvi} />
               <Route path="/app/marketing" component={Marketing} />
               <Route path="/app/pending-payments" component={PendingPayments} />
+              <Route path="/app/custom-orders" component={CustomOrders} />
               <Route component={Dashboard} />
             </Switch>
           </AppLayout>

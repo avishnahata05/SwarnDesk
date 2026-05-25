@@ -397,6 +397,12 @@ export interface RepairJobUpdate {
   deliveredDate?: string | null;
   /** @nullable */
   notes?: string | null;
+  customerName?: string;
+  customerMobile?: string;
+  itemDescription?: string;
+  issue?: string;
+  estimatedCost?: number;
+  promisedDate?: string;
 }
 
 export interface Purchase {
@@ -506,5 +512,125 @@ customerId?: number;
 
 export type ListRepairsParams = {
 status?: string;
+};
+
+export interface CustomOrder {
+  id: number;
+  orderNumber: string;
+  /** @nullable */
+  customerId?: number | null;
+  customerName: string;
+  customerMobile: string;
+  itemType: string;
+  /** @nullable */
+  description?: string | null;
+  metalType: string;
+  purity: string;
+  /** @nullable */
+  targetWeight?: number | null;
+  /** @nullable */
+  estimatedPrice?: number | null;
+  /** @nullable */
+  agreedPrice?: number | null;
+  advancePaid: number;
+  /** pending | karigar_assigned | in_progress | karigar_returned | ready | delivered | cancelled */
+  status: string;
+  /** @nullable */
+  karigarId?: number | null;
+  /** @nullable */
+  karigarName?: string | null;
+  /** @nullable */
+  metalIssuedWeight?: number | null;
+  /** @nullable */
+  metalIssuedDate?: string | null;
+  /** @nullable */
+  finishedWeight?: number | null;
+  /** @nullable */
+  wastageWeight?: number | null;
+  /** @nullable */
+  karigarReturnDate?: string | null;
+  /** @nullable */
+  karigarWages?: number | null;
+  /** @nullable */
+  karigarNotes?: string | null;
+  dueDate: string;
+  /** @nullable */
+  deliveryDate?: string | null;
+  /** @nullable */
+  finalPrice?: number | null;
+  /** @nullable */
+  notes?: string | null;
+  createdAt: string;
+}
+
+export interface CustomOrderInput {
+  /** @nullable */
+  customerId?: number | null;
+  customerName: string;
+  customerMobile: string;
+  itemType: string;
+  /** @nullable */
+  description?: string | null;
+  metalType: string;
+  purity: string;
+  /** @nullable */
+  targetWeight?: number | null;
+  /** @nullable */
+  estimatedPrice?: number | null;
+  /** @nullable */
+  agreedPrice?: number | null;
+  /** @nullable */
+  advancePaid?: number | null;
+  dueDate: string;
+  /** @nullable */
+  notes?: string | null;
+}
+
+export interface CustomOrderUpdate {
+  customerName?: string;
+  customerMobile?: string;
+  itemType?: string;
+  /** @nullable */
+  description?: string | null;
+  metalType?: string;
+  purity?: string;
+  /** @nullable */
+  targetWeight?: number | null;
+  /** @nullable */
+  estimatedPrice?: number | null;
+  /** @nullable */
+  agreedPrice?: number | null;
+  /** @nullable */
+  advancePaid?: number | null;
+  status?: string;
+  /** @nullable */
+  karigarId?: number | null;
+  /** @nullable */
+  karigarName?: string | null;
+  /** @nullable */
+  metalIssuedWeight?: number | null;
+  /** @nullable */
+  metalIssuedDate?: string | null;
+  /** @nullable */
+  finishedWeight?: number | null;
+  /** @nullable */
+  wastageWeight?: number | null;
+  /** @nullable */
+  karigarReturnDate?: string | null;
+  /** @nullable */
+  karigarWages?: number | null;
+  /** @nullable */
+  karigarNotes?: string | null;
+  dueDate?: string;
+  /** @nullable */
+  deliveryDate?: string | null;
+  /** @nullable */
+  finalPrice?: number | null;
+  /** @nullable */
+  notes?: string | null;
+}
+
+export type ListCustomOrdersParams = {
+  status?: string;
 };
 

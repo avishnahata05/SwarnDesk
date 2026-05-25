@@ -15,6 +15,7 @@ import girviRouter from "./girvi";
 import whatsappRouter from "./whatsapp";
 import authRouter from "./auth";
 import adminRouter from "./admin";
+import customOrdersRouter from "./custom-orders";
 
 const router: IRouter = Router();
 
@@ -35,6 +36,7 @@ router.use("/purchases", ...guard, purchasesRouter);
 router.use("/suppliers", ...guard, suppliersRouter);
 router.use("/settings", ...guard, settingsRouter);
 router.use("/girvi", ...guard, girviRouter);
+router.use("/custom-orders", ...guard, customOrdersRouter);
 router.use("/whatsapp", ...guard, whatsappRouter);
 router.use("/admin", adminRouter); // admin has its own auth inside
 

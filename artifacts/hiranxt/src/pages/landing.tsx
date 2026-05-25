@@ -1,4 +1,3 @@
-import { useState, useEffect } from "react";
 import { Link } from "wouter";
 import {
   Zap, Users, Hammer, Package,
@@ -79,14 +78,6 @@ const plans = [
 ];
 
 export default function LandingPage() {
-  const [goldRate, setGoldRate] = useState(7250);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setGoldRate(prev => prev + (Math.random() > 0.5 ? 1 : -1) * Math.floor(Math.random() * 5));
-    }, 30000);
-    return () => clearInterval(interval);
-  }, []);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -100,10 +91,6 @@ export default function LandingPage() {
             <span className="text-lg font-bold tracking-tight">SwarnDesk</span>
           </div>
           <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-full px-3 py-1.5 border border-border">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-              22K Gold: <span className="text-primary font-semibold ml-1">₹{(goldRate * 10).toLocaleString("en-IN")}/10g</span>
-            </div>
             <Link href="/login">
               <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-foreground" data-testid="button-sign-in-nav">
                 Sign In

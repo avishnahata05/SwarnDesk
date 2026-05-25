@@ -1,17 +1,20 @@
 import { useState } from "react";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import {
-  useListRepairs, useCreateRepair, useUpdateRepair, useGetSettings,
-  getListRepairsQueryKey
+  useListRepairs, useCreateRepair, useUpdateRepair, useDeleteRepair, useGetSettings,
+  getListRepairsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { useForm } from "react-hook-form";
-import { Plus, Wrench, MessageCircle, ArrowRight } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Plus, MessageCircle, ArrowRight, Pencil, Trash2, PrinterIcon,
+  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const STATUSES = ["received", "in_progress", "ready", "delivered"] as const;
@@ -25,204 +28,597 @@ const STATUS_LABELS: Record<Status, string> = {
 };
 
 const STATUS_COLORS: Record<Status, string> = {
-  received: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-  in_progress: "bg-orange-500/10 text-orange-400 border-orange-500/20",
-  ready: "bg-green-500/10 text-green-400 border-green-500/20",
+  received: "bg-blue-500/10 text-blue-700 border-blue-500/20",
+  in_progress: "bg-orange-500/10 text-orange-700 border-orange-500/20",
+  ready: "bg-green-500/10 text-green-700 border-green-500/20",
   delivered: "bg-muted text-muted-foreground border-border",
 };
 
-interface RepairForm {
-  customerName: string; customerMobile: string; itemDescription: string;
-  issue: string; estimatedCost: number; promisedDate: string; notes: string;
+const STATUS_COLUMN_BG: Record<Status, string> = {
+  received: "bg-blue-50/60 border-blue-200/60",
+  in_progress: "bg-orange-50/60 border-orange-200/60",
+  ready: "bg-green-50/60 border-green-200/60",
+  delivered: "bg-muted/20 border-border",
+};
+
+const nextStatus: Record<Status, Status | null> = {
+  received: "in_progress",
+  in_progress: "ready",
+  ready: "delivered",
+  delivered: null,
+};
+
+type Repair = {
+  id: number;
+  customerName: string;
+  customerMobile: string;
+  itemDescription: string;
+  issue: string;
+  estimatedCost: number;
+  actualCost?: number | null;
+  status: string;
+  receivedDate: string;
+  promisedDate: string;
+  deliveredDate?: string | null;
+  notes?: string | null;
+};
+
+type RepairForm = {
+  customerName: string;
+  customerMobile: string;
+  itemDescription: string;
+  issue: string;
+  estimatedCost: string;
+  promisedDate: string;
+  notes: string;
+};
+
+const EMPTY_FORM: RepairForm = {
+  customerName: "", customerMobile: "", itemDescription: "",
+  issue: "", estimatedCost: "", promisedDate: "", notes: "",
+};
+
+// ─── Print job card ────────────────────────────────────────────────────────────
+function printRepairJobCard(repair: Repair, shopName: string, shopAddress: string, shopMobile: string) {
+  const fmt = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
+  const fmtD = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+<title>Repair Job Card – #${repair.id}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;color:#111;font-size:12px;background:#fff}
+.page{max-width:400px;margin:0 auto;padding:20px}
+.shop{text-align:center;border-bottom:2px solid #1a3e6e;padding-bottom:10px;margin-bottom:12px}
+.shop-name{font-size:17px;font-weight:800;color:#1a3e6e}
+.shop-sub{font-size:10px;color:#555;margin-top:2px}
+.title{text-align:center;font-weight:700;font-size:13px;color:#c0392b;letter-spacing:1px;margin:8px 0;border:1px dashed #c0392b;padding:5px}
+.row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed #eee}
+.label{color:#666}
+.value{font-weight:600;text-align:right;max-width:55%;word-break:break-word}
+.status-badge{display:inline-block;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:700;background:#f0fdf4;color:#15803d;border:1px solid #86efac}
+.note-box{margin-top:8px;padding:6px;background:#f8f9fa;border-radius:4px;font-size:11px;color:#555;border-left:3px solid #1a3e6e}
+.sig-row{display:flex;justify-content:space-between;margin-top:24px}
+.sig-box{text-align:center;width:45%}
+.sig-line{border-top:1px solid #333;margin-bottom:4px}
+.sig-label{font-size:9px;color:#666}
+.footer{text-align:center;font-size:10px;color:#aaa;margin-top:16px;border-top:1px dashed #ddd;padding-top:8px}
+@media print{.no-print{display:none!important}}
+</style></head><body>
+<div class="page">
+<div class="no-print" style="text-align:right;margin-bottom:12px">
+  <button onclick="window.print()" style="background:#1a3e6e;color:#fff;border:none;padding:6px 16px;border-radius:4px;font-size:12px;cursor:pointer">🖨 Print</button>
+</div>
+<div class="shop">
+  <div class="shop-name">${shopName}</div>
+  <div class="shop-sub">${shopAddress}${shopMobile ? ` · ${shopMobile}` : ""}</div>
+</div>
+<div class="title">REPAIR JOB CARD</div>
+<div class="row"><span class="label">Job #</span><span class="value">#${repair.id}</span></div>
+<div class="row"><span class="label">Received</span><span class="value">${fmtD(repair.receivedDate)}</span></div>
+<div class="row"><span class="label">Status</span><span class="value"><span class="status-badge">${STATUS_LABELS[repair.status as Status] ?? repair.status}</span></span></div>
+<div class="row"><span class="label">Customer</span><span class="value">${repair.customerName}</span></div>
+<div class="row"><span class="label">Mobile</span><span class="value">${repair.customerMobile}</span></div>
+<div class="row"><span class="label">Item</span><span class="value">${repair.itemDescription}</span></div>
+<div class="row"><span class="label">Issue</span><span class="value">${repair.issue}</span></div>
+<div class="row"><span class="label">Estimated Cost</span><span class="value">${fmt(repair.estimatedCost)}</span></div>
+${repair.actualCost != null ? `<div class="row"><span class="label">Actual Cost</span><span class="value">${fmt(repair.actualCost)}</span></div>` : ""}
+<div class="row"><span class="label">Promised Date</span><span class="value">${fmtD(repair.promisedDate)}</span></div>
+${repair.deliveredDate ? `<div class="row"><span class="label">Delivered</span><span class="value">${fmtD(repair.deliveredDate)}</span></div>` : ""}
+${repair.notes ? `<div class="note-box">Notes: ${repair.notes}</div>` : ""}
+<div class="sig-row">
+  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Customer Signature</div></div>
+  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised by ${shopName}</div></div>
+</div>
+<div class="footer">This is a computer-generated repair job card. Powered by SwarnDesk.</div>
+</div></body></html>`;
+
+  const w = window.open("", "_blank", "width=460,height=640");
+  if (w) { w.document.write(html); w.document.close(); }
 }
 
+// ─── Main component ────────────────────────────────────────────────────────────
 export default function Repairs() {
-  const [addOpen, setAddOpen] = useState(false);
-  const queryClient = useQueryClient();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const { data: repairs, isLoading } = useListRepairs();
   const { data: settings } = useGetSettings();
   const createRepair = useCreateRepair();
   const updateRepair = useUpdateRepair();
+  const deleteRepair = useDeleteRepair();
 
-  const { register, handleSubmit, reset } = useForm<RepairForm>();
+  const shopName = settings?.businessName ?? "SwarnDesk Jewellers";
+  const shopAddress = settings?.address ?? "";
+  const shopMobile = settings?.mobile ?? "";
 
-  const onSubmit = (data: RepairForm) => {
+  // ── Create dialog ──
+  const [addOpen, setAddOpen] = useState(false);
+  const [form, setForm] = useState<RepairForm>(EMPTY_FORM);
+  const [submitting, setSubmitting] = useState(false);
+
+  // ── Edit dialog ──
+  const [editRepair, setEditRepair] = useState<Repair | null>(null);
+  const [editForm, setEditForm] = useState<RepairForm>(EMPTY_FORM);
+
+  // ── Delete confirmation ──
+  const [deleteTarget, setDeleteTarget] = useState<Repair | null>(null);
+
+  // ── Status change dialog ──
+  const [statusRepair, setStatusRepair] = useState<Repair | null>(null);
+  const [newStatus, setNewStatus] = useState<Status>("received");
+  const [actualCost, setActualCost] = useState("");
+  const [statusNotes, setStatusNotes] = useState("");
+
+  // ── Collapse columns ──
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: getListRepairsQueryKey() });
+
+  const setF = (k: keyof RepairForm, v: string) => setForm(f => ({ ...f, [k]: v }));
+  const setEF = (k: keyof RepairForm, v: string) => setEditForm(f => ({ ...f, [k]: v }));
+
+  const handleCreate = () => {
+    if (!form.customerName.trim()) { toast({ title: "Customer name required", variant: "destructive" }); return; }
+    if (!form.customerMobile.trim()) { toast({ title: "Mobile required", variant: "destructive" }); return; }
+    if (!form.itemDescription.trim()) { toast({ title: "Item description required", variant: "destructive" }); return; }
+    if (!form.issue.trim()) { toast({ title: "Issue/work required", variant: "destructive" }); return; }
+    const cost = parseFloat(form.estimatedCost);
+    if (!isFinite(cost) || cost < 0) { toast({ title: "Valid estimated cost required", variant: "destructive" }); return; }
+    if (!form.promisedDate) { toast({ title: "Promised date required", variant: "destructive" }); return; }
+
+    setSubmitting(true);
     createRepair.mutate({
       data: {
-        customerName: data.customerName,
-        customerMobile: data.customerMobile,
-        itemDescription: data.itemDescription,
-        issue: data.issue,
-        estimatedCost: parseFloat(String(data.estimatedCost)),
-        promisedDate: new Date(data.promisedDate).toISOString(),
-        notes: data.notes || null,
+        customerName: form.customerName,
+        customerMobile: form.customerMobile,
+        itemDescription: form.itemDescription,
+        issue: form.issue,
+        estimatedCost: cost,
+        promisedDate: new Date(form.promisedDate).toISOString(),
+        notes: form.notes.trim() || null,
         customerId: null,
       }
     }, {
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getListRepairsQueryKey() });
+        invalidate();
         toast({ title: "Repair job logged" });
         setAddOpen(false);
-        reset();
+        setForm(EMPTY_FORM);
       },
       onError: () => toast({ title: "Failed to log repair", variant: "destructive" }),
+      onSettled: () => setSubmitting(false),
     });
   };
 
-  const nextStatus: Record<Status, Status | null> = {
-    received: "in_progress",
-    in_progress: "ready",
-    ready: "delivered",
-    delivered: null,
+  const openEdit = (r: Repair) => {
+    setEditRepair(r);
+    setEditForm({
+      customerName: r.customerName,
+      customerMobile: r.customerMobile,
+      itemDescription: r.itemDescription,
+      issue: r.issue,
+      estimatedCost: String(r.estimatedCost),
+      promisedDate: r.promisedDate.split("T")[0],
+      notes: r.notes ?? "",
+    });
   };
 
-  const advanceStatus = (id: number, currentStatus: string) => {
-    const next = nextStatus[currentStatus as Status];
-    if (!next) return;
+  const handleEdit = () => {
+    if (!editRepair) return;
+    const cost = parseFloat(editForm.estimatedCost);
+    if (!editForm.customerName.trim() || !editForm.itemDescription.trim() || !editForm.issue.trim()) {
+      toast({ title: "Fill all required fields", variant: "destructive" }); return;
+    }
+    if (!isFinite(cost) || cost < 0) { toast({ title: "Valid estimated cost required", variant: "destructive" }); return; }
     updateRepair.mutate({
-      id,
+      id: editRepair.id,
       data: {
-        status: next,
-        ...(next === "delivered" ? { deliveredDate: new Date().toISOString() } : {}),
+        customerName: editForm.customerName,
+        customerMobile: editForm.customerMobile,
+        itemDescription: editForm.itemDescription,
+        issue: editForm.issue,
+        estimatedCost: cost,
+        promisedDate: new Date(editForm.promisedDate).toISOString(),
+        notes: editForm.notes.trim() || null,
       }
     }, {
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getListRepairsQueryKey() });
-        toast({ title: `Status updated to "${STATUS_LABELS[next]}"` });
-      }
+        invalidate();
+        toast({ title: "Repair updated" });
+        setEditRepair(null);
+      },
+      onError: () => toast({ title: "Failed to update repair", variant: "destructive" }),
     });
   };
 
-  const sendWhatsAppUpdate = (repair: NonNullable<typeof repairs>[number]) => {
-    const shopMobile = settings?.mobile ?? "";
-    const contactLine = shopMobile ? ` Contact us at ${shopMobile}.` : "";
-    const msg = `Hello ${repair.customerName}! Your repair job (${repair.itemDescription}) is now "${STATUS_LABELS[repair.status as Status]}". Estimated cost: ${formatCurrency(repair.estimatedCost)}.${contactLine}`;
-    const digits = repair.customerMobile.replace(/\D/g, "");
-    const fullMobile = digits.length === 10 ? `91${digits}` : digits;
-    window.open(`https://wa.me/${fullMobile}?text=${encodeURIComponent(msg)}`, "_blank");
+  const handleDelete = () => {
+    if (!deleteTarget) return;
+    deleteRepair.mutate({ id: deleteTarget.id }, {
+      onSuccess: () => {
+        invalidate();
+        toast({ title: "Repair deleted" });
+        setDeleteTarget(null);
+      },
+      onError: () => toast({ title: "Failed to delete repair", variant: "destructive" }),
+    });
   };
 
-  // Group by status for pipeline view
+  const openStatusChange = (r: Repair) => {
+    setStatusRepair(r);
+    setNewStatus(r.status as Status);
+    setActualCost(r.actualCost != null ? String(r.actualCost) : "");
+    setStatusNotes(r.notes ?? "");
+  };
+
+  const handleStatusChange = () => {
+    if (!statusRepair) return;
+    const isDelivering = newStatus === "delivered";
+    updateRepair.mutate({
+      id: statusRepair.id,
+      data: {
+        status: newStatus,
+        notes: statusNotes.trim() || null,
+        ...(isDelivering ? { deliveredDate: new Date().toISOString() } : {}),
+        ...(actualCost ? { actualCost: parseFloat(actualCost) } : {}),
+      }
+    }, {
+      onSuccess: () => {
+        invalidate();
+        toast({ title: `Status set to "${STATUS_LABELS[newStatus]}"` });
+        setStatusRepair(null);
+      },
+      onError: () => toast({ title: "Failed to update status", variant: "destructive" }),
+    });
+  };
+
+  const advanceStatus = (r: Repair) => {
+    const next = nextStatus[r.status as Status];
+    if (!next) return;
+    if (next === "delivered") { openStatusChange(r); return; }
+    updateRepair.mutate({
+      id: r.id,
+      data: { status: next },
+    }, {
+      onSuccess: () => {
+        invalidate();
+        toast({ title: `Moved to "${STATUS_LABELS[next]}"` });
+      },
+    });
+  };
+
+  const sendWhatsApp = (r: Repair) => {
+    const contactLine = shopMobile ? ` Contact us: ${shopMobile}.` : "";
+    const msg = `Hello ${r.customerName}! Your repair (${r.itemDescription}) is now "${STATUS_LABELS[r.status as Status]}". Est. cost: ${formatCurrency(r.estimatedCost)}.${contactLine}`;
+    const digits = r.customerMobile.replace(/\D/g, "");
+    const mobile = digits.length === 10 ? `91${digits}` : digits;
+    window.open(`https://wa.me/${mobile}?text=${encodeURIComponent(msg)}`, "_blank");
+  };
+
   const byStatus = STATUSES.reduce((acc, s) => {
-    acc[s] = (repairs ?? []).filter(r => r.status === s);
+    acc[s] = (repairs ?? []).filter(r => r.status === s) as Repair[];
     return acc;
-  }, {} as Record<Status, typeof repairs>);
+  }, {} as Record<Status, Repair[]>);
+
+  const inp = "w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary";
+  const lbl = "text-xs text-muted-foreground block mb-1 font-medium";
 
   return (
     <div className="space-y-5 max-w-7xl">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Repairs</h1>
           <p className="text-muted-foreground text-sm">Track repair jobs through the pipeline</p>
         </div>
-        <Button onClick={() => setAddOpen(true)} className="gap-2" data-testid="button-log-repair">
+        <Button onClick={() => setAddOpen(true)} className="gap-2">
           <Plus className="w-4 h-4" />Log Repair
         </Button>
       </div>
 
-      {/* Summary badges */}
-      <div className="flex gap-3 flex-wrap">
+      {/* Summary pills */}
+      <div className="flex gap-2 flex-wrap">
         {STATUSES.map(s => (
           <div key={s} className={`px-3 py-1.5 rounded-full border text-xs font-medium ${STATUS_COLORS[s]}`}>
-            {STATUS_LABELS[s]}: {(byStatus[s] ?? []).length}
+            {STATUS_LABELS[s]}: {byStatus[s].length}
           </div>
         ))}
       </div>
 
-      {isLoading && (
-        <div className="text-muted-foreground text-sm py-8 text-center">Loading repairs...</div>
-      )}
+      {isLoading && <div className="text-muted-foreground text-sm py-10 text-center">Loading repairs...</div>}
 
       {/* Kanban columns */}
       <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        {STATUSES.map(status => (
-          <div key={status} className="space-y-3">
-            <div className={`text-xs font-semibold px-3 py-2 rounded-lg border ${STATUS_COLORS[status]}`}>
-              {STATUS_LABELS[status]} ({(byStatus[status] ?? []).length})
+        {STATUSES.map(status => {
+          const isCollapsed = collapsed[status];
+          const cards = byStatus[status];
+          return (
+            <div key={status} className="space-y-2">
+              {/* Column header */}
+              <button
+                onClick={() => setCollapsed(c => ({ ...c, [status]: !c[status] }))}
+                className={`w-full flex items-center justify-between text-xs font-semibold px-3 py-2 rounded-lg border ${STATUS_COLUMN_BG[status]} transition-all`}
+              >
+                <span>{STATUS_LABELS[status]} ({cards.length})</span>
+                {isCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+              </button>
+
+              {!isCollapsed && cards.length === 0 && (
+                <div className="text-xs text-muted-foreground text-center py-6 border border-dashed border-border rounded-xl">
+                  No repairs
+                </div>
+              )}
+
+              {!isCollapsed && cards.map(repair => {
+                const isOverdue = repair.status !== "delivered" && new Date(repair.promisedDate) < new Date();
+                return (
+                  <Card key={repair.id} className={`border-border ${isOverdue ? "border-l-4 border-l-destructive" : ""}`}>
+                    <CardContent className="p-4 space-y-2">
+                      {/* Top row: name + action buttons */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-sm truncate">{repair.customerName}</div>
+                          <div className="text-xs text-muted-foreground">{repair.customerMobile}</div>
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <button onClick={() => openEdit(repair)} className="p-1 text-muted-foreground hover:text-primary transition-colors" title="Edit">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => printRepairJobCard(repair, shopName, shopAddress, shopMobile)} className="p-1 text-muted-foreground hover:text-primary transition-colors" title="Print job card">
+                            <PrinterIcon className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => sendWhatsApp(repair)} className="p-1 text-muted-foreground hover:text-green-600 transition-colors" title="Send WhatsApp update">
+                            <MessageCircle className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => setDeleteTarget(repair)} className="p-1 text-muted-foreground hover:text-destructive transition-colors" title="Delete">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Item info */}
+                      <div className="text-xs font-medium border-l-2 border-primary pl-2 leading-snug">{repair.itemDescription}</div>
+                      <div className="text-xs text-muted-foreground">{repair.issue}</div>
+
+                      {/* Cost + date */}
+                      <div className="flex items-center justify-between text-xs">
+                        <div>
+                          <span className="font-semibold text-primary">
+                            {repair.actualCost != null ? formatCurrency(repair.actualCost) : formatCurrency(repair.estimatedCost)}
+                          </span>
+                          {repair.actualCost != null && (
+                            <span className="text-muted-foreground ml-1">(actual)</span>
+                          )}
+                        </div>
+                        <span className={`${isOverdue ? "text-destructive font-semibold" : "text-muted-foreground"}`}>
+                          {repair.status === "delivered" && repair.deliveredDate
+                            ? `Delivered ${formatDate(repair.deliveredDate)}`
+                            : `Due: ${formatDate(repair.promisedDate)}`}
+                        </span>
+                      </div>
+
+                      {isOverdue && (
+                        <div className="flex items-center gap-1 text-[10px] text-destructive font-medium">
+                          <AlertTriangle className="w-3 h-3" />Overdue
+                        </div>
+                      )}
+
+                      {repair.notes && (
+                        <div className="text-[11px] text-muted-foreground italic truncate">{repair.notes}</div>
+                      )}
+
+                      {/* Action buttons */}
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          onClick={() => openStatusChange(repair)}
+                          className="flex-1 text-xs border border-border rounded-lg px-2 py-1.5 hover:bg-muted/30 transition-colors text-center"
+                        >
+                          Change Status
+                        </button>
+                        {nextStatus[status] && (
+                          <Button
+                            size="sm"
+                            className="flex-1 text-xs gap-1 h-7"
+                            onClick={() => advanceStatus(repair)}
+                          >
+                            {STATUS_LABELS[nextStatus[status]!]}
+                            <ArrowRight className="w-3 h-3" />
+                          </Button>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
-            {(byStatus[status] ?? []).map(repair => (
-              <Card key={repair.id} className="border-border" data-testid={`card-repair-${repair.id}`}>
-                <CardContent className="p-4 space-y-2.5">
-                  <div className="font-medium text-sm">{repair.customerName}</div>
-                  <div className="text-xs text-muted-foreground">{repair.customerMobile}</div>
-                  <div className="text-xs font-medium border-l-2 border-primary pl-2">{repair.itemDescription}</div>
-                  <div className="text-xs text-muted-foreground">{repair.issue}</div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-primary font-semibold">{formatCurrency(repair.estimatedCost)}</span>
-                    <span className="text-muted-foreground">Due: {formatDate(repair.promisedDate)}</span>
-                  </div>
-                  <div className="flex gap-2 pt-1">
-                    {nextStatus[status as Status] && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="flex-1 text-xs gap-1"
-                        onClick={() => advanceStatus(repair.id, status)}
-                        data-testid={`button-advance-${repair.id}`}
-                      >
-                        {STATUS_LABELS[nextStatus[status as Status]!]}
-                        <ArrowRight className="w-3 h-3" />
-                      </Button>
-                    )}
-                    <button
-                      onClick={() => sendWhatsAppUpdate(repair)}
-                      className="text-green-400 hover:text-green-300 p-1"
-                      data-testid={`button-wa-repair-${repair.id}`}
-                    >
-                      <MessageCircle className="w-4 h-4" />
-                    </button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      {/* Add dialog */}
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Log Repair Job</DialogTitle></DialogHeader>
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
+      {/* ── Create dialog ── */}
+      <Dialog open={addOpen} onOpenChange={v => { setAddOpen(v); if (!v) setForm(EMPTY_FORM); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Log New Repair Job</DialogTitle></DialogHeader>
+          <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Customer Name *</label>
-                <Input {...register("customerName", { required: true })} data-testid="input-repair-customer" />
+                <label className={lbl}>Customer Name *</label>
+                <input className={inp} value={form.customerName} onChange={e => setF("customerName", e.target.value)} placeholder="Full name" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Mobile *</label>
-                <Input {...register("customerMobile", { required: true })} data-testid="input-repair-mobile" />
+                <label className={lbl}>Mobile *</label>
+                <input className={inp} value={form.customerMobile} onChange={e => setF("customerMobile", e.target.value)} placeholder="10-digit number" />
               </div>
               <div className="col-span-2">
-                <label className="text-xs text-muted-foreground mb-1 block">Item Description *</label>
-                <Input {...register("itemDescription", { required: true })} placeholder="Gold necklace with pendant" data-testid="input-repair-item" />
+                <label className={lbl}>Item Description *</label>
+                <input className={inp} value={form.itemDescription} onChange={e => setF("itemDescription", e.target.value)} placeholder="Gold necklace with pendant" />
               </div>
               <div className="col-span-2">
-                <label className="text-xs text-muted-foreground mb-1 block">Issue / Work Required *</label>
-                <Input {...register("issue", { required: true })} placeholder="Clasp broken, needs replacement" data-testid="input-repair-issue" />
+                <label className={lbl}>Issue / Work Required *</label>
+                <input className={inp} value={form.issue} onChange={e => setF("issue", e.target.value)} placeholder="Clasp broken, needs replacement" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Estimated Cost (₹) *</label>
-                <Input type="number" {...register("estimatedCost", { required: true })} data-testid="input-repair-cost" />
+                <label className={lbl}>Estimated Cost (₹) *</label>
+                <input className={inp} type="number" min="0" value={form.estimatedCost} onChange={e => setF("estimatedCost", e.target.value)} placeholder="e.g. 500" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Promised Date *</label>
-                <Input type="date" {...register("promisedDate", { required: true })} data-testid="input-repair-date" />
+                <label className={lbl}>Promised Date *</label>
+                <input className={inp} type="date" value={form.promisedDate} min={new Date().toISOString().split("T")[0]} onChange={e => setF("promisedDate", e.target.value)} />
               </div>
               <div className="col-span-2">
-                <label className="text-xs text-muted-foreground mb-1 block">Notes</label>
-                <Input {...register("notes")} placeholder="Additional notes..." data-testid="input-repair-notes" />
+                <label className={lbl}>Notes</label>
+                <input className={inp} value={form.notes} onChange={e => setF("notes", e.target.value)} placeholder="Additional remarks..." />
               </div>
             </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={createRepair.isPending} data-testid="button-submit-repair">
-                {createRepair.isPending ? "Logging..." : "Log Repair"}
-              </Button>
-            </DialogFooter>
-          </form>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
+            <Button onClick={handleCreate} disabled={submitting || createRepair.isPending}>
+              {createRepair.isPending ? "Logging..." : "Log Repair"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit dialog ── */}
+      <Dialog open={!!editRepair} onOpenChange={v => { if (!v) setEditRepair(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Edit Repair Job #{editRepair?.id}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={lbl}>Customer Name *</label>
+                <input className={inp} value={editForm.customerName} onChange={e => setEF("customerName", e.target.value)} />
+              </div>
+              <div>
+                <label className={lbl}>Mobile *</label>
+                <input className={inp} value={editForm.customerMobile} onChange={e => setEF("customerMobile", e.target.value)} />
+              </div>
+              <div className="col-span-2">
+                <label className={lbl}>Item Description *</label>
+                <input className={inp} value={editForm.itemDescription} onChange={e => setEF("itemDescription", e.target.value)} />
+              </div>
+              <div className="col-span-2">
+                <label className={lbl}>Issue / Work Required *</label>
+                <input className={inp} value={editForm.issue} onChange={e => setEF("issue", e.target.value)} />
+              </div>
+              <div>
+                <label className={lbl}>Estimated Cost (₹) *</label>
+                <input className={inp} type="number" min="0" value={editForm.estimatedCost} onChange={e => setEF("estimatedCost", e.target.value)} />
+              </div>
+              <div>
+                <label className={lbl}>Promised Date *</label>
+                <input className={inp} type="date" value={editForm.promisedDate} onChange={e => setEF("promisedDate", e.target.value)} />
+              </div>
+              <div className="col-span-2">
+                <label className={lbl}>Notes</label>
+                <input className={inp} value={editForm.notes} onChange={e => setEF("notes", e.target.value)} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditRepair(null)}>Cancel</Button>
+            <Button onClick={handleEdit} disabled={updateRepair.isPending}>
+              {updateRepair.isPending ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Status change dialog ── */}
+      <Dialog open={!!statusRepair} onOpenChange={v => { if (!v) setStatusRepair(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Update Status — #{statusRepair?.id}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className={lbl}>New Status</label>
+              <Select value={newStatus} onValueChange={v => setNewStatus(v as Status)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {STATUSES.map(s => (
+                    <SelectItem key={s} value={s}>{STATUS_LABELS[s]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {newStatus === "delivered" && (
+              <div>
+                <label className={lbl}>Actual Cost (₹) <span className="text-muted-foreground/60">optional</span></label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={actualCost}
+                  onChange={e => setActualCost(e.target.value)}
+                  placeholder={`Est. was ${formatCurrency(statusRepair?.estimatedCost ?? 0)}`}
+                />
+              </div>
+            )}
+            <div>
+              <label className={lbl}>Notes <span className="text-muted-foreground/60">optional</span></label>
+              <Input value={statusNotes} onChange={e => setStatusNotes(e.target.value)} placeholder="Remarks..." />
+            </div>
+            {newStatus === "delivered" && (
+              <div className="flex items-center gap-2 text-xs text-green-700 p-2 bg-green-50 rounded-lg border border-green-200">
+                <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+                Delivered date will be set to today automatically.
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStatusRepair(null)}>Cancel</Button>
+            <Button onClick={handleStatusChange} disabled={updateRepair.isPending}>
+              {updateRepair.isPending ? "Updating..." : "Update Status"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete confirmation ── */}
+      <Dialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="w-4 h-4" />Delete Repair Job
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 text-sm">
+            <p>Are you sure you want to delete this repair job? This cannot be undone.</p>
+            {deleteTarget && (
+              <div className="p-3 rounded-lg bg-muted/30 border border-border space-y-1 text-xs">
+                <div><span className="text-muted-foreground">Customer:</span> <strong>{deleteTarget.customerName}</strong></div>
+                <div><span className="text-muted-foreground">Item:</span> {deleteTarget.itemDescription}</div>
+                <div><span className="text-muted-foreground">Status:</span> {STATUS_LABELS[deleteTarget.status as Status]}</div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleteRepair.isPending}>
+              {deleteRepair.isPending ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
