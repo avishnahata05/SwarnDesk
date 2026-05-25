@@ -566,7 +566,9 @@ export default function Billing() {
   const sendInvoiceWhatsApp = () => {
     if (!saleComplete?.customerMobile) return;
     const msg = `Dear ${saleComplete.customerName}, your invoice ${saleComplete.invoiceNumber} for ${formatCurrency(saleComplete.total)} has been generated. Thank you for shopping with ${shopInfo.name}!`;
-    window.open(`https://wa.me/91${saleComplete.customerMobile.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`, "_blank");
+    const digits = saleComplete.customerMobile.replace(/\D/g, "");
+    const fullMobile = digits.length === 10 ? `91${digits}` : digits;
+    window.open(`https://wa.me/${fullMobile}?text=${encodeURIComponent(msg)}`, "_blank");
   };
 
   // ── Sale Complete Screen ────────────────────────────────────────────────

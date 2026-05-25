@@ -179,7 +179,9 @@ function CustomerLedger({ customerId, onClose }: { customerId: number; onClose: 
           className="gap-1.5 flex-1 border-green-500/40 text-green-600 hover:bg-green-50"
           onClick={() => {
             const msg = `Hello ${customer.name}! Thank you for your continued trust in us.`;
-            window.open(`https://wa.me/91${customer.mobile.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`, "_blank");
+            const digits = customer.mobile.replace(/\D/g, "");
+            const fullMobile = digits.length === 10 ? `91${digits}` : digits;
+            window.open(`https://wa.me/${fullMobile}?text=${encodeURIComponent(msg)}`, "_blank");
           }}
         >
           <MessageCircle className="w-3.5 h-3.5" />
@@ -237,7 +239,9 @@ export default function Customers() {
 
   const sendWhatsApp = (mobile: string, name: string) => {
     const msg = `Hello ${name}! Thank you for your continued patronage at our jewellery store. We appreciate your business!`;
-    window.open(`https://wa.me/91${mobile.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`, "_blank");
+    const digits = mobile.replace(/\D/g, "");
+    const fullMobile = digits.length === 10 ? `91${digits}` : digits;
+    window.open(`https://wa.me/${fullMobile}?text=${encodeURIComponent(msg)}`, "_blank");
   };
 
   const allIds = (customers ?? []).map(c => c.id);
@@ -277,7 +281,9 @@ export default function Customers() {
   const sendViaLinks = () => {
     if (selectedCustomers.length === 0) return;
     selectedCustomers.forEach(c => {
-      window.open(`https://wa.me/91${c.mobile.replace(/\D/g, "")}?text=${encodeURIComponent(buildMessage(c.name))}`, "_blank");
+      const digits = c.mobile.replace(/\D/g, "");
+      const fullMobile = digits.length === 10 ? `91${digits}` : digits;
+      window.open(`https://wa.me/${fullMobile}?text=${encodeURIComponent(buildMessage(c.name))}`, "_blank");
     });
     toast({ title: `Opened WhatsApp for ${selectedCustomers.length} customer(s)` });
     setBulkOpen(false);

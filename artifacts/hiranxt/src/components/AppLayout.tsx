@@ -146,10 +146,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 href={href}
                 data-testid={`nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 group",
+                  "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all duration-150 group",
                   isActive
-                    ? "bg-white text-sidebar font-semibold shadow-sm"
-                    : "text-white/75 hover:bg-white/[0.10] hover:text-white"
+                    ? "bg-white text-[hsl(220,55%,13%)] shadow-sm"
+                    : "text-white/70 hover:bg-white/[0.09] hover:text-white font-medium"
                 )}
                 onClick={() => setSidebarOpen(false)}
               >

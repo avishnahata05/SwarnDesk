@@ -11,7 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 function getAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem("sd_token");
+  const token = localStorage.getItem("swarndesk_token");
   return token ? { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } : { "Content-Type": "application/json" };
 }
 
