@@ -2,7 +2,7 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { db, usersTable, paymentRequestsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { signToken } from "../middleware/auth.js";
+import { signToken, verifyToken } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -104,6 +104,49 @@ router.post("/setup-admin", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Admin setup failed");
     res.status(500).json({ error: "Setup failed" });
+  }
+});
+
+// GET /auth/me — returns fresh user data from DB (used to refresh stale JWT/localStorage)
+router.get("/me", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    const token = authHeader.slice(7);
+    let payload: { userId: number };
+    try {
+      payload = verifyToken(token) as typeof payload;
+    } catch {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, payload.userId)).limit(1);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    // Refresh expired plan
+    let plan = user.plan;
+    const now = new Date();
+    if (plan === "trial" && new Date(user.trialEndsAt) < now) {
+      plan = "expired";
+      await db.update(usersTable).set({ plan: "expired" }).where(eq(usersTable.id, user.id));
+    } else if (plan === "active" && user.subscriptionEndsAt && new Date(user.subscriptionEndsAt) < now) {
+      plan = "expired";
+      await db.update(usersTable).set({ plan: "expired" }).where(eq(usersTable.id, user.id));
+    }
+    const newToken = signToken({
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      plan,
+      trialEndsAt: user.trialEndsAt.toISOString(),
+      subscriptionEndsAt: user.subscriptionEndsAt ? new Date(user.subscriptionEndsAt).toISOString() : null,
+      shopName: user.shopName,
+    });
+    res.json({
+      token: newToken,
+      user: { id: user.id, email: user.email, name: user.name, shopName: user.shopName, role: user.role, plan, trialEndsAt: user.trialEndsAt, subscriptionEndsAt: user.subscriptionEndsAt ?? null },
+    });
+  } catch (err) {
+    req.log.error({ err }, "/me failed");
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

@@ -413,11 +413,12 @@ export default function Girvi() {
   const [renewInterestPaid, setRenewInterestPaid] = useState("");
   const [renewNewDueDate, setRenewNewDueDate] = useState("");
   const [renewNotes, setRenewNotes] = useState("");
+  const [redeemConfirmed, setRedeemConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [lastPayment, setLastPayment] = useState<Payment | null>(null);
 
   const closeNewLoan = useCallback(() => setShowNewLoan(false), []);
-  const closeActionDialog = useCallback(() => { setActionLoan(null); setActionType(null); }, []);
+  const closeActionDialog = useCallback(() => { setActionLoan(null); setActionType(null); setRedeemConfirmed(false); }, []);
   useBackClose(showNewLoan, closeNewLoan);
   useBackClose(!!actionLoan, closeActionDialog);
 
@@ -519,6 +520,10 @@ export default function Girvi() {
         method = "POST";
         const amt = parseFloat(collectAmount);
         if (!isFinite(amt) || amt <= 0) { toast({ title: "Enter a valid positive amount", variant: "destructive" }); setSubmitting(false); return; }
+        if (collectType === "auto" && amt > actionLoan.totalDue + 0.01) {
+          toast({ title: `Amount exceeds total due (${formatCurrency(actionLoan.totalDue)})`, variant: "destructive" });
+          setSubmitting(false); return;
+        }
         body = { amount: amt, paymentType: collectType, notes: collectNotes.trim() || null };
       } else if (actionType === "renew") {
         url = `${API}/${actionLoan.id}/renew`;
@@ -530,6 +535,10 @@ export default function Girvi() {
           notes: renewNotes.trim() || null,
         };
       } else if (actionType === "redeem") {
+        if (!redeemConfirmed) {
+          toast({ title: "Please confirm the pledged item(s) have been returned", variant: "destructive" });
+          setSubmitting(false); return;
+        }
         body = { status: "redeemed" };
       } else if (actionType === "forfeit") {
         const saleVal = parseFloat(goldSaleValue);
@@ -583,6 +592,7 @@ export default function Girvi() {
       setGoldSaleValue(""); setNewDueDate("");
       setCollectAmount(""); setCollectNotes(""); setCollectType("auto");
       setRenewInterestPaid(""); setRenewNewDueDate(""); setRenewNotes("");
+      setRedeemConfirmed(false);
     } catch (err) {
       toast({ title: (err as Error).message || "Failed", variant: "destructive" });
     } finally { setSubmitting(false); }
@@ -636,21 +646,28 @@ export default function Girvi() {
           </h1>
           <p className="text-muted-foreground text-sm mt-0.5">Gold & silver collateral loans with live interest</p>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          {(summary?.overdueCount ?? 0) > 0 && (
-            <Button variant="outline" size="sm" onClick={sendBulkOverdueReminders} className="gap-1.5 border-orange-400/40 text-orange-600 hover:bg-orange-50">
-              <MessageCircle className="w-3.5 h-3.5" />Remind {summary!.overdueCount} Overdue
+        <div className="flex flex-col items-end gap-1.5">
+          <div className="flex gap-2 flex-wrap">
+            {(summary?.overdueCount ?? 0) > 0 && (
+              <Button variant="outline" size="sm" onClick={sendBulkOverdueReminders} className="gap-1.5 border-orange-400/40 text-orange-600 hover:bg-orange-50">
+                <MessageCircle className="w-3.5 h-3.5" />Remind {summary!.overdueCount} Overdue
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={() => setCalendarMode(c => c === "en" ? "hi" : "en")} className="gap-1.5">
+              <Calendar className="w-3.5 h-3.5" />{calendarMode === "en" ? "हिंदी तिथि" : "English Date"}
             </Button>
+            <Button variant="outline" size="sm" onClick={loadAll} disabled={loading} className="gap-1.5">
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />Recalculate
+            </Button>
+            <Button size="sm" onClick={() => setShowNewLoan(true)} className="gap-1.5">
+              <Plus className="w-3.5 h-3.5" />New Girvi
+            </Button>
+          </div>
+          {calendarMode === "hi" && (
+            <p className="text-[11px] text-muted-foreground">
+              Dates shown in Vikram Samvat (विक्रम संवत) — years look ~57 higher than English calendar, this is expected.
+            </p>
           )}
-          <Button variant="outline" size="sm" onClick={() => setCalendarMode(c => c === "en" ? "hi" : "en")} className="gap-1.5">
-            <Calendar className="w-3.5 h-3.5" />{calendarMode === "en" ? "हिंदी तिथि" : "English Date"}
-          </Button>
-          <Button variant="outline" size="sm" onClick={loadAll} disabled={loading} className="gap-1.5">
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />Recalculate
-          </Button>
-          <Button size="sm" onClick={() => setShowNewLoan(true)} className="gap-1.5">
-            <Plus className="w-3.5 h-3.5" />New Girvi
-          </Button>
         </div>
       </div>
 
@@ -813,7 +830,7 @@ export default function Girvi() {
       />
 
       {/* Action Dialog */}
-      <Dialog open={!!actionLoan} onOpenChange={v => { if (!v) { setActionLoan(null); setActionType(null); } }}>
+      <Dialog open={!!actionLoan} onOpenChange={v => { if (!v) { setActionLoan(null); setActionType(null); setRedeemConfirmed(false); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -839,9 +856,12 @@ export default function Girvi() {
                 {actionLoan.penaltyInterest > 0 && <div className="flex justify-between text-orange-600"><span>Penalty interest</span><span>{formatCurrency(actionLoan.penaltyInterest)}</span></div>}
                 <div className="flex justify-between"><span className="text-muted-foreground">Collected (this cycle)</span><span className="text-emerald-600">−{formatCurrency(actionLoan.collectedSinceReset)}</span></div>
                 <div className="flex justify-between font-semibold text-sm"><span>Outstanding interest</span><span className="text-primary">{formatCurrency(actionLoan.outstandingInterest)}</span></div>
-                <div className="flex justify-between font-bold text-sm text-primary border-t border-border pt-1"><span>Total due (principal + int.)</span><span>{formatCurrency(actionLoan.totalDue)}</span></div>
+                <div className="flex justify-between items-baseline border-t border-border pt-1.5 mt-0.5">
+                  <span className="font-semibold">Total due (principal + int.)</span>
+                  <span className="font-extrabold text-lg text-primary">{formatCurrency(actionLoan.totalDue)}</span>
+                </div>
                 <div className="text-[10px] text-muted-foreground pt-0.5">
-                  Rate: {actionLoan.interestRate}% per {actionLoan.interestPeriod} · ≈ {(actionLoan.dailyRate * 100).toFixed(4)}%/day · ≈ {formatCurrency(Math.round(actionLoan.currentPrincipal * actionLoan.dailyRate))}/day
+                  Rate: {actionLoan.interestRate}% per {actionLoan.interestPeriod} · ≈ {formatCurrency(Math.round(actionLoan.currentPrincipal * actionLoan.dailyRate))}/day <span className="opacity-70">({(actionLoan.dailyRate * 100).toFixed(4)}%/day)</span>
                 </div>
               </div>
 
@@ -858,6 +878,13 @@ export default function Girvi() {
                     const amt = parseFloat(collectAmount);
                     const outstanding = actionLoan.outstandingInterest;
                     const principal = actionLoan.currentPrincipal;
+                    if (amt > actionLoan.totalDue + 0.01) {
+                      return (
+                        <div className="p-2 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                          ⚠ Amount exceeds total due ({formatCurrency(actionLoan.totalDue)}). Reduce the amount — this loan will be rejected.
+                        </div>
+                      );
+                    }
                     if (amt <= outstanding) {
                       return (
                         <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-xs space-y-0.5">
@@ -912,11 +939,14 @@ export default function Girvi() {
               {actionType === "renew" && (
                 <div className="space-y-3">
                   <div className="p-2 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-800">
-                    Renewing resets the interest clock to today. Collect the interest due now, then the loan runs fresh from today.
+                    Renewing resets the interest clock to today for future interest — but it does not erase what's already owed.
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">Interest collected today (₹)</label>
                     <Input type="number" value={renewInterestPaid} onChange={e => setRenewInterestPaid(e.target.value)} placeholder="0 if nothing collected now" className="h-9" autoFocus />
+                    <p className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-1.5">
+                      ⚠ Any interest you don't collect now stays outstanding on this loan — it does NOT reset to zero.
+                    </p>
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">New due date</label>
@@ -931,19 +961,33 @@ export default function Girvi() {
 
               {/* Redeem */}
               {actionType === "redeem" && (
-                <div className="p-3 rounded-lg bg-green-50 border border-green-200 text-xs text-green-800 space-y-1">
-                  <div>Collect <strong>{formatCurrency(actionLoan.totalDue)}</strong> from the customer and return the pledged {actionLoan.metalType} ornament(s).</div>
-                  <div className="text-[10px] space-y-0.5">
-                    <div>Principal: {formatCurrency(actionLoan.currentPrincipal)}</div>
-                    <div>Interest due: {formatCurrency(actionLoan.outstandingInterest)}</div>
+                <div className="space-y-2">
+                  <div className="p-3 rounded-lg bg-green-50 border border-green-200 text-xs text-green-800 space-y-1">
+                    <div>Collect <strong>{formatCurrency(actionLoan.totalDue)}</strong> from the customer and return the pledged {actionLoan.metalType} ornament(s).</div>
+                    <div className="text-[10px] space-y-0.5">
+                      <div>Principal: {formatCurrency(actionLoan.currentPrincipal)}</div>
+                      <div>Interest due: {formatCurrency(actionLoan.outstandingInterest)}</div>
+                    </div>
+                    {actionLoan.itemDescription && <div className="mt-1 font-medium">Items: {actionLoan.itemDescription}</div>}
                   </div>
-                  {actionLoan.itemDescription && <div className="mt-1 font-medium">Items: {actionLoan.itemDescription}</div>}
+                  <label className="flex items-start gap-2 p-2.5 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-900 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={redeemConfirmed}
+                      onChange={e => setRedeemConfirmed(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>I confirm the pledged item(s) have been physically returned to the customer</span>
+                  </label>
                 </div>
               )}
 
               {/* Forfeit */}
               {actionType === "forfeit" && (
                 <div className="space-y-2">
+                  <div className="p-2 rounded-lg bg-muted/40 border border-border text-xs text-muted-foreground">
+                    Forfeiting means the customer will <strong>NOT</strong> get their pledged gold back. The shop keeps the item.
+                  </div>
                   <label className="text-xs text-muted-foreground block">Amount received from selling the gold (₹)</label>
                   <Input type="number" value={goldSaleValue} onChange={e => setGoldSaleValue(e.target.value)} className="h-9" />
                   {goldSaleValue && !isNaN(parseFloat(goldSaleValue)) && (
@@ -966,13 +1010,13 @@ export default function Girvi() {
               )}
 
               <div className="flex gap-2 justify-end">
-                <Button variant="outline" size="sm" onClick={() => { setActionLoan(null); setActionType(null); }}>Cancel</Button>
+                <Button variant="outline" size="sm" onClick={() => { setActionLoan(null); setActionType(null); setRedeemConfirmed(false); }}>Cancel</Button>
                 <Button
                   size="sm"
                   variant={actionType === "forfeit" ? "destructive" : "default"}
                   className={actionType === "collect" || actionType === "renew" ? "bg-emerald-600 hover:bg-emerald-700" : actionType === "redeem" ? "bg-green-600 hover:bg-green-700" : ""}
                   onClick={handleAction}
-                  disabled={submitting}
+                  disabled={submitting || (actionType === "redeem" && !redeemConfirmed)}
                 >
                   {submitting ? "Processing..." :
                    actionType === "collect" ? `Collect ₹${parseFloat(collectAmount || "0").toLocaleString("en-IN")}` :
@@ -1056,11 +1100,14 @@ function LoanRow({
             </Badge>
             {loan.isOverdue && <Flame className="w-3.5 h-3.5 text-orange-500" />}
             {isActive && (liveEstValue ?? loan.estimatedValue) > 0 && (
-              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
-                loan.currentPrincipal / (liveEstValue ?? loan.estimatedValue) > 0.8 ? "bg-red-100 text-red-700" :
-                loan.currentPrincipal / (liveEstValue ?? loan.estimatedValue) > 0.6 ? "bg-amber-100 text-amber-700" :
-                "bg-green-100 text-green-700"
-              }`}>
+              <span
+                className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                  loan.currentPrincipal / (liveEstValue ?? loan.estimatedValue) > 0.8 ? "bg-red-100 text-red-700" :
+                  loan.currentPrincipal / (liveEstValue ?? loan.estimatedValue) > 0.6 ? "bg-amber-100 text-amber-700" :
+                  "bg-green-100 text-green-700"
+                }`}
+                title="LTV = loan amount as a % of the gold's current market value. Higher means less safety margin."
+              >
                 LTV {((loan.currentPrincipal / (liveEstValue ?? loan.estimatedValue)) * 100).toFixed(0)}%
               </span>
             )}
@@ -1096,7 +1143,9 @@ function LoanRow({
               <div className="text-muted-foreground mb-1 font-medium">Collateral</div>
               <div className="font-medium">{loan.metalType.toUpperCase()} {loan.purity}</div>
               <div>Gross: {loan.grossWeight.toFixed(3)}g</div>
-              <div>Net: {loan.netWeight.toFixed(3)}g</div>
+              <div title="Net weight (pure metal, after removing stones/other material) is what the loan value is based on">
+                Net: {loan.netWeight.toFixed(3)}g <span className="text-muted-foreground">(used for valuation)</span>
+              </div>
               <div className="text-muted-foreground">At pledge: {formatCurrency(loan.estimatedValue)}</div>
               {liveEstValue !== null && (
                 <div className={`font-medium ${liveEstValue < loan.estimatedValue ? "text-orange-600" : "text-emerald-600"}`}>
@@ -1127,7 +1176,7 @@ function LoanRow({
               {loan.principalPaid > 0 && <div className="text-emerald-600">−{formatCurrency(loan.principalPaid)} repaid</div>}
               {loan.principalPaid > 0 && <div className="font-semibold text-primary">{formatCurrency(loan.currentPrincipal)} current principal</div>}
               <div className="mt-1">{loan.interestRate}%/{loan.interestPeriod}{loan.penaltyRate > 0 ? ` +${loan.penaltyRate}% OD` : ""}</div>
-              <div className="text-[10px] text-muted-foreground">{(loan.dailyRate * 100).toFixed(4)}%/day · {formatCurrency(Math.round(loan.currentPrincipal * loan.dailyRate))}/day</div>
+              <div className="text-[10px] text-muted-foreground">≈ {formatCurrency(Math.round(loan.currentPrincipal * loan.dailyRate))}/day <span className="opacity-70">({(loan.dailyRate * 100).toFixed(4)}%/day)</span></div>
               <div className="mt-1">Start: {formatDateDisplay(loan.startDate)}</div>
               <div>Due: {formatDateDisplay(loan.dueDate)}</div>
               <div className="mt-1 text-[10px]">KYC: {loan.kycDocType ? loan.kycDocType.replace(/_/g, " ").toUpperCase() : "—"} {loan.kycDocNumber ?? ""}</div>
@@ -1264,6 +1313,8 @@ type ItemRow = {
 };
 
 const ITEM_TYPES = ["Necklace","Bangle","Ring","Chain","Earring","Pendant","Bracelet","Mangalsutra","Payal","Tikka","Nose Ring","Other"];
+const GOLD_PURITIES = ["24K", "22K", "18K", "14K"];
+const SILVER_PURITIES = ["925"];
 
 function makeItem(): ItemRow {
   return { key: Math.random().toString(36).slice(2), itemType: "Necklace", quantity: 1, metalType: "gold", purity: "22K", grossWeight: "", netWeight: "", estimatedValue: "" };
@@ -1306,10 +1357,10 @@ function NewLoanDialog({ open, onClose, onCreated, rates }: {
     let cancelled = false;
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`${API}?search=${encodeURIComponent(digits)}&status=active`, { headers: getAuthHeaders() });
+        const res = await fetch(`${API}?mobile=${encodeURIComponent(digits)}&status=active`, { headers: getAuthHeaders() });
         if (!res.ok || cancelled) return;
-        const data = await res.json();
-        if (!cancelled) setExistingLoans((data.loans ?? []).slice(0, 5));
+        const data: { loanNumber: string; loanAmount: number; startDate: string; status: string }[] = await res.json();
+        if (!cancelled) setExistingLoans(data.slice(0, 5));
       } catch { /* ignore */ }
     }, 500);
     return () => { cancelled = true; clearTimeout(t); };
@@ -1321,12 +1372,18 @@ function NewLoanDialog({ open, onClose, onCreated, rates }: {
     setItems(prev => prev.map(it => {
       if (it.key !== key) return it;
       const updated = { ...it, [field]: value };
+      // Purity options are metal-specific (14K etc. are gold-only, 925 is silver-only) —
+      // reset to a sensible default when the metal changes so the two never mismatch.
+      if (field === "metalType") {
+        const validPurities = value === "silver" ? SILVER_PURITIES : GOLD_PURITIES;
+        if (!validPurities.includes(updated.purity)) {
+          updated.purity = value === "silver" ? "925" : "22K";
+        }
+      }
       if (field === "grossWeight" || field === "netWeight" || field === "metalType" || field === "purity") {
-        const wt = parseFloat(String(field === "netWeight" ? value : (updated.netWeight || (field === "grossWeight" ? value : updated.grossWeight))) || "0");
+        const wt = parseFloat(String(updated.netWeight || updated.grossWeight) || "0");
         if (wt > 0) {
-          const mt = field === "metalType" ? String(value) : updated.metalType;
-          const pu = field === "purity" ? String(value) : updated.purity;
-          updated.estimatedValue = String(Math.round(wt * getItemRate(mt, pu, rates)));
+          updated.estimatedValue = String(Math.round(wt * getItemRate(updated.metalType, updated.purity, rates)));
         }
       }
       return updated;
@@ -1512,11 +1569,11 @@ function NewLoanDialog({ open, onClose, onCreated, rates }: {
                     <Select value={it.purity} onValueChange={v => updateItem(it.key, "purity", v)}>
                       <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="24K">24K</SelectItem>
-                        <SelectItem value="22K">22K</SelectItem>
-                        <SelectItem value="18K">18K</SelectItem>
-                        <SelectItem value="14K">14K</SelectItem>
-                        <SelectItem value="925">Silver 925</SelectItem>
+                        {it.metalType === "silver" ? (
+                          <SelectItem value="925">Silver 925</SelectItem>
+                        ) : (
+                          GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1526,7 +1583,9 @@ function NewLoanDialog({ open, onClose, onCreated, rates }: {
                       onChange={e => updateItem(it.key, "grossWeight", e.target.value)} placeholder="0.000" />
                   </div>
                   <div>
-                    <label className={lbl}>Net Wt (g/pc)</label>
+                    <label className={lbl} title="Net weight (pure metal, after removing stones/other material) is used to value the loan">
+                      Net Wt (g/pc) <span className="text-muted-foreground/60">used for valuation</span>
+                    </label>
                     <input className={inp} type="number" step="0.001" value={it.netWeight}
                       onChange={e => updateItem(it.key, "netWeight", e.target.value)} placeholder="Same as gross" />
                   </div>
@@ -1576,8 +1635,12 @@ function NewLoanDialog({ open, onClose, onCreated, rates }: {
 
           {/* LTV warning */}
           {loanAmt > 0 && totalEst > 0 && (
-            <div className={`p-3 rounded-xl border text-xs ${ltv > 80 ? "bg-red-50 border-red-200 text-red-700" : ltv > 60 ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-green-50 border-green-200 text-green-700"}`}>
+            <div
+              className={`p-3 rounded-xl border text-xs ${ltv > 80 ? "bg-red-50 border-red-200 text-red-700" : ltv > 60 ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-green-50 border-green-200 text-green-700"}`}
+              title="LTV = loan amount as a % of the gold's current market value. Higher means less safety margin."
+            >
               <strong>LTV: {ltv.toFixed(0)}%</strong> — {ltv > 80 ? "⚠ High risk" : ltv > 60 ? "Moderate risk" : "Good — comfortable margin"}
+              <span className="text-muted-foreground/70"> (loan amount as % of gold's market value)</span>
             </div>
           )}
 
@@ -1593,7 +1656,7 @@ function NewLoanDialog({ open, onClose, onCreated, rates }: {
                 return (
                   <>
                     <div className="text-muted-foreground mb-1">
-                      {rate}% per {form.interestPeriod} = <strong>{(dailyRate * 100).toFixed(4)}%/day</strong> = {formatCurrency(Math.round(principal * dailyRate))}/day
+                      {rate}% per {form.interestPeriod} ({(dailyRate * 100).toFixed(4)}%/day) = <strong>{formatCurrency(Math.round(principal * dailyRate))}/day</strong>
                     </div>
                     {[{ label: "1 month (30d)", days: 30 }, { label: "3 months (90d)", days: 90 }, { label: "6 months (180d)", days: 180 }].map(({ label, days }) => {
                       const interest = Math.round(principal * (rate / 100) * (days / pd));

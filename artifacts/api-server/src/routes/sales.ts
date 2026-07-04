@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { salesTable, saleLineItemsTable, inventoryItemsTable, customersTable, paymentTransactionsTable } from "@workspace/db";
+import { salesTable, saleLineItemsTable, inventoryItemsTable, customersTable, paymentTransactionsTable, businessSettingsTable } from "@workspace/db";
 import { eq, and, gte, lte, sql, desc, inArray } from "drizzle-orm";
 
 const router = Router();
@@ -171,6 +171,15 @@ router.post("/", async (req, res) => {
     const paidAmount = isFinite(rawPaid) && rawPaid >= 0 ? rawPaid : totalAmount;
     const autoStatus = paidAmount >= totalAmount ? "paid" : paidAmount > 0 ? "partial" : "pending";
 
+    // Loyalty points are an optional program (Settings → Loyalty Points) — off shops
+    // shouldn't have points silently accruing on every sale.
+    const [loyaltySettings] = await db.select({
+      loyaltyPointsEnabled: businessSettingsTable.loyaltyPointsEnabled,
+      loyaltyPointsRate: businessSettingsTable.loyaltyPointsRate,
+    }).from(businessSettingsTable).where(eq(businessSettingsTable.userId, userId)).orderBy(desc(businessSettingsTable.id)).limit(1);
+    const loyaltyEnabled = loyaltySettings?.loyaltyPointsEnabled ?? true;
+    const loyaltyRate = (loyaltySettings ? parseFloat(loyaltySettings.loyaltyPointsRate) : NaN) || 1000;
+
     const sale = await db.transaction(async (tx) => {
       // 1. Lock inventory rows and check stock atomically
       for (const item of items) {
@@ -242,12 +251,21 @@ router.post("/", async (req, res) => {
       if (data.customerId) {
         const custId = parseInt(data.customerId);
         if (!isNaN(custId) && custId > 0) {
-          await tx.execute(
-            sql`UPDATE customers
-                SET total_purchases = total_purchases + ${totalAmount}::numeric,
-                    loyalty_points   = loyalty_points + ${Math.floor(totalAmount / 1000)}
-                WHERE id = ${custId} AND user_id = ${userId}`
-          );
+          if (loyaltyEnabled) {
+            const pointsEarned = Math.floor(totalAmount / loyaltyRate);
+            await tx.execute(
+              sql`UPDATE customers
+                  SET total_purchases = total_purchases + ${totalAmount}::numeric,
+                      loyalty_points   = loyalty_points + ${pointsEarned}
+                  WHERE id = ${custId} AND user_id = ${userId}`
+            );
+          } else {
+            await tx.execute(
+              sql`UPDATE customers
+                  SET total_purchases = total_purchases + ${totalAmount}::numeric
+                  WHERE id = ${custId} AND user_id = ${userId}`
+            );
+          }
         }
       }
 

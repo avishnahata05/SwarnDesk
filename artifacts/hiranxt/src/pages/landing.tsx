@@ -55,7 +55,7 @@ const plans = [
     name: "Monthly",
     price: "₹2,999",
     period: "/month",
-    desc: "Pay month to month, cancel anytime",
+    desc: "Pay month to month, no long-term lock-in",
     saving: null,
     highlight: false,
   },
@@ -145,7 +145,7 @@ export default function LandingPage() {
           </div>
 
           <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
-            <p className="text-xs text-muted-foreground">No credit card needed · 7-day free trial · cancel anytime</p>
+            <p className="text-xs text-muted-foreground">7-day free trial, no credit card needed · no long-term lock-in</p>
             <span className="hidden sm:block text-muted-foreground/40">|</span>
             <Link href="/login" className="text-xs text-primary hover:underline font-medium" data-testid="link-sign-in-hero">
               Already have an account? Sign In →
@@ -254,7 +254,7 @@ export default function LandingPage() {
             ))}
           </div>
           <p className="text-center text-sm text-muted-foreground mt-6">
-            All plans start with a <strong>7-day free trial</strong> — no credit card required. Pay only after your trial ends.
+            All plans start with a <strong>7-day free trial</strong> — no credit card needed. When your trial ends, pay easily via UPI to continue.
           </p>
         </div>
       </section>

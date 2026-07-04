@@ -17,11 +17,16 @@ export const repairJobsTable = pgTable("repair_jobs", {
   promisedDate: timestamp("promised_date").notNull(),
   deliveredDate: timestamp("delivered_date"),
   notes: text("notes"),
+  // Karigar assigned to do the repair work. Denormalized name mirrors custom_orders' pattern
+  // so the job card/list can show it without an extra join.
+  karigarId: integer("karigar_id"),
+  karigarName: text("karigar_name"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
   index("repairs_user_idx").on(t.userId),
   index("repairs_user_status_idx").on(t.userId, t.status),
   index("repairs_customer_idx").on(t.customerId),
+  index("repairs_karigar_idx").on(t.karigarId),
 ]);
 
 export const insertRepairJobSchema = createInsertSchema(repairJobsTable).omit({ id: true, createdAt: true, receivedDate: true });

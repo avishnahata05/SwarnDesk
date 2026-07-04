@@ -15,13 +15,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import {
   Search, Plus, Trash2, MessageCircle, CheckCircle2,
   UserPlus, ChevronDown, ChevronUp, FileText, ClipboardList, History, Pencil,
-  ScanLine, CheckCircle, XCircle, Zap,
+  ScanLine, CheckCircle, XCircle, Zap, AlertTriangle,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useMetalRateForm } from "@/hooks/use-metal-rate-form";
 
 interface CartItem {
   inventoryItemId: number;
   itemName: string;
+  huid: string | null; // BIS Hallmark Unique ID — must appear on the invoice for hallmarked jewellery
   quantity: number;
   availableQty: number; // max allowed; Infinity for quick-entry items
   unitPrice: number;
@@ -47,6 +49,13 @@ interface SaleComplete {
   gstAmount: number;
   paymentMode: string;
   paymentStatus: string;
+}
+
+// Escape user-entered text (item names, customer names, shop settings) before it lands
+// in the print window's HTML — otherwise a crafted name could inject markup/script into
+// the print popup, which retains a window.opener link back to the app.
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
 
 const PURITIES = ["24K", "22K", "18K", "14K", "925", "999"];
@@ -80,7 +89,7 @@ function openPrintWindow(params: {
   const itemRows = items.map((item, i) => `
     <tr>
       <td>${i + 1}</td>
-      <td class="desc">${item.itemName}</td>
+      <td class="desc">${escapeHtml(item.itemName)}${item.huid ? `<br/><span class="huid">HUID: ${escapeHtml(item.huid)}</span>` : ""}</td>
       <td class="center">${item.quantity}</td>
       <td class="right">${item.grossWeight.toFixed(3)}g</td>
       <td class="right">${item.netWeight.toFixed(3)}g</td>
@@ -134,6 +143,7 @@ function openPrintWindow(params: {
   tbody tr:nth-child(even) { background: #f9fafb; }
   tbody td { padding: 7px 10px; border-bottom: 1px solid #e5e7eb; }
   td.desc { max-width: 200px; }
+  .huid { font-size: 10px; color: #777; font-weight: 400; }
   tfoot td { padding: 8px 10px; font-weight: 600; border-top: 2px solid #e5e7eb; }
 
   /* Summary */
@@ -188,17 +198,17 @@ ${isEstimate ? '<div class="watermark">ESTIMATE</div>' : ""}
   <!-- Header -->
   <div class="header">
     <div>
-      <div class="shop-name">${shop.name}</div>
+      <div class="shop-name">${escapeHtml(shop.name)}</div>
       <div class="shop-sub">
-        ${shop.address}<br/>
-        Mobile: ${shop.mobile}${shop.gstin ? ` &nbsp;|&nbsp; GSTIN: ${shop.gstin}` : ""}
+        ${escapeHtml(shop.address)}<br/>
+        Mobile: ${escapeHtml(shop.mobile)}${shop.gstin ? ` &nbsp;|&nbsp; GSTIN: ${escapeHtml(shop.gstin)}` : ""}
       </div>
     </div>
     <div class="doc-type">
       <div class="doc-label">${isEstimate ? "Estimate / Quotation" : "Tax Invoice"}</div>
-      <div class="doc-num">${isEstimate ? "Est. Ref" : "Invoice"}: ${invoiceNumber}</div>
-      <div class="doc-date">Date: ${date}</div>
-      ${!isEstimate ? `<div class="doc-date">HSN: 7113 · GST: 3%</div>` : ""}
+      <div class="doc-num">${isEstimate ? "Est. Ref" : "Invoice"}: ${escapeHtml(invoiceNumber)}</div>
+      <div class="doc-date">Date: ${escapeHtml(date)}</div>
+      <div class="doc-date">HSN: 7113 · GST: 3%${isEstimate ? " (estimated)" : ""}</div>
     </div>
   </div>
 
@@ -208,8 +218,8 @@ ${isEstimate ? '<div class="watermark">ESTIMATE</div>' : ""}
   <div class="info-row">
     <div class="info-box">
       <div class="info-label">Bill To</div>
-      <div class="info-value">${customer.name || "Walk-in Customer"}</div>
-      ${customer.mobile ? `<div class="info-sub">📞 ${customer.mobile}</div>` : ""}
+      <div class="info-value">${escapeHtml(customer.name || "Walk-in Customer")}</div>
+      ${customer.mobile ? `<div class="info-sub">📞 ${escapeHtml(customer.mobile)}</div>` : ""}
     </div>
     <div class="info-box">
       <div class="info-label">${isEstimate ? "Valid Until" : "Payment Mode"}</div>
@@ -243,20 +253,18 @@ ${isEstimate ? '<div class="watermark">ESTIMATE</div>' : ""}
       </div>
       ${discountAmount > 0 ? `<div class="sum-row discount"><span>Discount</span><span>− ${fmt(discountAmount)}</span></div>` : ""}
       ${exchangeGoldWeight > 0 ? `<div class="sum-row exchange"><span>Exchange Gold (${exchangeGoldWeight.toFixed(3)}g)</span><span>− ${fmt(exchangeGoldValue)}</span></div>` : ""}
-      ${!isEstimate ? `
       <div class="sum-row light"><span>Taxable Value</span><span>${fmt(taxableBase)}</span></div>
-      <div class="sum-row light"><span>CGST @ 1.5%</span><span>${fmt(cgst)}</span></div>
-      <div class="sum-row light"><span>SGST @ 1.5%</span><span>${fmt(sgst)}</span></div>
-      ` : ""}
+      <div class="sum-row light"><span>CGST @ 1.5%${isEstimate ? " (est.)" : ""}</span><span>${fmt(cgst)}</span></div>
+      <div class="sum-row light"><span>SGST @ 1.5%${isEstimate ? " (est.)" : ""}</span><span>${fmt(sgst)}</span></div>
       <div class="sum-row total">
         <span>${isEstimate ? "Estimated Total" : "Grand Total"}</span>
         <span>${fmt(totalAmount)}</span>
       </div>
     </div>
   </div>
-  ${!isEstimate ? `<div class="gst-note">Amount in words: ${amountToWords(totalAmount)}</div>` : ""}
+  <div class="gst-note">${isEstimate ? "Estimated amount in words" : "Amount in words"}: ${amountToWords(totalAmount)}</div>
 
-  ${!isEstimate ? `<div class="payment-badge">✓ ${paymentMode.toUpperCase()} Payment</div>` : `<div class="payment-badge">⏳ Estimate Valid for 7 Days</div>`}
+  ${!isEstimate ? `<div class="payment-badge">✓ ${escapeHtml(paymentMode.toUpperCase())} Payment</div>` : `<div class="payment-badge">⏳ Estimate Valid for 7 Days</div>`}
 
   <!-- Footer -->
   <div class="footer">
@@ -268,7 +276,7 @@ ${isEstimate ? '<div class="watermark">ESTIMATE</div>' : ""}
     <div class="footer-right">
       <div class="sig-line"></div>
       <div>Authorised Signatory</div>
-      <div style="font-weight:600;margin-top:2px;">${shop.name}</div>
+      <div style="font-weight:600;margin-top:2px;">${escapeHtml(shop.name)}</div>
     </div>
   </div>
 
@@ -309,6 +317,7 @@ function amountToWords(amount: number): string {
 export default function Billing() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { data: rates } = useGetCurrentRates();
 
   const [tab, setTab] = useState<"stock" | "quick" | "scan">("stock");
   const [customerSearch, setCustomerSearch] = useState("");
@@ -329,6 +338,7 @@ export default function Billing() {
   const [discount, setDiscount] = useState(0);
   const [exchangeGoldWeight, setExchangeGoldWeight] = useState(0);
   const [saleComplete, setSaleComplete] = useState<SaleComplete | null>(null);
+  const [confirmSaleOpen, setConfirmSaleOpen] = useState(false);
 
   // Quick add customer
   const [quickAddOpen, setQuickAddOpen] = useState(false);
@@ -341,27 +351,23 @@ export default function Billing() {
   const [quickMetal, setQuickMetal] = useState<"gold" | "silver">("gold");
   const [quickPurity, setQuickPurity] = useState("22K");
   const [quickWeight, setQuickWeight] = useState("");
+  const [quickStoneWeight, setQuickStoneWeight] = useState("");
   const [quickMakingPct, setQuickMakingPct] = useState("10");
   const [quickStoneCharges, setQuickStoneCharges] = useState("");
   const [quickQty, setQuickQty] = useState("1");
 
   // Rate edit dialog state
   const [rateEditOpen, setRateEditOpen] = useState(false);
-  const [rateForm, setRateForm] = useState({ gold22k: "", silver: "" });
+  const { rateForm, setGoldRate, setSilver, buildRatePayload } = useMetalRateForm(rates);
   const updateRates = useUpdateRates();
 
-  const openRateEdit = () => {
-    setRateForm({
-      gold22k: String(Math.round((rates?.gold22k ?? 7250) * 10)),
-      silver: String(Math.round((rates?.silver ?? 95) * 1000)),
-    });
-    setRateEditOpen(true);
-  };
+  const openRateEdit = () => setRateEditOpen(true);
 
   const saveRateEdit = () => {
-    const payload: Record<string, number> = {};
-    if (rateForm.gold22k) payload.gold22k = parseFloat(rateForm.gold22k) / 10;
-    if (rateForm.silver) payload.silver = parseFloat(rateForm.silver) / 1000;
+    const payload = buildRatePayload();
+    if (Object.keys(payload).length === 0) {
+      toast({ title: "Enter at least one valid rate", variant: "destructive" }); return;
+    }
     updateRates.mutate({ data: payload }, {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getGetCurrentRatesQueryKey() });
@@ -409,7 +415,6 @@ export default function Billing() {
   }, [tab]);
 
 
-  const { data: rates } = useGetCurrentRates();
   const { data: settings } = useGetSettings();
   const { data: customers } = useListCustomers({ ...(customerSearch ? { search: customerSearch } : {}) });
   const { data: items, isFetching: itemsFetching } = useListInventoryItems({ ...(itemSearch ? { search: itemSearch } : {}) });
@@ -432,6 +437,16 @@ export default function Billing() {
     return goldRate22k;
   };
 
+  // Same rounding order as addToCart/the scan handler below — round making charges first,
+  // then round the grand total — so the price shown before adding an item always matches
+  // the price it's actually added to the cart at.
+  const previewItemPrice = (item: { category: string; purity: string; netWeight: number; stoneWeight: number; makingCharges: number; stoneValue?: number | null }) => {
+    const liveRate = getLiveRate(item.category, item.purity);
+    const metalVal = Math.max(0, item.netWeight - item.stoneWeight) * liveRate;
+    const makingAmt = Math.round(metalVal * item.makingCharges / 100);
+    return Math.round(metalVal + makingAmt + (item.stoneValue ?? 0));
+  };
+
   // Process scan results once the API returns data for the pending barcode query
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -448,18 +463,27 @@ export default function Billing() {
       const liveMetalVal = pureMetalWeight * liveRate;
       const liveMakingAmt = Math.round(liveMetalVal * target.makingCharges / 100);
       const livePrice = Math.round(liveMetalVal + liveMakingAmt + (target.stoneValue ?? 0));
+      let blockedByStock = false;
       setCart(prev => {
         const existing = prev.find(c => c.inventoryItemId === target.id);
-        if (existing) return prev.map(c => c.inventoryItemId === target.id ? { ...c, quantity: c.quantity + 1 } : c);
+        if (existing) {
+          if (existing.quantity >= existing.availableQty) { blockedByStock = true; return prev; }
+          return prev.map(c => c.inventoryItemId === target.id ? { ...c, quantity: c.quantity + 1 } : c);
+        }
         return [...prev, {
-          inventoryItemId: target.id, itemName: target.name, quantity: 1,
+          inventoryItemId: target.id, itemName: target.name, huid: target.huid ?? null, quantity: 1,
           availableQty: target.quantity, unitPrice: livePrice, metalRate: liveRate,
           grossWeight: target.grossWeight, netWeight: target.netWeight,
           makingCharges: liveMakingAmt, stoneCharges: target.stoneValue ?? 0, discount: 0,
         }];
       });
-      setLastScanned({ name: target.name, success: true });
-      setScanLog(prev => [{ name: target.name, price: livePrice, qty: 1 }, ...prev].slice(0, 10));
+      if (blockedByStock) {
+        setLastScanned({ name: target.name, success: false });
+        toast({ title: `Only ${target.quantity} of "${target.name}" in stock`, variant: "destructive", duration: 2000 });
+      } else {
+        setLastScanned({ name: target.name, success: true });
+        setScanLog(prev => [{ name: target.name, price: livePrice, qty: 1 }, ...prev].slice(0, 10));
+      }
     } else {
       setLastScanned({ name: scanPending, success: false });
       toast({ title: `"${scanPending}" not found or out of stock`, variant: "destructive", duration: 2000 });
@@ -474,8 +498,9 @@ export default function Billing() {
   const SILVER_PURITIES = ["999", "925"];
   const quickGrossWeight = parseFloat(quickWeight || "0");
   const quickMetalRate = getLiveRate(quickMetal, quickPurity);
-  const quickNetWeight = quickGrossWeight;
-  const quickMetalValue = quickGrossWeight * quickMetalRate;
+  const quickStoneWeightVal = parseFloat(quickStoneWeight || "0");
+  const quickNetWeight = Math.max(0, quickGrossWeight - quickStoneWeightVal);
+  const quickMetalValue = quickNetWeight * quickMetalRate;
   const quickMakingVal = Math.round(quickMetalValue * parseFloat(quickMakingPct || "0") / 100);
   const quickStoneChargesVal = parseFloat(quickStoneCharges || "0");
   const quickUnitPrice = Math.round(quickMetalValue + quickMakingVal + quickStoneChargesVal);
@@ -489,6 +514,7 @@ export default function Billing() {
     setCart(prev => [...prev, {
       inventoryItemId: tempId,
       itemName: `${quickName} (${quickMetal === "gold" ? "Gold" : "Silver"} ${quickPurity}, ${parseFloat(quickWeight).toFixed(3)}g)`,
+      huid: null,
       quantity: qty,
       availableQty: Infinity,
       unitPrice: quickUnitPrice,
@@ -499,7 +525,7 @@ export default function Billing() {
       stoneCharges: quickStoneChargesVal,
       discount: 0,
     }]);
-    setQuickName(""); setQuickWeight(""); setQuickMakingPct("10"); setQuickStoneCharges(""); setQuickQty("1"); setQuickMetal("gold"); setQuickPurity("22K");
+    setQuickName(""); setQuickWeight(""); setQuickStoneWeight(""); setQuickMakingPct("10"); setQuickStoneCharges(""); setQuickQty("1"); setQuickMetal("gold"); setQuickPurity("22K");
     toast({ title: "Added to cart" });
   };
 
@@ -517,23 +543,28 @@ export default function Billing() {
     setScanInput("");
   }, [scanInput]);
 
-  const addToCart = (item: { id: number; name: string; category: string; purity: string; metalRate: number; grossWeight: number; netWeight: number; stoneWeight: number; makingCharges: number; stoneValue?: number | null; totalValue: number; quantity: number }) => {
+  const addToCart = (item: { id: number; name: string; category: string; purity: string; metalRate: number; grossWeight: number; netWeight: number; stoneWeight: number; makingCharges: number; stoneValue?: number | null; totalValue: number; quantity: number; huid?: string | null }) => {
     const liveRate = getLiveRate(item.category, item.purity);
     const pureMetalWeight = Math.max(0, item.netWeight - item.stoneWeight);
     const liveMetalVal = pureMetalWeight * liveRate;
     const liveMakingAmt = Math.round(liveMetalVal * item.makingCharges / 100);
     const livePrice = Math.round(liveMetalVal + liveMakingAmt + (item.stoneValue ?? 0));
+    let blockedByStock = false;
     setCart(prev => {
       const existing = prev.find(c => c.inventoryItemId === item.id);
-      if (existing) return prev.map(c => c.inventoryItemId === item.id ? { ...c, quantity: c.quantity + 1 } : c);
+      if (existing) {
+        if (existing.quantity >= existing.availableQty) { blockedByStock = true; return prev; }
+        return prev.map(c => c.inventoryItemId === item.id ? { ...c, quantity: c.quantity + 1 } : c);
+      }
       return [...prev, {
-        inventoryItemId: item.id, itemName: item.name, quantity: 1,
+        inventoryItemId: item.id, itemName: item.name, huid: item.huid ?? null, quantity: 1,
         availableQty: item.quantity,
         unitPrice: livePrice, metalRate: liveRate,
         grossWeight: item.grossWeight, netWeight: item.netWeight,
         makingCharges: liveMakingAmt, stoneCharges: item.stoneValue ?? 0, discount: 0,
       }];
     });
+    if (blockedByStock) toast({ title: `Only ${item.quantity} of "${item.name}" in stock`, variant: "destructive" });
     setItemSearch("");
   };
 
@@ -595,8 +626,40 @@ export default function Billing() {
     });
   };
 
-  const completeSale = () => {
+  // Validates the cart/payment inputs and, if everything checks out, opens the "Confirm Sale"
+  // dialog instead of saving immediately — so a stray click can't finalize a sale by accident.
+  const requestCompleteSale = () => {
     if (cart.length === 0) { toast({ title: "Add items to cart first", variant: "destructive" }); return; }
+
+    // The server derives the actual paymentStatus from paidAmount alone (it ignores the
+    // paymentStatus field). If "Partial" is selected but no amount was typed, defaulting to
+    // the full total would silently record the sale as fully paid — contradicting what the
+    // user picked and losing track of the balance owed. Require an explicit amount instead.
+    if (paymentStatus === "partial") {
+      const entered = parseFloat(paidNow);
+      if (paidNow === "" || !isFinite(entered) || entered <= 0) {
+        toast({ title: "Enter the amount paid now for a partial payment", variant: "destructive" });
+        return;
+      }
+      if (entered >= totalAmount) {
+        toast({ title: "This amount covers the full total or more — please select \"Paid\" instead of \"Partial\".", variant: "destructive" });
+        return;
+      }
+    }
+
+    setConfirmSaleOpen(true);
+  };
+
+  const completeSale = () => {
+    let paidAmount: number;
+    if (paymentStatus === "pending") {
+      paidAmount = 0;
+    } else if (paymentStatus === "partial") {
+      paidAmount = parseFloat(paidNow);
+    } else {
+      paidAmount = paidNow !== "" ? parseFloat(paidNow) || 0 : totalAmount;
+    }
+
     const cartSnap = [...cart];
     createSale.mutate({
       data: {
@@ -604,7 +667,7 @@ export default function Billing() {
         customerName: selectedCustomer?.name ?? "Walk-in Customer",
         totalAmount, gstAmount, discountAmount: discount,
         exchangeGoldWeight, exchangeGoldValue, paymentMode, paymentStatus,
-        paidAmount: paymentStatus === "pending" ? 0 : (paidNow !== "" ? parseFloat(paidNow) || 0 : totalAmount),
+        paidAmount,
         notes: null,
         items: cart.map(c => ({
           inventoryItemId: c.inventoryItemId > 0 ? c.inventoryItemId : 0,
@@ -615,6 +678,7 @@ export default function Billing() {
       }
     }, {
       onSuccess: (sale) => {
+        setConfirmSaleOpen(false);
         setSaleComplete({
           invoiceNumber: sale.invoiceNumber,
           total: sale.totalAmount,
@@ -633,7 +697,10 @@ export default function Billing() {
         queryClient.invalidateQueries({ queryKey: getListInventoryItemsQueryKey() });
         toast({ title: "Sale completed!", description: `Invoice: ${sale.invoiceNumber}` });
       },
-      onError: () => toast({ title: "Sale failed", variant: "destructive" }),
+      onError: () => {
+        setConfirmSaleOpen(false);
+        toast({ title: "Sale failed", variant: "destructive" });
+      },
     });
   };
 
@@ -768,7 +835,7 @@ export default function Billing() {
                                   variant="outline"
                                   className={`text-[10px] h-4 ${sale.paymentStatus === "paid" ? "text-green-700 border-green-200" : "text-orange-700 border-orange-200"}`}
                                 >
-                                  {sale.paymentStatus}
+                                  {sale.paymentStatus.charAt(0).toUpperCase() + sale.paymentStatus.slice(1)}
                                 </Badge>
                               </div>
                             </div>
@@ -975,7 +1042,7 @@ export default function Billing() {
                               <div className="text-xs text-muted-foreground">{item.category} · {item.purity} · {item.grossWeight}g</div>
                             </div>
                             <div className="text-right shrink-0">
-                              <div className="text-sm font-semibold text-primary">{formatCurrency(Math.round(Math.max(0, item.netWeight - item.stoneWeight) * getLiveRate(item.category, item.purity) * (1 + item.makingCharges / 100) + (item.stoneValue ?? 0)))}</div>
+                              <div className="text-sm font-semibold text-primary">{formatCurrency(previewItemPrice(item))}</div>
                               <div className="text-xs text-muted-foreground">Qty: {item.quantity}</div>
                             </div>
                           </div>
@@ -987,7 +1054,10 @@ export default function Billing() {
               ) : (
                 <>
                   <div className="text-sm font-medium">Quick Entry by Weight</div>
-                  <p className="text-xs text-muted-foreground -mt-1">For items not in stock. Will NOT deduct from inventory.</p>
+                  <div className="flex items-start gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs -mt-1">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                    <span>For items not in stock. This will <strong>NOT</strong> deduct from inventory.</span>
+                  </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     <div className="col-span-2 sm:col-span-3">
                       <label className="text-xs text-muted-foreground mb-1 block">Item Name *</label>
@@ -1025,6 +1095,10 @@ export default function Billing() {
                       <Input type="number" step="0.001" placeholder="e.g. 10.500" value={quickWeight} onChange={e => setQuickWeight(e.target.value)} data-testid="input-quick-weight" />
                     </div>
                     <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Stone Weight (g)</label>
+                      <Input type="number" step="0.001" placeholder="e.g. 0.500 (optional)" value={quickStoneWeight} onChange={e => setQuickStoneWeight(e.target.value)} data-testid="input-quick-stone-weight" />
+                    </div>
+                    <div>
                       <label className="text-xs text-muted-foreground mb-1 block">Qty</label>
                       <Input type="number" min="1" value={quickQty} onChange={e => setQuickQty(e.target.value)} data-testid="input-quick-qty" />
                     </div>
@@ -1048,7 +1122,7 @@ export default function Billing() {
                             </div>
                           </div>
                           <div>
-                            <div className="text-muted-foreground">Metal value</div>
+                            <div className="text-muted-foreground">Net wt. ({quickNetWeight.toFixed(3)}g)</div>
                             <div className="font-semibold text-primary">{formatCurrency(quickMetalValue)}</div>
                           </div>
                           <div>
@@ -1079,20 +1153,22 @@ export default function Billing() {
                 <button
                   type="button"
                   onClick={openRateEdit}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors group"
+                  title="Click to update today's gold rate"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-200 hover:border-amber-400 rounded-lg hover:bg-amber-100 transition-colors group cursor-pointer"
                   data-testid="button-edit-gold-rate"
                 >
-                  <span className="text-amber-700">22K Gold</span>
+                  <span className="text-amber-700 group-hover:underline">22K Gold</span>
                   <span className="font-semibold text-amber-800">₹{Math.round(goldRate22k * 10).toLocaleString("en-IN")}/10g</span>
                   <Pencil className="w-3 h-3 text-amber-400 group-hover:text-amber-600 transition-colors" />
                 </button>
                 <button
                   type="button"
                   onClick={openRateEdit}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-muted border border-border rounded-lg hover:bg-muted/80 transition-colors group"
+                  title="Click to update today's silver rate"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-muted border border-border hover:border-foreground/30 rounded-lg hover:bg-muted/80 transition-colors group cursor-pointer"
                   data-testid="button-edit-silver-rate"
                 >
-                  <span className="text-muted-foreground">Silver</span>
+                  <span className="text-muted-foreground group-hover:underline">Silver</span>
                   <span className="font-semibold">₹{Math.round(silverRate * 1000).toLocaleString("en-IN")}/kg</span>
                   <Pencil className="w-3 h-3 text-muted-foreground group-hover:text-foreground transition-colors" />
                 </button>
@@ -1109,7 +1185,7 @@ export default function Billing() {
                   <button
                     onClick={() => printBill(true)}
                     className="flex items-center gap-1.5 text-xs text-amber-700 hover:text-amber-600 transition-colors"
-                    title="Print as estimate"
+                    title="Prints a non-binding price quote, not a final invoice."
                     data-testid="button-print-estimate-cart"
                   >
                     <ClipboardList className="w-3.5 h-3.5" />Estimate
@@ -1248,7 +1324,7 @@ export default function Billing() {
                         <span>{formatCurrency(Math.max(0, totalAmount - (parseFloat(paidNow) || 0)))}</span>
                       </div>
                     )}
-                    <p className="text-[10px] text-orange-600">Remaining balance will go to Pending Payments.</p>
+                    <p className="text-[10px] text-orange-600">Remaining balance will go to Pending Payments (see Pending Payments in the sidebar).</p>
                   </div>
                 )}
 
@@ -1262,21 +1338,70 @@ export default function Billing() {
                       <SelectItem value="pending">Pending (₹0 now)</SelectItem>
                     </SelectContent>
                   </Select>
+                  <p className="text-[10px] text-muted-foreground mt-1">Payment Status decides what gets saved (Payment Mode is just how they paid).</p>
                 </div>
               </div>
 
-              <Button
-                className="w-full"
-                onClick={completeSale}
-                disabled={createSale.isPending || cart.length === 0}
-                data-testid="button-complete-sale"
-              >
-                {createSale.isPending ? "Processing..." : cart.length === 0 ? "Add items to cart" : `Complete Sale (${formatCurrency(totalAmount)})`}
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  className="gap-2 text-amber-700 border-amber-300 hover:bg-amber-50"
+                  onClick={() => printBill(true)}
+                  disabled={cart.length === 0}
+                  title="Prints a non-binding price quote, not a final invoice."
+                  data-testid="button-print-estimate-summary"
+                >
+                  <ClipboardList className="w-4 h-4" />Print Estimate
+                </Button>
+                <Button
+                  className="flex-1"
+                  onClick={requestCompleteSale}
+                  disabled={createSale.isPending || cart.length === 0}
+                  data-testid="button-complete-sale"
+                >
+                  {createSale.isPending ? "Processing..." : cart.length === 0 ? "Add items to cart" : `Complete Sale (${formatCurrency(totalAmount)})`}
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </div>
       </div>
+
+      {/* Confirm Sale Dialog */}
+      <Dialog open={confirmSaleOpen} onOpenChange={setConfirmSaleOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-primary" />
+              Confirm Sale
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Customer</span>
+              <span className="font-medium">{selectedCustomer?.name ?? "Walk-in Customer"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Items</span>
+              <span className="font-medium">{cart.length}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Payment Status</span>
+              <span className="font-medium capitalize">{paymentStatus}</span>
+            </div>
+            <div className="flex justify-between border-t border-border pt-2 font-bold text-base">
+              <span>Total Amount</span>
+              <span className="text-primary">{formatCurrency(totalAmount)}</span>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmSaleOpen(false)} disabled={createSale.isPending}>Cancel</Button>
+            <Button onClick={completeSale} disabled={createSale.isPending} data-testid="button-confirm-sale">
+              {createSale.isPending ? "Processing..." : "Confirm & Complete Sale"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Rate Edit Dialog */}
       <Dialog open={rateEditOpen} onOpenChange={setRateEditOpen}>
@@ -1289,27 +1414,49 @@ export default function Billing() {
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              Gold rate <strong>per 10 grams</strong>, Silver rate <strong>per kg</strong>
+              Gold rate <strong>per 10 grams</strong>, Silver rate <strong>per kg</strong>. Enter any one gold rate and the others auto-fill — edit a field to override it.
             </p>
-            <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Gold 22K (₹ per 10g)</label>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Gold 22K (₹/10g)</label>
                 <Input
                   type="number"
                   step="1"
                   value={rateForm.gold22k}
-                  onChange={e => setRateForm(f => ({ ...f, gold22k: e.target.value }))}
+                  onChange={e => setGoldRate("gold22k", e.target.value)}
                   placeholder="e.g. 72500"
-                  data-testid="input-billing-rate-gold"
+                  data-testid="input-billing-rate-gold22k"
                 />
               </div>
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Silver (₹ per kg)</label>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Gold 24K (₹/10g)</label>
+                <Input
+                  type="number"
+                  step="1"
+                  value={rateForm.gold24k}
+                  onChange={e => setGoldRate("gold24k", e.target.value)}
+                  placeholder="e.g. 79500"
+                  data-testid="input-billing-rate-gold24k"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Gold 18K (₹/10g)</label>
+                <Input
+                  type="number"
+                  step="1"
+                  value={rateForm.gold18k}
+                  onChange={e => setGoldRate("gold18k", e.target.value)}
+                  placeholder="e.g. 59400"
+                  data-testid="input-billing-rate-gold18k"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Silver (₹/kg)</label>
                 <Input
                   type="number"
                   step="1"
                   value={rateForm.silver}
-                  onChange={e => setRateForm(f => ({ ...f, silver: e.target.value }))}
+                  onChange={e => setSilver(e.target.value)}
                   placeholder="e.g. 95000"
                   data-testid="input-billing-rate-silver"
                 />

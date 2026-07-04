@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import {
-  useListRepairs, useCreateRepair, useUpdateRepair, useDeleteRepair, useGetSettings,
+  useListRepairs, useCreateRepair, useUpdateRepair, useDeleteRepair, useGetSettings, useListKarigars,
   getListRepairsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Plus, MessageCircle, ArrowRight, Pencil, Trash2, PrinterIcon,
-  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp,
+  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Hammer,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -61,6 +61,8 @@ type Repair = {
   promisedDate: string;
   deliveredDate?: string | null;
   notes?: string | null;
+  karigarId?: number | null;
+  karigarName?: string | null;
 };
 
 type RepairForm = {
@@ -71,11 +73,12 @@ type RepairForm = {
   estimatedCost: string;
   promisedDate: string;
   notes: string;
+  karigarId: string;
 };
 
 const EMPTY_FORM: RepairForm = {
   customerName: "", customerMobile: "", itemDescription: "",
-  issue: "", estimatedCost: "", promisedDate: "", notes: "",
+  issue: "", estimatedCost: "", promisedDate: "", notes: "", karigarId: "",
 };
 
 // ─── Print job card ────────────────────────────────────────────────────────────
@@ -121,6 +124,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;color:#111;font-size:12px;backgroun
 <div class="row"><span class="label">Mobile</span><span class="value">${repair.customerMobile}</span></div>
 <div class="row"><span class="label">Item</span><span class="value">${repair.itemDescription}</span></div>
 <div class="row"><span class="label">Issue</span><span class="value">${repair.issue}</span></div>
+${repair.karigarName ? `<div class="row"><span class="label">Assigned Karigar</span><span class="value">${repair.karigarName}</span></div>` : ""}
 <div class="row"><span class="label">Estimated Cost</span><span class="value">${fmt(repair.estimatedCost)}</span></div>
 ${repair.actualCost != null ? `<div class="row"><span class="label">Actual Cost</span><span class="value">${fmt(repair.actualCost)}</span></div>` : ""}
 <div class="row"><span class="label">Promised Date</span><span class="value">${fmtD(repair.promisedDate)}</span></div>
@@ -144,6 +148,7 @@ export default function Repairs() {
 
   const { data: repairs, isLoading } = useListRepairs();
   const { data: settings } = useGetSettings();
+  const { data: karigars } = useListKarigars();
   const createRepair = useCreateRepair();
   const updateRepair = useUpdateRepair();
   const deleteRepair = useDeleteRepair();
@@ -198,6 +203,7 @@ export default function Repairs() {
         promisedDate: new Date(form.promisedDate).toISOString(),
         notes: form.notes.trim() || null,
         customerId: null,
+        karigarId: form.karigarId ? parseInt(form.karigarId) : null,
       }
     }, {
       onSuccess: () => {
@@ -221,6 +227,7 @@ export default function Repairs() {
       estimatedCost: String(r.estimatedCost),
       promisedDate: r.promisedDate.split("T")[0],
       notes: r.notes ?? "",
+      karigarId: r.karigarId != null ? String(r.karigarId) : "",
     });
   };
 
@@ -241,6 +248,7 @@ export default function Repairs() {
         estimatedCost: cost,
         promisedDate: new Date(editForm.promisedDate).toISOString(),
         notes: editForm.notes.trim() || null,
+        karigarId: editForm.karigarId ? parseInt(editForm.karigarId) : null,
       }
     }, {
       onSuccess: () => {
@@ -380,17 +388,18 @@ export default function Repairs() {
                           <div className="font-semibold text-sm truncate">{repair.customerName}</div>
                           <div className="text-xs text-muted-foreground">{repair.customerMobile}</div>
                         </div>
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                          <button onClick={() => openEdit(repair)} className="p-1 text-muted-foreground hover:text-primary transition-colors" title="Edit">
+                        <div className="flex items-center gap-0.5 flex-shrink-0">
+                          <button onClick={() => openEdit(repair)} className="p-2 -m-0.5 text-muted-foreground hover:text-primary hover:bg-muted/40 rounded-md transition-colors" title="Edit">
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
-                          <button onClick={() => printRepairJobCard(repair, shopName, shopAddress, shopMobile)} className="p-1 text-muted-foreground hover:text-primary transition-colors" title="Print job card">
+                          <button onClick={() => printRepairJobCard(repair, shopName, shopAddress, shopMobile)} className="p-2 -m-0.5 text-muted-foreground hover:text-primary hover:bg-muted/40 rounded-md transition-colors" title="Print job card">
                             <PrinterIcon className="w-3.5 h-3.5" />
                           </button>
-                          <button onClick={() => sendWhatsApp(repair)} className="p-1 text-muted-foreground hover:text-green-600 transition-colors" title="Send WhatsApp update">
+                          <button onClick={() => sendWhatsApp(repair)} className="p-2 -m-0.5 text-muted-foreground hover:text-green-600 hover:bg-green-50 rounded-md transition-colors" title="Send WhatsApp update">
                             <MessageCircle className="w-3.5 h-3.5" />
                           </button>
-                          <button onClick={() => setDeleteTarget(repair)} className="p-1 text-muted-foreground hover:text-destructive transition-colors" title="Delete">
+                          <div className="w-px h-4 bg-border mx-0.5" />
+                          <button onClick={() => setDeleteTarget(repair)} className="p-2 -m-0.5 text-muted-foreground hover:text-destructive hover:bg-red-50 rounded-md transition-colors" title="Delete">
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
@@ -399,6 +408,12 @@ export default function Repairs() {
                       {/* Item info */}
                       <div className="text-xs font-medium border-l-2 border-primary pl-2 leading-snug">{repair.itemDescription}</div>
                       <div className="text-xs text-muted-foreground">{repair.issue}</div>
+
+                      {repair.karigarName && (
+                        <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                          <Hammer className="w-3 h-3" />{repair.karigarName}
+                        </div>
+                      )}
 
                       {/* Cost + date */}
                       <div className="flex items-center justify-between text-xs">
@@ -441,7 +456,7 @@ export default function Repairs() {
                             className="flex-1 text-xs gap-1 h-7"
                             onClick={() => advanceStatus(repair)}
                           >
-                            {STATUS_LABELS[nextStatus[status]!]}
+                            {nextStatus[status] === "delivered" ? "Mark Delivered..." : STATUS_LABELS[nextStatus[status]!]}
                             <ArrowRight className="w-3 h-3" />
                           </Button>
                         )}
@@ -484,6 +499,18 @@ export default function Repairs() {
               <div>
                 <label className={lbl}>Promised Date *</label>
                 <input className={inp} type="date" value={form.promisedDate} min={new Date().toISOString().split("T")[0]} onChange={e => setF("promisedDate", e.target.value)} />
+              </div>
+              <div className="col-span-2">
+                <label className={lbl}>Assign Karigar</label>
+                <Select value={form.karigarId || "none"} onValueChange={v => setF("karigarId", v === "none" ? "" : v)}>
+                  <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Unassigned</SelectItem>
+                    {(karigars ?? []).map(k => (
+                      <SelectItem key={k.id} value={String(k.id)}>{k.name} ({k.specialization})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="col-span-2">
                 <label className={lbl}>Notes</label>
@@ -531,6 +558,18 @@ export default function Repairs() {
                 <input className={inp} type="date" value={editForm.promisedDate} onChange={e => setEF("promisedDate", e.target.value)} />
               </div>
               <div className="col-span-2">
+                <label className={lbl}>Assign Karigar</label>
+                <Select value={editForm.karigarId || "none"} onValueChange={v => setEF("karigarId", v === "none" ? "" : v)}>
+                  <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Unassigned</SelectItem>
+                    {(karigars ?? []).map(k => (
+                      <SelectItem key={k.id} value={String(k.id)}>{k.name} ({k.specialization})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="col-span-2">
                 <label className={lbl}>Notes</label>
                 <input className={inp} value={editForm.notes} onChange={e => setEF("notes", e.target.value)} />
               </div>
@@ -565,14 +604,26 @@ export default function Repairs() {
             </div>
             {newStatus === "delivered" && (
               <div>
-                <label className={lbl}>Actual Cost (₹) <span className="text-muted-foreground/60">optional</span></label>
-                <Input
-                  type="number"
-                  min="0"
-                  value={actualCost}
-                  onChange={e => setActualCost(e.target.value)}
-                  placeholder={`Est. was ${formatCurrency(statusRepair?.estimatedCost ?? 0)}`}
-                />
+                <label className={lbl}>Actual Cost (₹) <span className="text-muted-foreground/60">optional — leave blank to use the estimate</span></label>
+                <div className="flex gap-2">
+                  <Input
+                    type="number"
+                    min="0"
+                    value={actualCost}
+                    onChange={e => setActualCost(e.target.value)}
+                    placeholder={`Est. was ${formatCurrency(statusRepair?.estimatedCost ?? 0)}`}
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-xs whitespace-nowrap"
+                    onClick={() => setActualCost(String(statusRepair?.estimatedCost ?? 0))}
+                  >
+                    Use estimate
+                  </Button>
+                </div>
               </div>
             )}
             <div>
@@ -604,7 +655,7 @@ export default function Repairs() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-2 text-sm">
-            <p>Are you sure you want to delete this repair job? This cannot be undone.</p>
+            <p>This will permanently delete this repair record, including all notes and history. This cannot be undone.</p>
             {deleteTarget && (
               <div className="p-3 rounded-lg bg-muted/30 border border-border space-y-1 text-xs">
                 <div><span className="text-muted-foreground">Customer:</span> <strong>{deleteTarget.customerName}</strong></div>

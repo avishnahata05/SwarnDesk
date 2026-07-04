@@ -21,6 +21,9 @@ interface PurchaseForm {
   ratePerGram: number; totalAmount: number; purchaseDate: string; notes: string;
 }
 
+// Same fixed purity options as inventory.tsx / billing.tsx, for consistency across the app.
+const PURITIES = ["24K", "22K", "18K", "14K", "925", "999", "Unspecified"];
+
 export default function Purchases() {
   const [addOpen, setAddOpen] = useState(false);
   const queryClient = useQueryClient();
@@ -36,6 +39,7 @@ export default function Purchases() {
   const netWeight = watch("netWeight");
   const ratePerGram = watch("ratePerGram");
   const metalTypeWatch = watch("metalType") ?? "gold";
+  const purityWatch = watch("purity") ?? "22K";
 
   const onSubmit = (data: PurchaseForm) => {
     createPurchase.mutate({
@@ -93,7 +97,15 @@ export default function Purchases() {
             <tbody>
               {isLoading && <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>}
               {!isLoading && (!purchases || purchases.length === 0) && (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No purchases recorded yet.</td></tr>
+                <tr>
+                  <td colSpan={8} className="px-4 py-12 text-center">
+                    <div className="text-muted-foreground mb-3">No purchases recorded yet.</div>
+                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setAddOpen(true)} data-testid="button-add-first-purchase">
+                      <Plus className="w-3.5 h-3.5" />
+                      Record First Purchase
+                    </Button>
+                  </td>
+                </tr>
               )}
               {(purchases ?? []).map(p => (
                 <tr key={p.id} className="border-b border-border hover:bg-muted/10" data-testid={`row-purchase-${p.id}`}>
@@ -124,7 +136,7 @@ export default function Purchases() {
                 <Input {...register("supplierName", { required: true })} placeholder="Mehta Gold Suppliers" data-testid="input-supplier-name" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Metal Type</label>
+                <label className="text-xs text-muted-foreground mb-1 block">Metal Type / Form</label>
                 <Select value={metalTypeWatch} onValueChange={v => setValue("metalType", v)}>
                   <SelectTrigger data-testid="select-metal-type"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -136,7 +148,12 @@ export default function Purchases() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Purity</label>
-                <Input defaultValue="22K" {...register("purity")} data-testid="input-purchase-purity" />
+                <Select value={purityWatch} onValueChange={v => setValue("purity", v)}>
+                  <SelectTrigger data-testid="select-purchase-purity"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Gross Weight (g) *</label>
@@ -147,15 +164,16 @@ export default function Purchases() {
                 <Input type="number" step="0.001" {...register("netWeight", { required: true })} data-testid="input-purchase-net" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Fine Weight (g)</label>
+                <label className="text-xs text-muted-foreground mb-1 block" title="Fine weight = pure metal equivalent after adjusting for purity">Fine Weight (g)</label>
                 <Input type="number" step="0.001" {...register("fineWeight")} placeholder="Same as net if pure" data-testid="input-purchase-fine" />
+                <p className="text-[10px] text-muted-foreground mt-1">Fine weight = pure metal equivalent after adjusting for purity</p>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Rate per gram (₹) *</label>
                 <Input type="number" {...register("ratePerGram", { required: true })} data-testid="input-purchase-rate" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Total Amount (₹)</label>
+                <label className="text-xs text-muted-foreground mb-1 block">Total Amount (₹, optional)</label>
                 <Input type="number" {...register("totalAmount")} placeholder="Auto-calculated if blank" data-testid="input-purchase-total" />
               </div>
               <div>

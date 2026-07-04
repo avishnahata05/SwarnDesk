@@ -153,9 +153,9 @@ export default function PendingPayments() {
         </Card>
         <Card className="border-border col-span-2 sm:col-span-1">
           <CardContent className="p-4">
-            <div className="text-xs text-muted-foreground mb-1">Partially Paid</div>
+            <div className="text-xs text-muted-foreground mb-1">Still Owed on Partial Bills</div>
             <div className="text-2xl font-bold text-orange-600">
-              {formatCurrency(sales.reduce((s, x) => s + x.paidAmount, 0))}
+              {formatCurrency(sales.filter(x => x.paymentStatus === "partial").reduce((s, x) => s + x.balanceAmount, 0))}
             </div>
           </CardContent>
         </Card>

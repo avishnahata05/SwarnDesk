@@ -45,7 +45,9 @@ const STATUS_COLOR: Record<Status, string> = {
 const ACTIVE_STATUSES: Status[] = ["pending", "karigar_assigned", "in_progress", "karigar_returned", "ready"];
 const ITEM_TYPES = ["Ring", "Necklace", "Bangle", "Chain", "Earring", "Pendant", "Bracelet", "Mangalsutra", "Payal", "Tikka", "Nose Ring", "Other"];
 const METAL_TYPES = ["gold", "silver"];
-const PURITIES = ["24K", "22K", "18K", "14K", "925", "999"];
+const GOLD_PURITIES = ["24K", "22K", "18K", "14K"];
+const SILVER_PURITIES = ["999", "925"];
+const puritiesForMetal = (metalType: string) => metalType === "silver" ? SILVER_PURITIES : GOLD_PURITIES;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -560,12 +562,12 @@ export default function CustomOrders() {
                     {(order.status === "pending" || order.status === "karigar_assigned") && (
                       <Button size="sm" className="h-7 text-xs gap-1.5 whitespace-nowrap" onClick={() => openAssign(order)}>
                         <Hammer className="w-3 h-3" />
-                        {order.status === "karigar_assigned" ? "Issue Metal" : "Assign Karigar"}
+                        Assign Karigar
                       </Button>
                     )}
                     {order.status === "in_progress" && (
                       <Button size="sm" className="h-7 text-xs gap-1.5 bg-purple-600 hover:bg-purple-700 text-white whitespace-nowrap" onClick={() => openReturn(order)}>
-                        <ArrowRight className="w-3 h-3" />Karigar Returned
+                        <ArrowRight className="w-3 h-3" />Quality Check
                       </Button>
                     )}
                     {order.status === "karigar_returned" && (
@@ -619,7 +621,7 @@ export default function CustomOrders() {
                   <label className={lbl}>Purity *</label>
                   <Select value={form.purity} onValueChange={v => setF("purity", v)}>
                     <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                    <SelectContent>{PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                    <SelectContent>{puritiesForMetal(form.metalType).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
                 <div><label className={lbl}>Target Weight (g)</label><input className={inp} type="number" step="0.001" value={form.targetWeight} onChange={e => setF("targetWeight", e.target.value)} placeholder="e.g. 15.000" /></div>
@@ -677,7 +679,7 @@ export default function CustomOrders() {
                   <label className={lbl}>Purity *</label>
                   <Select value={editForm.purity} onValueChange={v => setEF("purity", v)}>
                     <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                    <SelectContent>{PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                    <SelectContent>{puritiesForMetal(editForm.metalType).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
                 <div><label className={lbl}>Target Weight (g)</label><input className={inp} type="number" step="0.001" value={editForm.targetWeight} onChange={e => setEF("targetWeight", e.target.value)} /></div>
@@ -748,7 +750,7 @@ export default function CustomOrders() {
       <Dialog open={!!returnOrder} onOpenChange={v => { if (!v) setReturnOrder(null); }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Karigar Returned — {returnOrder?.orderNumber}</DialogTitle>
+            <DialogTitle>Quality Check — {returnOrder?.orderNumber}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             {returnOrder?.metalIssuedWeight != null && (
@@ -772,11 +774,19 @@ export default function CustomOrders() {
               <label className={lbl}>Notes</label>
               <Input value={karigarNotes} onChange={e => setKarigarNotes(e.target.value)} placeholder="Quality notes, remarks…" />
             </div>
-            {finishedWeight && returnOrder?.metalIssuedWeight != null && (
-              <div className="text-xs p-2.5 bg-primary/5 border border-primary/20 rounded-lg">
-                Issued: <strong>{returnOrder.metalIssuedWeight}g</strong> · Returned: <strong>{parseFloat(finishedWeight).toFixed(3)}g</strong> · Difference: <strong className="text-destructive">{(returnOrder.metalIssuedWeight - parseFloat(finishedWeight)).toFixed(3)}g</strong>
-              </div>
-            )}
+            {finishedWeight && returnOrder?.metalIssuedWeight != null && (() => {
+              const diff = returnOrder.metalIssuedWeight - parseFloat(finishedWeight);
+              const isWastage = diff > 0;
+              return (
+                <div className="text-xs p-2.5 bg-primary/5 border border-primary/20 rounded-lg">
+                  Issued: <strong>{returnOrder.metalIssuedWeight}g</strong> · Returned: <strong>{parseFloat(finishedWeight).toFixed(3)}g</strong> ·{" "}
+                  {isWastage ? "Wastage" : diff < 0 ? "Gain" : "Difference"}:{" "}
+                  <strong className={isWastage ? "text-destructive" : diff < 0 ? "text-emerald-600" : ""}>
+                    {Math.abs(diff).toFixed(3)}g{diff < 0 ? " more than issued" : ""}
+                  </strong>
+                </div>
+              );
+            })()}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setReturnOrder(null)}>Cancel</Button>
@@ -838,6 +848,13 @@ export default function CustomOrders() {
               <div className="p-3 rounded-lg bg-muted/30 border border-border text-xs space-y-1">
                 <div><strong>{deleteTarget.customerName}</strong> · {deleteTarget.orderNumber}</div>
                 <div className="text-muted-foreground">{deleteTarget.itemType} · {STATUS_LABEL[deleteTarget.status as Status]}</div>
+              </div>
+            )}
+            {deleteTarget && (deleteTarget.advancePaid > 0 || (deleteTarget.metalIssuedWeight ?? 0) > 0) && (
+              <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                {deleteTarget.advancePaid > 0 && <div>₹{deleteTarget.advancePaid.toLocaleString("en-IN")} advance collected</div>}
+                {(deleteTarget.metalIssuedWeight ?? 0) > 0 && <div>{deleteTarget.metalIssuedWeight}g metal issued to {deleteTarget.karigarName ?? "karigar"}</div>}
+                <div className="mt-1 font-medium">Deleting this order will not reverse or record these — track them manually if needed.</div>
               </div>
             )}
           </div>

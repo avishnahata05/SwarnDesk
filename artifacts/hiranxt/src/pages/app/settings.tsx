@@ -6,10 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useForm } from "react-hook-form";
-import { Settings as SettingsIcon, Building2, Percent, GitBranch, MessageCircle, CheckCircle2, AlertCircle, Coins, Download, FileSpreadsheet, CreditCard, Clock, AlertTriangle } from "lucide-react";
+import { Settings as SettingsIcon, Building2, Percent, GitBranch, MessageCircle, CheckCircle2, AlertCircle, Coins, Download, FileSpreadsheet, CreditCard, Clock, AlertTriangle, Star } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link } from "wouter";
+import { useMetalRateForm } from "@/hooks/use-metal-rate-form";
 
 function getAuthHeaders(): Record<string, string> {
   const token = localStorage.getItem("swarndesk_token");
@@ -27,6 +28,11 @@ interface WaConfig {
   accessToken: string;
 }
 
+interface LoyaltyConfig {
+  enabled: boolean;
+  rate: string; // ₹ a customer must spend to earn 1 point
+}
+
 export default function Settings() {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -37,23 +43,15 @@ export default function Settings() {
 
   const { data: currentRates } = useGetCurrentRates();
   const updateRates = useUpdateRates();
-  const [rateForm, setRateForm] = useState({ gold22k: "", gold24k: "", gold18k: "", silver: "" });
+  const { rateForm, setGoldRate, setSilver, buildRatePayload } = useMetalRateForm(currentRates);
 
   const [waConfig, setWaConfig] = useState<WaConfig>({ enabled: false, phoneNumberId: "", accessToken: "" });
   const [waSaving, setWaSaving] = useState(false);
   const [waTestStatus, setWaTestStatus] = useState<"idle" | "ok" | "fail">("idle");
   const [exporting, setExporting] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (currentRates) {
-      setRateForm({
-        gold22k: String(Math.round(currentRates.gold22k * 10)),
-        gold24k: String(Math.round(currentRates.gold24k * 10)),
-        gold18k: String(Math.round(currentRates.gold18k * 10)),
-        silver: String(Math.round(currentRates.silver * 1000)),
-      });
-    }
-  }, [currentRates]);
+  const [loyaltyConfig, setLoyaltyConfig] = useState<LoyaltyConfig>({ enabled: true, rate: "1000" });
+  const [loyaltySaving, setLoyaltySaving] = useState(false);
 
   useEffect(() => {
     if (settings) {
@@ -71,19 +69,15 @@ export default function Settings() {
         phoneNumberId: (settings as unknown as { whatsappPhoneNumberId?: string }).whatsappPhoneNumberId ?? "",
         accessToken: prev.accessToken, // never overwrite what the user typed; token is not returned by API
       }));
+      setLoyaltyConfig({
+        enabled: (settings as unknown as { loyaltyPointsEnabled?: boolean }).loyaltyPointsEnabled ?? true,
+        rate: String((settings as unknown as { loyaltyPointsRate?: number }).loyaltyPointsRate ?? 1000),
+      });
     }
   }, [settings, reset]);
 
   const saveRates = () => {
-    const payload: Record<string, number> = {};
-    const p22k = parseFloat(rateForm.gold22k);
-    const p24k = parseFloat(rateForm.gold24k);
-    const p18k = parseFloat(rateForm.gold18k);
-    const pSilver = parseFloat(rateForm.silver);
-    if (rateForm.gold22k && isFinite(p22k) && p22k > 0) payload.gold22k = p22k / 10;
-    if (rateForm.gold24k && isFinite(p24k) && p24k > 0) payload.gold24k = p24k / 10;
-    if (rateForm.gold18k && isFinite(p18k) && p18k > 0) payload.gold18k = p18k / 10;
-    if (rateForm.silver && isFinite(pSilver) && pSilver > 0) payload.silver = pSilver / 1000;
+    const payload = buildRatePayload();
     if (Object.keys(payload).length === 0) {
       toast({ title: "Enter at least one valid rate", variant: "destructive" }); return;
     }
@@ -141,6 +135,32 @@ export default function Settings() {
       toast({ title: "Failed to save WhatsApp settings", variant: "destructive" });
     } finally {
       setWaSaving(false);
+    }
+  };
+
+  const saveLoyaltyConfig = async () => {
+    const rate = parseFloat(loyaltyConfig.rate);
+    if (loyaltyConfig.enabled && (!isFinite(rate) || rate <= 0)) {
+      toast({ title: "Enter a valid positive amount per point", variant: "destructive" });
+      return;
+    }
+    setLoyaltySaving(true);
+    try {
+      const r = await fetch("/api/settings", {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          loyaltyPointsEnabled: loyaltyConfig.enabled,
+          loyaltyPointsRate: rate,
+        }),
+      });
+      if (!r.ok) throw new Error();
+      queryClient.invalidateQueries({ queryKey: getGetSettingsQueryKey() });
+      toast({ title: "Loyalty points settings saved" });
+    } catch {
+      toast({ title: "Failed to save loyalty points settings", variant: "destructive" });
+    } finally {
+      setLoyaltySaving(false);
     }
   };
 
@@ -264,8 +284,9 @@ export default function Settings() {
                 )}
                 {subStatus.endsAt && (
                   <span className="text-xs text-muted-foreground">
-                    {subStatus.type === "trial" ? "Trial ends:" : "Renews/expires:"}{" "}
+                    {subStatus.type === "trial" ? "Trial ends:" : "Valid until:"}{" "}
                     <strong>{new Date(subStatus.endsAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</strong>
+                    {subStatus.type !== "trial" && " — renew manually before this date to avoid interruption"}
                   </span>
                 )}
               </div>
@@ -287,7 +308,7 @@ export default function Settings() {
               </div>
             )}
             <div className="pt-1 border-t border-border/50">
-              <div className="text-xs text-muted-foreground mb-2">Plans: ₹2,999/month · ₹7,999/quarter · ₹29,999/year</div>
+              <div className="text-xs text-muted-foreground mb-2">Choose one billing cycle: ₹2,999/month · ₹7,999/quarter · ₹29,999/year</div>
               <Link href="/payment">
                 <Button size="sm" className="gap-1.5 text-xs h-8">
                   <CreditCard className="w-3.5 h-3.5" />
@@ -315,7 +336,8 @@ export default function Settings() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">GSTIN</label>
-                <Input {...register("gstin")} placeholder="27AAACR5055K1ZS" data-testid="input-gstin" />
+                <Input {...register("gstin")} placeholder="22AAAAA0000A1Z5" data-testid="input-gstin" />
+                <p className="text-xs text-muted-foreground mt-0.5">15-character GST number, e.g. 22AAAAA0000A1Z5 (leave blank if you don't have GST registration yet)</p>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Mobile</label>
@@ -358,13 +380,19 @@ export default function Settings() {
                     type="number"
                     step="1"
                     value={rateForm[key as keyof typeof rateForm]}
-                    onChange={e => setRateForm(f => ({ ...f, [key]: e.target.value }))}
+                    onChange={e => key === "silver" ? setSilver(e.target.value) : setGoldRate(key as "gold22k" | "gold24k" | "gold18k", e.target.value)}
                     placeholder={placeholder}
                     data-testid={`input-rate-${key}`}
                   />
                 </div>
               ))}
             </div>
+            <p className="text-xs text-muted-foreground">
+              Enter any one gold rate and the other karats auto-fill from it — edit any field afterward to override.
+            </p>
+            <p className="text-xs text-amber-700">
+              Auto-filled values overwrite existing 18K/24K rates — double check before saving.
+            </p>
             {currentRates && (
               <p className="text-xs text-muted-foreground">
                 Last updated: {new Date(currentRates.updatedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
@@ -426,6 +454,7 @@ export default function Settings() {
             </CardTitle>
           </CardHeader>
           <CardContent>
+            <p className="text-xs text-muted-foreground mb-3">(Role assignment for staff logins is coming soon — this is a preview of upcoming roles.)</p>
             <div className="space-y-2">
               {[
                 { role: "Admin", desc: "Full access to all modules", active: true },
@@ -460,6 +489,9 @@ export default function Settings() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2.5">
+            This is an advanced/optional feature — if you're not comfortable with these steps, ask a tech-savvy friend or contact WhatsApp Support (see sidebar) for help setting this up. Without it, WhatsApp messages still work via normal WhatsApp links — this just adds the ability to send them automatically without opening WhatsApp each time.
+          </p>
           <p className="text-xs text-muted-foreground">
             Connect Meta's WhatsApp Business Cloud API to send automated reminders and bulk CRM messages directly from SwarnDesk.
             Get your credentials from <span className="text-primary">Meta for Developers → WhatsApp → API Setup</span>.
@@ -536,6 +568,59 @@ export default function Settings() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Loyalty Points — optional, purchases only (not Girvi loans) */}
+      <Card className="border-border border-amber-500/20">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Star className="w-4 h-4 text-amber-500" />
+            Loyalty Points Program
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            Reward customers with points on purchases (Sales only — Girvi loan payments never earn points).
+            Points accrue automatically on the customer's profile when a sale is linked to their record.
+          </p>
+
+          <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+            <div>
+              <div className="text-sm font-medium">Enable Loyalty Points</div>
+              <div className="text-xs text-muted-foreground">Turn off to stop earning points on new sales — existing points are kept either way</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setLoyaltyConfig(c => ({ ...c, enabled: !c.enabled }))}
+              className={`w-11 h-6 rounded-full transition-colors relative ${loyaltyConfig.enabled ? "bg-amber-500" : "bg-muted"}`}
+              data-testid="toggle-loyalty-enabled"
+            >
+              <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${loyaltyConfig.enabled ? "left-[22px]" : "left-0.5"}`} />
+            </button>
+          </div>
+
+          {loyaltyConfig.enabled && (
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">₹ spent per 1 point earned</label>
+              <Input
+                type="number"
+                min="1"
+                value={loyaltyConfig.rate}
+                onChange={e => setLoyaltyConfig(c => ({ ...c, rate: e.target.value }))}
+                placeholder="1000"
+                className="max-w-[160px]"
+              />
+              <p className="text-xs text-muted-foreground mt-0.5">
+                e.g. 1000 means a customer earns 1 point for every ₹1,000 spent on a linked sale.
+              </p>
+            </div>
+          )}
+
+          <Button type="button" size="sm" onClick={saveLoyaltyConfig} disabled={loyaltySaving} className="gap-1.5 bg-amber-500 hover:bg-amber-600">
+            {loyaltySaving ? "Saving..." : "Save Loyalty Settings"}
+          </Button>
+        </CardContent>
+      </Card>
+
       {/* Export Data */}
       <Card className="border-border">
         <CardHeader className="pb-3">

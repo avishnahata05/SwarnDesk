@@ -46,13 +46,28 @@ function calcAccruedInterest(loan: typeof girviLoansTable.$inferSelect, asOf = n
   return { normalInterest, penaltyInterest, total: normalInterest + penaltyInterest, periodDays };
 }
 
+// When loan terms (due date, penalty rate) change without a payment being collected,
+// preserve the interest already owed as of "now" instead of letting the recalculation
+// under the new terms silently erase it (e.g. pushing the due date forward would
+// otherwise retroactively turn already-accrued penalty interest into normal interest).
+function preserveOutstandingBaseline(
+  loan: typeof girviLoansTable.$inferSelect,
+  changes: Partial<Pick<typeof girviLoansTable.$inferSelect, "dueDate" | "penaltyRate" | "interestRate">>,
+  now: Date,
+): string {
+  const before = calcAccruedInterest(loan, now).total;
+  const after = calcAccruedInterest({ ...loan, ...changes }, now).total;
+  const baselineBefore = safeFloat((loan as any).interestBaseline ?? "0");
+  return (baselineBefore + (after - before)).toFixed(2);
+}
+
 function generateLoanNumber() {
   const now = new Date();
   const rand = Math.floor(Math.random() * 90000) + 10000;
   return `GV${now.getFullYear().toString().slice(-2)}${String(now.getMonth() + 1).padStart(2, "0")}${rand}`;
 }
 
-function mapLoan(l: typeof girviLoansTable.$inferSelect, asOf = new Date()) {
+export function mapLoan(l: typeof girviLoansTable.$inferSelect, asOf = new Date()) {
   const loanAmount = safeFloat(l.loanAmount);
   const principalPaid = safeFloat((l as any).principalPaid ?? "0");
   const currentPrincipal = Math.max(0, loanAmount - principalPaid);
@@ -178,11 +193,15 @@ router.get("/stats/summary", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const userId = req.user!.userId;
-    const { status, due } = req.query as Record<string, string>;
+    const { status, due, mobile } = req.query as Record<string, string>;
     let loans = await db.select().from(girviLoansTable)
       .where(eq(girviLoansTable.userId, userId))
       .orderBy(desc(girviLoansTable.createdAt));
     const now = new Date();
+    if (mobile) {
+      const digits = mobile.replace(/\D/g, "");
+      if (digits) loans = loans.filter(l => l.customerMobile.replace(/\D/g, "").includes(digits));
+    }
     if (status && status !== "all" && VALID_STATUSES.has(status)) {
       loans = loans.filter(l => l.status === status);
     } else if (status && status !== "all") {
@@ -401,6 +420,10 @@ router.post("/:id/collect-interest", async (req, res) => {
     const outstandingInterest = mappedLoan.outstandingInterest;
     const currentPrincipal = mappedLoan.currentPrincipal;
 
+    if (paymentType === "auto" && amt > mappedLoan.totalDue + 0.01) {
+      return res.status(400).json({ error: `Amount exceeds total amount due (₹${mappedLoan.totalDue.toFixed(2)})` });
+    }
+
     let updated: typeof girviLoansTable.$inferSelect;
 
     if (paymentType === "auto" && amt > outstandingInterest) {
@@ -507,6 +530,12 @@ router.post("/:id/renew", async (req, res) => {
       ? (loan.notes ? `${loan.notes}\n${resolvedNotes}`.slice(0, MAX_NOTES_LEN) : resolvedNotes)
       : loan.notes;
 
+    const now = new Date();
+    const { total: accruedBeforeRenewal } = calcAccruedInterest(loan, now);
+    const interestBaselineBefore = safeFloat((loan as any).interestBaseline ?? "0");
+    const collectedSinceReset = Math.max(0, safeFloat(loan.totalInterestCollected) - interestBaselineBefore);
+    const outstandingBeforeRenewal = Math.max(0, accruedBeforeRenewal - collectedSinceReset);
+
     if (paid > 0) {
       await db.insert(girviPaymentsTable).values({
         userId,
@@ -515,21 +544,23 @@ router.post("/:id/renew", async (req, res) => {
         customerName: loan.customerName,
         amount: paid.toString(),
         paymentType: "renewal",
-        paymentDate: new Date(),
+        paymentDate: now,
         notes: resolvedNotes,
       });
     }
 
-    // Reset clock + set interestBaseline = new totalInterestCollected so that
-    // outstanding interest correctly restarts at 0 after renewal.
+    // Reset the clock, but if the interest paid doesn't cover what was already accrued,
+    // carry the shortfall forward as already-outstanding on the fresh cycle instead of
+    // writing it off — otherwise unpaid interest simply vanishes on renewal.
     const newTotalCollected = safeFloat(loan.totalInterestCollected) + paid;
+    const newInterestBaseline = newTotalCollected + Math.max(0, outstandingBeforeRenewal - paid);
     const [updated] = await db.update(girviLoansTable)
       .set({
-        startDate: new Date(),
+        startDate: now,
         dueDate: renewedDueDate,
         status: "active",
         totalInterestCollected: newTotalCollected.toFixed(2),
-        interestBaseline: newTotalCollected.toFixed(2),
+        interestBaseline: newInterestBaseline.toFixed(2),
         notes: mergedNotes ?? null,
       })
       .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
@@ -581,9 +612,40 @@ router.patch("/:id", async (req, res) => {
       const outstanding = Math.max(0, accruedInterest - collectedSinceReset);
       const principalPaid = safeFloat((loan as any).principalPaid ?? "0");
       const currentPrincipal = Math.max(0, safeFloat(loan.loanAmount) - principalPaid);
-      updates.status = "redeemed";
-      updates.redeemedDate = now;
-      updates.redeemedAmount = (currentPrincipal + outstanding).toString();
+      const totalDue = currentPrincipal + outstanding;
+
+      // Record the final interest + principal settlement as payments (mirrors the
+      // auto-redeem path in collect-interest) so payment history and the
+      // totalInterestCollected dashboard stat aren't left understated.
+      const updated = await db.transaction(async tx => {
+        if (outstanding > 0) {
+          await tx.insert(girviPaymentsTable).values({
+            userId, loanId: id, loanNumber: loan.loanNumber, customerName: loan.customerName,
+            amount: outstanding.toFixed(2), paymentType: "interest", paymentDate: now,
+            notes: "Redemption: final interest settlement",
+          });
+        }
+        if (currentPrincipal > 0) {
+          await tx.insert(girviPaymentsTable).values({
+            userId, loanId: id, loanNumber: loan.loanNumber, customerName: loan.customerName,
+            amount: currentPrincipal.toFixed(2), paymentType: "principal", paymentDate: now,
+            notes: "Redemption: final principal settlement",
+          });
+        }
+        const [u] = await tx.update(girviLoansTable)
+          .set({
+            status: "redeemed",
+            redeemedDate: now,
+            redeemedAmount: totalDue.toFixed(2),
+            totalInterestCollected: (safeFloat(loan.totalInterestCollected) + outstanding).toFixed(2),
+            principalPaid: loan.loanAmount,
+          })
+          .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
+          .returning();
+        return u;
+      });
+
+      return res.json(mapLoan(updated));
     } else if (data.status === "forfeited") {
       if (loan.status !== "active" && loan.status !== "extended") {
         return res.status(400).json({ error: "Only active/extended loans can be forfeited" });
@@ -602,6 +664,9 @@ router.patch("/:id", async (req, res) => {
       updates.redeemedDate = now;
       updates.goldSaleValue = goldSaleValue.toString();
       updates.lossAmount = lossAmount.toString();
+      // Loan is closed out (via gold sale) — clear the remaining principal so
+      // currentPrincipal doesn't keep showing a stale nonzero balance afterwards.
+      updates.principalPaid = loan.loanAmount;
     } else if (data.status === "extended") {
       if (loan.status !== "active" && loan.status !== "extended") {
         return res.status(400).json({ error: "Only active/extended loans can be extended" });
@@ -610,6 +675,9 @@ router.patch("/:id", async (req, res) => {
       if (data.newDueDate) {
         const nd = new Date(data.newDueDate);
         if (isNaN(nd.getTime())) return res.status(400).json({ error: "Invalid new due date" });
+        // Pushing the due date out changes how much of the accrued interest counts as
+        // "normal" vs "penalty" under the recalculation — preserve what's owed right now.
+        updates.interestBaseline = preserveOutstandingBaseline(loan, { dueDate: nd }, now);
         updates.dueDate = nd;
       }
     } else {
@@ -619,6 +687,7 @@ router.patch("/:id", async (req, res) => {
       if (data.penaltyRate !== undefined) {
         const pr = safeFloat(data.penaltyRate);
         if (pr < 0 || pr > 100) return res.status(400).json({ error: "Penalty rate must be 0–100" });
+        updates.interestBaseline = preserveOutstandingBaseline(loan, { penaltyRate: pr.toString() }, now);
         updates.penaltyRate = pr.toString();
       }
     }

@@ -114,10 +114,11 @@ export default function RegisterPage() {
                 <label className="text-sm font-medium text-foreground">Mobile</label>
                 <Input
                   type="tel"
-                  placeholder="+91 98765 43210"
+                  placeholder="98765 43210"
                   value={form.mobile}
                   onChange={handleChange("mobile")}
                 />
+                <p className="text-xs text-muted-foreground">10-digit mobile number (no need to type +91)</p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -131,6 +132,11 @@ export default function RegisterPage() {
                     required
                     autoComplete="new-password"
                   />
+                  {form.password.length > 0 && (
+                    <p className={`text-xs ${form.password.length >= 6 ? "text-green-600" : "text-destructive"}`}>
+                      {form.password.length >= 6 ? "Password length OK" : `At least ${6 - form.password.length} more character${6 - form.password.length !== 1 ? "s" : ""} needed`}
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium text-foreground">Confirm Password <span className="text-destructive">*</span></label>
@@ -142,6 +148,11 @@ export default function RegisterPage() {
                     required
                     autoComplete="new-password"
                   />
+                  {form.confirmPassword.length > 0 && (
+                    <p className={`text-xs ${form.confirmPassword === form.password ? "text-green-600" : "text-destructive"}`}>
+                      {form.confirmPassword === form.password ? "Passwords match" : "Passwords do not match"}
+                    </p>
+                  )}
                 </div>
               </div>
 

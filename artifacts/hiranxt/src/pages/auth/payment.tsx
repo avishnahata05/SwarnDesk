@@ -1,19 +1,28 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { LogOut, MessageCircle } from "lucide-react";
 
 const UPI_VPA = "akshatnahata05@ibl";
 const AMOUNT = 2999;
+const WHATSAPP_SUPPORT_URL = "https://wa.me/919424575918?text=Hello+SwarnDesk+Support";
 
 export default function PaymentPage() {
   const { user, logout } = useAuth();
+  const [, navigate] = useLocation();
   const [utrNumber, setUtrNumber] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
+
+  const handleBack = () => {
+    logout();
+    navigate("/login");
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,7 +65,7 @@ export default function PaymentPage() {
             <p className="text-sm text-muted-foreground">
               You'll receive confirmation once your account is activated.
             </p>
-            <Button variant="outline" onClick={logout} className="mt-4">
+            <Button variant="outline" onClick={handleBack} className="mt-4">
               Sign Out
             </Button>
           </CardContent>
@@ -68,6 +77,14 @@ export default function PaymentPage() {
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md space-y-6">
+        <button
+          onClick={handleBack}
+          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <LogOut className="w-4 h-4" />
+          Sign Out
+        </button>
+
         {/* Header */}
         <div className="text-center space-y-2">
           <div className="flex justify-center">
@@ -104,7 +121,18 @@ export default function PaymentPage() {
                   </div>
                 </div>
               ))}
-              <p className="text-xs text-muted-foreground text-center">All plans include every feature. Contact us to pay for a quarterly or annual plan.</p>
+              <p className="text-xs text-muted-foreground text-center">
+                This page collects payment for the Monthly plan (₹2,999). For Quarterly or Annual billing, contact WhatsApp Support first (see link below) before paying.
+              </p>
+              <a
+                href={WHATSAPP_SUPPORT_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-1.5 text-xs text-green-700 hover:text-green-800 underline"
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+                Contact WhatsApp Support
+              </a>
             </div>
 
             {/* UPI Payment Details */}
@@ -120,6 +148,9 @@ export default function PaymentPage() {
               </div>
               <p className="text-xs text-muted-foreground">
                 Open any UPI app (GPay, PhonePe, Paytm, BHIM) and pay to the VPA above. Keep the UTR / transaction reference number handy.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                UTR = the reference number shown in your bank/UPI app after making the payment.
               </p>
             </div>
 
@@ -157,7 +188,7 @@ export default function PaymentPage() {
 
             <div className="text-center">
               <button
-                onClick={logout}
+                onClick={handleBack}
                 className="text-xs text-muted-foreground hover:text-foreground underline transition-colors"
               >
                 Sign out

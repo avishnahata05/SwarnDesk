@@ -5,6 +5,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 
+const WHATSAPP_SUPPORT_URL = "https://wa.me/919424575918?text=Hello+SwarnDesk+Support";
+
+function friendlyLoginError(message: string): string {
+  const lower = message.toLowerCase();
+  if (lower.includes("fetch") || lower.includes("network")) {
+    return "Couldn't connect — check your internet connection and try again.";
+  }
+  return message;
+}
+
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -37,7 +47,7 @@ export default function LoginPage() {
         }
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(err instanceof Error ? friendlyLoginError(err.message) : "Login failed");
     }
   };
 
@@ -93,6 +103,16 @@ export default function LoginPage() {
                 {isLoading ? "Signing in..." : "Sign In"}
               </Button>
             </form>
+            <div className="mt-3 text-center text-xs">
+              <a
+                href={WHATSAPP_SUPPORT_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-muted-foreground hover:text-foreground underline"
+              >
+                Forgot password? Contact WhatsApp Support
+              </a>
+            </div>
             <div className="mt-4 text-center text-sm text-muted-foreground">
               Don't have an account?{" "}
               <Link href="/register" className="text-primary font-medium hover:underline">

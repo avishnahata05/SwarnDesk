@@ -17,6 +17,10 @@ export const businessSettingsTable = pgTable("business_settings", {
   whatsappApiEnabled: boolean("whatsapp_api_enabled").notNull().default(false),
   whatsappPhoneNumberId: text("whatsapp_phone_number_id"),
   whatsappAccessToken: text("whatsapp_access_token"),
+  // Optional loyalty points program for purchases (Sales only — not Girvi loans).
+  // loyaltyPointsRate = rupees a customer must spend to earn 1 point.
+  loyaltyPointsEnabled: boolean("loyalty_points_enabled").notNull().default(true),
+  loyaltyPointsRate: numeric("loyalty_points_rate", { precision: 10, scale: 2 }).notNull().default("1000"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 

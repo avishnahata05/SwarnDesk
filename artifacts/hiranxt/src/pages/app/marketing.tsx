@@ -9,6 +9,15 @@ import {
   Search, Info, ExternalLink, CheckCircle2, XCircle, Loader2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { Link } from "wouter";
+
+function friendlySendError(message: string): string {
+  const lower = message.toLowerCase();
+  if (lower.includes("meta") || /\b\d{3,}\b/.test(message) || lower.includes("graph.facebook")) {
+    return "Couldn't send via WhatsApp API — check your WhatsApp settings and try again, or use the WhatsApp link fallback.";
+  }
+  return message;
+}
 
 function getAuthHeaders(): Record<string, string> {
   const token = localStorage.getItem("swarndesk_token");
@@ -180,7 +189,7 @@ export default function Marketing() {
         body: JSON.stringify({ recipients }),
       });
       const d = await r.json() as { sent: number; failed: number; results?: { mobile: string; success: boolean }[]; error?: string };
-      if (!r.ok) throw new Error(d.error ?? "Failed to send");
+      if (!r.ok) throw new Error(d.error ? friendlySendError(d.error) : "Failed to send");
 
       const resultMap = new Map((d.results ?? []).map(x => [x.mobile, x.success]));
       setResults(selectedCustomers.map(c => ({
@@ -218,7 +227,7 @@ export default function Marketing() {
         {waEnabled === false && (
           <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
             <Info className="w-4 h-4 flex-shrink-0" />
-            <span>WhatsApp API not configured. <a href="/app/settings" className="underline font-medium">Set it up in Settings</a> to send directly. Until then, we'll open WhatsApp links.</span>
+            <span>Direct sending isn't set up yet — we'll open a WhatsApp chat for each customer instead so you can send manually. <a href="/app/settings" className="underline font-medium">Set it up in Settings</a> to send automatically instead.</span>
           </div>
         )}
         {waEnabled === true && (
@@ -292,7 +301,7 @@ export default function Marketing() {
                   onChange={e => setCustomMessage(e.target.value)}
                   placeholder="Write your message here..."
                 />
-                <div className="text-xs text-muted-foreground mt-1">{customMessage.length} characters</div>
+                <div className="text-xs text-muted-foreground mt-1">{customMessage.length} characters — longer messages may be less likely to be read</div>
               </div>
 
               {/* Preview */}
@@ -335,7 +344,14 @@ export default function Marketing() {
               {isLoading ? (
                 <div className="py-8 text-center text-muted-foreground text-sm">Loading customers...</div>
               ) : filtered.length === 0 ? (
-                <div className="py-8 text-center text-muted-foreground text-sm">No customers with phone numbers found.</div>
+                <div className="py-8 text-center text-muted-foreground text-sm space-y-2">
+                  <p>No customers with phone numbers found.</p>
+                  <p>
+                    <Link href="/app/customers" className="text-primary underline font-medium">
+                      Add phone numbers to your customers first — go to Customers.
+                    </Link>
+                  </p>
+                </div>
               ) : (
                 <div className="max-h-[420px] overflow-y-auto">
                   {/* Select all row */}

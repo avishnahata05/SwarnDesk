@@ -16,17 +16,22 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 
 const navItems = [
+  // Daily operations
   { href: "/app/dashboard", label: "Dashboard", labelHi: "डैशबोर्ड", icon: LayoutDashboard },
-  { href: "/app/inventory", label: "Inventory", labelHi: "इन्वेंटरी", icon: Package },
   { href: "/app/billing", label: "Billing & POS", labelHi: "बिलिंग", icon: ShoppingCart },
   { href: "/app/customers", label: "Customers", labelHi: "ग्राहक", icon: Users },
+  // Stock & supply
+  { href: "/app/inventory", label: "Inventory", labelHi: "इन्वेंटरी", icon: Package },
+  { href: "/app/purchases", label: "Purchases", labelHi: "खरीद", icon: TruckIcon },
+  // Production
+  { href: "/app/custom-orders", label: "Custom Orders", labelHi: "कस्टम ऑर्डर", icon: ClipboardList },
   { href: "/app/karigars", label: "Karigars", labelHi: "कारीगर", icon: Hammer },
+  // Services
   { href: "/app/repairs", label: "Repairs", labelHi: "मरम्मत", icon: Wrench },
   { href: "/app/girvi", label: "Girvi", labelHi: "गिरवी", icon: Banknote },
-  { href: "/app/custom-orders", label: "Custom Orders", labelHi: "कस्टम ऑर्डर", icon: ClipboardList },
-  { href: "/app/purchases", label: "Purchases", labelHi: "खरीद", icon: TruckIcon },
-  { href: "/app/marketing", label: "Marketing", labelHi: "मार्केटिंग", icon: Megaphone },
+  // Finance & growth
   { href: "/app/pending-payments", label: "Pending Payments", labelHi: "बकाया भुगतान", icon: Clock },
+  { href: "/app/marketing", label: "Marketing", labelHi: "मार्केटिंग", icon: Megaphone },
   { href: "/app/reports", label: "Reports", labelHi: "रिपोर्ट", icon: BarChart3 },
   { href: "/app/settings", label: "Settings", labelHi: "सेटिंग्स", icon: Settings },
 ];
@@ -85,10 +90,17 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   const saveRates = () => {
     const payload: Record<string, number> = {};
-    if (rateForm.gold22k) payload.gold22k = parseFloat(rateForm.gold22k) / 10;
-    if (rateForm.gold24k) payload.gold24k = parseFloat(rateForm.gold24k) / 10;
-    if (rateForm.gold18k) payload.gold18k = parseFloat(rateForm.gold18k) / 10;
-    if (rateForm.silver) payload.silver = parseFloat(rateForm.silver) / 1000;
+    const p22k = parseFloat(rateForm.gold22k);
+    const p24k = parseFloat(rateForm.gold24k);
+    const p18k = parseFloat(rateForm.gold18k);
+    const pSilver = parseFloat(rateForm.silver);
+    if (rateForm.gold22k && isFinite(p22k) && p22k > 0) payload.gold22k = p22k / 10;
+    if (rateForm.gold24k && isFinite(p24k) && p24k > 0) payload.gold24k = p24k / 10;
+    if (rateForm.gold18k && isFinite(p18k) && p18k > 0) payload.gold18k = p18k / 10;
+    if (rateForm.silver && isFinite(pSilver) && pSilver > 0) payload.silver = pSilver / 1000;
+    if (Object.keys(payload).length === 0) {
+      toast({ title: "Enter at least one valid rate", variant: "destructive" }); return;
+    }
 
     updateRates.mutate({ data: payload }, {
       onSuccess: (updated) => {

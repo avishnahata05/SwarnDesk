@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { customersTable, salesTable, repairJobsTable } from "@workspace/db";
+import { customersTable, salesTable, repairJobsTable, girviLoansTable } from "@workspace/db";
 import { eq, ilike, and, or, desc, inArray } from "drizzle-orm";
+import { mapLoan as mapGirviLoan } from "./girvi";
 
 const router = Router();
 
@@ -158,6 +159,44 @@ router.post("/", async (req, res) => {
     res.status(201).json(mapCustomer(customer));
   } catch (err) {
     req.log.error({ err }, "Failed to create customer");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Look up a person's full history (purchases + Girvi loans) by mobile number.
+// Works even for people who never became a formal Customer record — Girvi loans
+// store the mobile directly and are matched independently of any customerId link.
+router.get("/history", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const { mobile } = req.query as Record<string, string>;
+    const digits = (mobile ?? "").replace(/\D/g, "");
+    if (digits.length < 4) return res.status(400).json({ error: "Enter at least 4 digits of the mobile number" });
+
+    const [allCustomers, allGirviLoans] = await Promise.all([
+      db.select().from(customersTable).where(eq(customersTable.userId, userId)),
+      db.select().from(girviLoansTable).where(eq(girviLoansTable.userId, userId)),
+    ]);
+
+    const customer = allCustomers.find(c => c.mobile.replace(/\D/g, "").includes(digits)) ?? null;
+
+    const sales = customer
+      ? await db.select().from(salesTable)
+          .where(and(eq(salesTable.customerId, customer.id), eq(salesTable.userId, userId)))
+          .orderBy(desc(salesTable.saleDate))
+      : [];
+
+    const girviLoans = allGirviLoans
+      .filter(l => l.customerMobile.replace(/\D/g, "").includes(digits))
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+    res.json({
+      customer: customer ? mapCustomer(customer) : null,
+      sales: sales.map(mapSale),
+      girviLoans: girviLoans.map(l => mapGirviLoan(l)),
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to get customer history");
     res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -1408,6 +1408,10 @@ components:
           type: ["string", "null"]
         notes:
           type: ["string", "null"]
+        karigarId:
+          type: ["integer", "null"]
+        karigarName:
+          type: ["string", "null"]
         createdAt:
           type: string
 
@@ -1431,6 +1435,8 @@ components:
           type: string
         notes:
           type: ["string", "null"]
+        karigarId:
+          type: ["integer", "null"]
 
     RepairJobUpdate:
       type: object
@@ -1443,6 +1449,20 @@ components:
           type: ["string", "null"]
         notes:
           type: ["string", "null"]
+        customerName:
+          type: string
+        customerMobile:
+          type: string
+        itemDescription:
+          type: string
+        issue:
+          type: string
+        estimatedCost:
+          type: number
+        promisedDate:
+          type: string
+        karigarId:
+          type: ["integer", "null"]
 
     Purchase:
       type: object

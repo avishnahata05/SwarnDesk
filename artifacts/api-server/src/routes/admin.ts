@@ -121,7 +121,12 @@ router.delete("/users/:id", async (req, res) => {
     const id = parseInt(req.params.id);
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, id)).limit(1);
     if (!user || user.role === "admin") return res.status(404).json({ error: "User not found" });
-    await db.delete(usersTable).where(eq(usersTable.id, id));
+    await db.transaction(async (tx) => {
+      // payment_requests.user_id has a FK to users.id with no cascade — must clear it first
+      // or the delete below fails with a constraint violation.
+      await tx.delete(paymentRequestsTable).where(eq(paymentRequestsTable.userId, id));
+      await tx.delete(usersTable).where(eq(usersTable.id, id));
+    });
     res.status(204).send();
   } catch (err) {
     req.log.error({ err }, "Failed to delete user");
@@ -160,8 +165,12 @@ router.get("/stats", async (req, res) => {
     const pendingPayments = await db.select().from(paymentRequestsTable).where(eq(paymentRequestsTable.status, "pending"));
     const now = new Date();
     const trialUsers = users.filter(u => u.plan === "trial" && new Date(u.trialEndsAt) > now);
-    const activeUsers = users.filter(u => u.plan === "active");
-    const expiredUsers = users.filter(u => u.plan === "expired" || (u.plan === "trial" && new Date(u.trialEndsAt) <= now));
+    const activeUsers = users.filter(u => u.plan === "active" && (!u.subscriptionEndsAt || new Date(u.subscriptionEndsAt) > now));
+    const expiredUsers = users.filter(u =>
+      u.plan === "expired" ||
+      (u.plan === "trial" && new Date(u.trialEndsAt) <= now) ||
+      (u.plan === "active" && !!u.subscriptionEndsAt && new Date(u.subscriptionEndsAt) <= now)
+    );
     res.json({
       totalUsers: users.length,
       trialUsers: trialUsers.length,

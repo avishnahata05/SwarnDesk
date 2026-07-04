@@ -49,8 +49,8 @@ const statCards = [
     accent: "text-emerald-600",
   },
   {
-    label: "Making Charges",
-    hint: "Today's making charges collected",
+    label: "Today's Profit",
+    hint: "Making charges earned today (profit estimate)",
     key: "todayProfit" as const,
     format: "currency",
     icon: TrendingUp,
@@ -89,8 +89,8 @@ const statCards = [
     accent: "text-violet-600",
   },
   {
-    label: "Pending Repairs",
-    hint: "Jobs awaiting pickup",
+    label: "Active Repairs",
+    hint: "Repair jobs not yet delivered",
     key: "pendingRepairs" as const,
     format: "number",
     icon: Wrench,
@@ -343,7 +343,7 @@ export default function Dashboard() {
                     <div className="text-xs text-muted-foreground mt-0.5">{item.category} · {item.purity}</div>
                   </div>
                   <Badge variant="destructive" className="shrink-0 text-[11px]" data-testid={`badge-stock-${item.id}`}>
-                    Qty: {item.quantity}
+                    Qty: {item.quantity}{typeof item.lowStockThreshold === "number" ? ` (below reorder level of ${item.lowStockThreshold})` : ""}
                   </Badge>
                 </div>
               ))
@@ -397,7 +397,7 @@ export default function Dashboard() {
                       variant={sale.paymentStatus === "paid" ? "default" : "secondary"}
                       className="text-[10px] mt-0.5"
                     >
-                      {sale.paymentStatus}
+                      {sale.paymentStatus.charAt(0).toUpperCase() + sale.paymentStatus.slice(1)}
                     </Badge>
                   </div>
                 </div>
@@ -423,6 +423,11 @@ export default function Dashboard() {
             <button onClick={() => setAiOpen(false)} className="text-white/70 hover:text-white transition-colors">
               <X className="w-4 h-4" />
             </button>
+          </div>
+          <div className="px-3 pt-2 pb-1 bg-amber-50 border-b border-amber-200">
+            <p className="text-[10px] text-amber-800 leading-snug">
+              Demo assistant — answers are illustrative examples, not based on your live shop data.
+            </p>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-3 max-h-64 bg-muted/30">
             {aiMessages.map((msg, i) => (

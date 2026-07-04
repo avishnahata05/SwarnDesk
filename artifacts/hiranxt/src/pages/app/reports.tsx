@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { formatCurrency } from "@/lib/utils";
 import {
-  useGetDailySalesStats, useGetSalesByCategory, useGetInventoryStatsByCategory, useGetDashboardSummary
+  useGetDailySalesStats, useGetSalesByCategory, useGetInventoryStatsByCategory, useGetDashboardSummary, useGetSettings
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -103,11 +103,19 @@ export default function Reports() {
   const { data: salesByCategory } = useGetSalesByCategory();
   const { data: inventoryByCategory } = useGetInventoryStatsByCategory();
   const { data: summary } = useGetDashboardSummary();
+  const { data: settings } = useGetSettings();
 
   const now = new Date();
   const [gstrMonth, setGstrMonth] = useState(String(now.getMonth() + 1));
   const [gstrYear, setGstrYear] = useState(String(now.getFullYear()));
   const [exporting, setExporting] = useState(false);
+
+  // Fall back to the standard 3% jewellery GST rate only until settings have loaded
+  const gstRatePct = settings?.gstRate ?? 3;
+  const gstDivisor = 1 + gstRatePct / 100;
+  const halfGstRatePct = gstRatePct / 2;
+
+  const hasData = (summary?.todaySales ?? 0) > 0 || (summary?.totalInventoryValue ?? 0) > 0 || (summary?.totalCustomers ?? 0) > 0;
 
   const handleExport = async () => {
     setExporting(true);
@@ -144,6 +152,12 @@ export default function Reports() {
           </Card>
         ))}
       </div>
+
+      {!hasData && (
+        <div className="text-center text-sm text-muted-foreground py-2">
+          No sales yet — figures will appear here once you start billing.
+        </div>
+      )}
 
       {/* Daily sales trend */}
       <Card className="border-border">
@@ -253,9 +267,9 @@ export default function Reports() {
         <CardContent>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 text-sm mb-4">
             {[
-              { label: "Taxable Value (Sales)", value: formatCurrency((summary?.todaySales ?? 0) / 1.03) },
-              { label: "CGST (1.5%)", value: formatCurrency(((summary?.todaySales ?? 0) / 1.03) * 0.015) },
-              { label: "SGST (1.5%)", value: formatCurrency(((summary?.todaySales ?? 0) / 1.03) * 0.015) },
+              { label: "Taxable Value (Sales)", value: formatCurrency((summary?.todaySales ?? 0) / gstDivisor) },
+              { label: `CGST (${(halfGstRatePct).toFixed(2)}%)`, value: formatCurrency(((summary?.todaySales ?? 0) / gstDivisor) * (halfGstRatePct / 100)) },
+              { label: `SGST (${(halfGstRatePct).toFixed(2)}%)`, value: formatCurrency(((summary?.todaySales ?? 0) / gstDivisor) * (halfGstRatePct / 100)) },
             ].map(item => (
               <div key={item.label} className="p-4 rounded-xl bg-muted/30 border border-border">
                 <div className="text-xs text-muted-foreground mb-1">{item.label}</div>
@@ -273,12 +287,12 @@ export default function Reports() {
           <CardTitle className="text-base font-semibold flex items-center gap-2 flex-wrap">
             <FileSpreadsheet className="w-5 h-5 text-primary" />
             GSTR-1 Export
-            <span className="text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded-full">GST Filing Ready</span>
+            <span className="text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded-full">CSV Export</span>
           </CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground mb-4">
-            Export B2C sales data in GSTR-1 format (HSN: 7113, Jewellery). Includes invoice number, date, customer, taxable value, CGST (1.5%), SGST (1.5%), and totals. Upload directly to the GST portal.
+            Export B2C sales data in GSTR-1 format (HSN: 7113, Jewellery). Includes invoice number, date, customer, taxable value, CGST, SGST, and totals. Export as CSV for your GST filing / accountant.
           </p>
           <div className="flex items-end gap-3 flex-wrap">
             <div>
@@ -315,8 +329,8 @@ export default function Reports() {
           <div className="mt-4 p-3 rounded-lg bg-muted/30 border border-border text-xs text-muted-foreground grid grid-cols-2 md:grid-cols-4 gap-2">
             {[
               { label: "HSN Code", val: "7113 (Jewellery)" },
-              { label: "GST Rate", val: "3% (CGST 1.5% + SGST 1.5%)" },
-              { label: "Format", val: "CSV (GST portal compatible)" },
+              { label: "GST Rate", val: `${gstRatePct}% (CGST ${halfGstRatePct.toFixed(2)}% + SGST ${halfGstRatePct.toFixed(2)}%)` },
+              { label: "Format", val: "CSV for your GST filing / accountant" },
               { label: "BOM", val: "UTF-8 with BOM for Excel" },
             ].map(({ label, val }) => (
               <div key={label}>

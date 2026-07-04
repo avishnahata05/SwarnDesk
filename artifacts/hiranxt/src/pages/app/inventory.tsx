@@ -3,7 +3,7 @@ import { formatCurrency } from "@/lib/utils";
 import {
   useListInventoryItems, useCreateInventoryItem,
   useGetCurrentRates, useGetInventoryStatsByCategory, useGetSettings,
-  getListInventoryItemsQueryKey
+  getListInventoryItemsQueryKey, getGetInventoryStatsByCategoryQueryKey
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -82,6 +82,19 @@ function exportToCsv(items: InventoryItem[], filename = "inventory.csv") {
 
 // ─── Barcode label printing ───────────────────────────────────────────────────
 
+// Escape user-entered text before it lands in the print window's HTML (item names,
+// shop names, barcodes are free-text fields — without this a crafted name/barcode
+// could inject markup/script into the print popup, which retains a window.opener link back to the app).
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+}
+
+// Safely embed a string as a JS string literal inside an inline <script> block
+// (JSON.stringify handles quotes/backslashes; the </script> replacement stops early tag termination).
+function toJsStringLiteral(s: string): string {
+  return JSON.stringify(s).replace(/</g, "\\u003C");
+}
+
 type LabelSize = "thermal58" | "thermal80" | "a4sheet";
 
 function printBarcodeLabel(params: {
@@ -100,9 +113,9 @@ function printBarcodeLabel(params: {
 
   const labelHtml = (i: number) => `
     <div class="label">
-      <div class="shop">${shopName}</div>
-      <div class="name">${item.name}</div>
-      <div class="meta">${item.purity} &middot; ${item.grossWeight.toFixed(3)}g &middot; ${item.category}</div>
+      <div class="shop">${escapeHtml(shopName)}</div>
+      <div class="name">${escapeHtml(item.name)}</div>
+      <div class="meta">${escapeHtml(item.purity)} &middot; ${item.grossWeight.toFixed(3)}g &middot; ${escapeHtml(item.category)}</div>
       <div class="price">&#8377;${item.totalValue.toLocaleString("en-IN")}</div>
       <svg id="bc${i}" class="bc"></svg>
     </div>`;
@@ -111,7 +124,7 @@ function printBarcodeLabel(params: {
 <html>
 <head>
 <meta charset="UTF-8"/>
-<title>Label – ${item.name}</title>
+<title>Label – ${escapeHtml(item.name)}</title>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"><\/script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -138,7 +151,7 @@ body{font-family:Arial,sans-serif;background:#fff;padding:${isA4 ? "12px" : "4px
 ${Array.from({ length: copies }, (_, i) => labelHtml(i)).join("")}
 </div>
 <script>
-var bc='${barcode.replace(/'/g, "\\'")}';
+var bc=${toJsStringLiteral(barcode)};
 for(var i=0;i<${copies};i++){
   try{
     JsBarcode(document.getElementById('bc'+i),bc,{
@@ -256,8 +269,9 @@ function ItemFormDialog({
               <Input {...register("branch")} data-testid={`${testIdPrefix}-branch`} />
             </div>
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">HUID (optional)</label>
+              <label className="text-xs text-muted-foreground mb-1 block" title="HUID = BIS Hallmark Unique ID (required for hallmarked gold sales)">HUID (optional)</label>
               <Input {...register("huid")} placeholder="AA1234" data-testid={`${testIdPrefix}-huid`} />
+              <p className="text-[10px] text-muted-foreground mt-1">HUID = BIS Hallmark Unique ID (required for hallmarked gold sales)</p>
             </div>
             <div className="col-span-2">
               <label className="text-xs text-muted-foreground mb-1 block">Barcode (optional — leave blank to auto-generate)</label>
@@ -409,6 +423,8 @@ export default function Inventory() {
     makingCharges: number; quantity: number; branch: string;
     huid: string | null; barcode: string | null; lowStockThreshold: number;
   }>(null);
+  const [deleteItem, setDeleteItem] = useState<{ id: number; name: string } | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
   const scanRef = useRef<HTMLInputElement>(null);
 
   const queryClient = useQueryClient();
@@ -441,7 +457,10 @@ export default function Inventory() {
     // Subtract stone weight before applying metal rate — stones aren't gold
     const pureMetalWeight = Math.max(0, item.netWeight - item.stoneWeight);
     const metalVal = pureMetalWeight * liveRate;
-    return Math.round(metalVal * (1 + item.makingCharges / 100) + (item.stoneValue ?? 0));
+    // Round making charges first, then the grand total — must match the add/edit
+    // preview and the billing cart's price calc, or the same item shows different prices in different places.
+    const makingAmt = Math.round(metalVal * item.makingCharges / 100);
+    return Math.round(metalVal + makingAmt + (item.stoneValue ?? 0));
   };
 
   // Focus scan input when scan mode activates
@@ -465,7 +484,10 @@ export default function Inventory() {
     const stoneW = parseFloat(String(data.stoneWeight || 0));
     const makingPct = parseFloat(String(data.makingCharges));
     const metalVal = Math.max(0, netW - stoneW) * metalRate;
-    const totalValue = metalVal + metalVal * makingPct / 100;
+    // Round making charges first, then the grand total — matches the dialog's live
+    // preview so the saved totalValue is never a rupee off from what was shown before saving.
+    const makingAmt = Math.round(metalVal * makingPct / 100);
+    const totalValue = Math.round(metalVal + makingAmt);
     return {
       ...data,
       grossWeight: parseFloat(String(data.grossWeight)),
@@ -473,7 +495,7 @@ export default function Inventory() {
       stoneWeight: stoneW,
       makingCharges: makingPct,
       metalRate,
-      totalValue: Math.round(totalValue),
+      totalValue,
       quantity: parseInt(String(data.quantity)),
       lowStockThreshold: parseInt(String(data.lowStockThreshold || 2)),
       huid: data.huid || null,
@@ -485,6 +507,7 @@ export default function Inventory() {
     createItem.mutate({ data: buildPayload(data) }, {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListInventoryItemsQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getGetInventoryStatsByCategoryQueryKey() });
         toast({ title: "Item added successfully" });
         setAddOpen(false);
       },
@@ -500,10 +523,33 @@ export default function Inventory() {
       });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed");
       queryClient.invalidateQueries({ queryKey: getListInventoryItemsQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getGetInventoryStatsByCategoryQueryKey() });
       toast({ title: "Item updated successfully" });
       setEditItem(null);
     } catch (err) {
       toast({ title: (err as Error).message || "Failed to update item", variant: "destructive" });
+    }
+  };
+
+  const confirmDeleteItem = async () => {
+    if (!deleteItem) return;
+    setDeletePending(true);
+    try {
+      const r = await fetch(`/api/inventory/${deleteItem.id}`, { method: "DELETE", headers: getAuthHeaders() });
+      if (r.status === 409) {
+        const err = await r.json().catch(() => ({}));
+        toast({ title: err.error ? `Can't delete: ${err.error}` : "This item is used in a past sale/bill and can't be deleted", variant: "destructive" });
+        return;
+      }
+      if (!r.ok) throw new Error("Failed to delete");
+      queryClient.invalidateQueries({ queryKey: getListInventoryItemsQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getGetInventoryStatsByCategoryQueryKey() });
+      toast({ title: "Item deleted" });
+      setDeleteItem(null);
+    } catch {
+      toast({ title: "Failed to delete item", variant: "destructive" });
+    } finally {
+      setDeletePending(false);
     }
   };
 
@@ -632,11 +678,21 @@ export default function Inventory() {
 
       {/* Items table */}
       <Card className="border-border">
-        <CardHeader className="pb-0 pt-3 px-4 flex flex-row items-center justify-between">
+        <CardHeader className="pb-0 pt-3 px-4 flex flex-row items-center justify-between flex-wrap gap-2">
           <span className="text-xs text-muted-foreground">
             {isLoading ? "Loading..." : `${items.length} item${items.length !== 1 ? "s" : ""}`}
             {search && ` for "${search}"`}
           </span>
+          {category !== "all" && (
+            <button
+              onClick={() => setCategory("all")}
+              className="flex items-center gap-1 text-xs bg-primary/10 text-primary border border-primary/20 rounded-full pl-2.5 pr-1.5 py-0.5 hover:bg-primary/20 transition-colors capitalize"
+              title="Clear category filter"
+            >
+              {category}
+              <X className="w-3 h-3" />
+            </button>
+          )}
         </CardHeader>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -663,7 +719,9 @@ export default function Inventory() {
                   <td colSpan={10} className="px-4 py-12 text-center">
                     <Package className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
                     <div className="text-muted-foreground">{search ? `No items found for "${search}"` : "No items found."}</div>
-                    {!search && <div className="text-xs text-muted-foreground mt-1">Add your first inventory item to get started.</div>}
+                    {search
+                      ? <div className="text-xs text-muted-foreground mt-1">Try a different search, or clear the search to see all items.</div>
+                      : <div className="text-xs text-muted-foreground mt-1">Add your first inventory item to get started.</div>}
                   </td>
                 </tr>
               )}
@@ -733,22 +791,7 @@ export default function Inventory() {
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={async () => {
-                          if (!window.confirm(`Delete "${item.name}"? This cannot be undone.`)) return;
-                          try {
-                            const r = await fetch(`/api/inventory/${item.id}`, { method: "DELETE", headers: getAuthHeaders() });
-                            if (r.status === 409) {
-                              const err = await r.json().catch(() => ({}));
-                              toast({ title: err.error ?? "Cannot delete this item", variant: "destructive" });
-                              return;
-                            }
-                            if (!r.ok) throw new Error("Failed to delete");
-                            queryClient.invalidateQueries({ queryKey: getListInventoryItemsQueryKey() });
-                            toast({ title: "Item deleted" });
-                          } catch {
-                            toast({ title: "Failed to delete item", variant: "destructive" });
-                          }
-                        }}
+                        onClick={() => setDeleteItem({ id: item.id, name: item.name })}
                         className="text-muted-foreground hover:text-destructive transition-colors"
                         data-testid={`button-delete-${item.id}`} title="Delete item"
                       >
@@ -793,6 +836,27 @@ export default function Inventory() {
           onSubmit={onEdit} isPending={false} rates={rates} testIdPrefix="input-edit-item"
         />
       )}
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={!!deleteItem} onOpenChange={v => { if (!v && !deletePending) setDeleteItem(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-destructive" />
+              Delete Item?
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Delete <strong className="text-foreground">"{deleteItem?.name}"</strong>? This cannot be undone.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteItem(null)} disabled={deletePending}>Cancel</Button>
+            <Button variant="destructive" onClick={confirmDeleteItem} disabled={deletePending} data-testid="button-confirm-delete">
+              {deletePending ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Hardware guide dialog */}
       <HardwareGuideDialog open={guideOpen} onClose={() => setGuideOpen(false)} />

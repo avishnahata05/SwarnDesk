@@ -66,8 +66,20 @@ interface ExpiringUser {
   subscriptionEndsAt: string | null;
 }
 
-function planBadge(plan: string, trialEndsAt: string) {
-  if (plan === "active") return <Badge className="bg-green-100 text-green-800 border-green-200">Active</Badge>;
+/** A user is only really "active" if plan is active AND the subscription hasn't lapsed — mirrors App.tsx's isAccessExpired */
+function isReallyExpired(u: { plan: string; trialEndsAt: string; subscriptionEndsAt: string | null }) {
+  const now = new Date();
+  if (u.plan === "expired") return true;
+  if (u.plan === "trial") return new Date(u.trialEndsAt) <= now;
+  if (u.plan === "active") return !!u.subscriptionEndsAt && new Date(u.subscriptionEndsAt) <= now;
+  return false;
+}
+
+function planBadge(plan: string, trialEndsAt: string, subscriptionEndsAt: string | null) {
+  if (plan === "active") {
+    if (subscriptionEndsAt && new Date(subscriptionEndsAt) <= new Date()) return <Badge variant="destructive">Expired</Badge>;
+    return <Badge className="bg-green-100 text-green-800 border-green-200">Active</Badge>;
+  }
   if (plan === "trial") {
     const daysLeft = Math.ceil((new Date(trialEndsAt).getTime() - Date.now()) / 86400000);
     if (daysLeft > 0) return <Badge className="bg-blue-100 text-blue-800 border-blue-200">Trial ({daysLeft}d left)</Badge>;
@@ -105,6 +117,7 @@ export default function AdminPage() {
   const [expiring, setExpiring] = useState<ExpiringUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
 
   // UI state
   const [userSearch, setUserSearch] = useState("");
@@ -122,6 +135,7 @@ export default function AdminPage() {
 
   // Delete user dialog
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   // User plan action dialog
   const [planTarget, setPlanTarget] = useState<AdminUser | null>(null);
@@ -133,25 +147,35 @@ export default function AdminPage() {
     return { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
   };
 
+  /** Fetches and throws with the server's error message on any non-2xx response, instead of silently treating it as success. */
+  const apiCall = async (url: string, opts?: RequestInit) => {
+    const res = await fetch(url, { headers: getHeaders(), ...opts });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.error || `Request failed (${res.status})`);
+    }
+    if (res.status === 204) return null;
+    return res.json();
+  };
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const headers = getHeaders();
       const [s, u, p, r, e] = await Promise.all([
-        fetch("/api/admin/stats", { headers }).then(x => x.json()),
-        fetch("/api/admin/users", { headers }).then(x => x.json()),
-        fetch("/api/admin/payment-requests", { headers }).then(x => x.json()),
-        fetch("/api/admin/revenue", { headers }).then(x => x.json()),
-        fetch("/api/admin/expiring-soon", { headers }).then(x => x.json()),
+        apiCall("/api/admin/stats"),
+        apiCall("/api/admin/users"),
+        apiCall("/api/admin/payment-requests"),
+        apiCall("/api/admin/revenue"),
+        apiCall("/api/admin/expiring-soon"),
       ]);
       setStats(s);
       setUsers(Array.isArray(u) ? u : []);
       setPayments(Array.isArray(p) ? p : []);
       setRevenue(r?.totalRevenue !== undefined ? r : null);
       setExpiring(Array.isArray(e) ? e : []);
-    } catch {
-      setError("Failed to load admin data");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load admin data");
     } finally {
       setLoading(false);
     }
@@ -167,37 +191,44 @@ export default function AdminPage() {
   const handleApproveCustom = async () => {
     if (!approveTarget) return;
     setActionLoading(`pay-${approveTarget.id}`);
+    setActionError("");
     try {
-      await fetch(`/api/admin/payment-requests/${approveTarget.id}/approve-custom`, {
-        method: "PATCH", headers: getHeaders(),
+      await apiCall(`/api/admin/payment-requests/${approveTarget.id}/approve-custom`, {
+        method: "PATCH",
         body: JSON.stringify({ days: parseInt(approveDays) || 30, notes: approveNotes || null }),
       });
       setApproveTarget(null); setApproveNotes(""); setApproveDays("30");
       await fetchAll();
-    } catch { setError("Failed to approve payment"); }
+    } catch (err) { setActionError(err instanceof Error ? err.message : "Failed to approve payment"); }
     finally { setActionLoading(null); }
   };
 
   const handleApproveQuick = async (id: number) => {
     setActionLoading(`pay-${id}`);
+    setActionError("");
     try {
-      await fetch(`/api/admin/payment-requests/${id}/approve`, { method: "PATCH", headers: getHeaders() });
+      await apiCall(`/api/admin/payment-requests/${id}/approve`, { method: "PATCH" });
       await fetchAll();
-    } catch { setError("Failed to approve payment"); }
+    } catch (err) { setError(err instanceof Error ? err.message : "Failed to approve payment"); }
     finally { setActionLoading(null); }
   };
 
   const handleReject = async () => {
     if (!rejectTarget) return;
+    if (!rejectNotes.trim()) {
+      setActionError("Please enter a reason for rejection — this is shown to the user.");
+      return;
+    }
     setActionLoading(`pay-${rejectTarget.id}`);
+    setActionError("");
     try {
-      await fetch(`/api/admin/payment-requests/${rejectTarget.id}/reject`, {
-        method: "PATCH", headers: getHeaders(),
+      await apiCall(`/api/admin/payment-requests/${rejectTarget.id}/reject`, {
+        method: "PATCH",
         body: JSON.stringify({ notes: rejectNotes || null }),
       });
       setRejectTarget(null); setRejectNotes("");
       await fetchAll();
-    } catch { setError("Failed to reject payment"); }
+    } catch (err) { setActionError(err instanceof Error ? err.message : "Failed to reject payment"); }
     finally { setActionLoading(null); }
   };
 
@@ -206,25 +237,29 @@ export default function AdminPage() {
   const handlePlanAction = async () => {
     if (!planTarget || !planAction) return;
     setActionLoading(`user-${planTarget.id}`);
+    setActionError("");
     try {
-      await fetch(`/api/admin/users/${planTarget.id}/plan`, {
-        method: "PATCH", headers: getHeaders(),
+      await apiCall(`/api/admin/users/${planTarget.id}/plan`, {
+        method: "PATCH",
         body: JSON.stringify({ action: planAction, days: parseInt(planDays) || 30 }),
       });
       setPlanTarget(null); setPlanAction(null); setPlanDays("30");
       await fetchAll();
-    } catch { setError("Failed to update user plan"); }
+    } catch (err) { setActionError(err instanceof Error ? err.message : "Failed to update user plan"); }
     finally { setActionLoading(null); }
   };
 
   const handleDeleteUser = async () => {
     if (!deleteTarget) return;
+    if (deleteConfirmText.trim().toUpperCase() !== "DELETE") return;
     setActionLoading(`user-${deleteTarget.id}`);
+    setActionError("");
     try {
-      await fetch(`/api/admin/users/${deleteTarget.id}`, { method: "DELETE", headers: getHeaders() });
+      await apiCall(`/api/admin/users/${deleteTarget.id}`, { method: "DELETE" });
       setDeleteTarget(null);
+      setDeleteConfirmText("");
       await fetchAll();
-    } catch { setError("Failed to delete user"); }
+    } catch (err) { setActionError(err instanceof Error ? err.message : "Failed to delete user"); }
     finally { setActionLoading(null); }
   };
 
@@ -236,9 +271,9 @@ export default function AdminPage() {
   const filteredUsers = users.filter(u => {
     const matchesPlan =
       planFilter === "all" ? true :
-      planFilter === "active" ? u.plan === "active" :
-      planFilter === "trial" ? (u.plan === "trial" && new Date(u.trialEndsAt) > new Date()) :
-      planFilter === "expired" ? (u.plan === "expired" || (u.plan === "trial" && new Date(u.trialEndsAt) <= new Date())) :
+      planFilter === "active" ? (u.plan === "active" && !isReallyExpired(u)) :
+      planFilter === "trial" ? (u.plan === "trial" && !isReallyExpired(u)) :
+      planFilter === "expired" ? isReallyExpired(u) :
       true;
     const q = userSearch.toLowerCase();
     const matchesSearch = !q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || u.shopName.toLowerCase().includes(q) || (u.mobile ?? "").includes(q);
@@ -342,7 +377,7 @@ export default function AdminPage() {
                               {u.plan === "trial" ? "Trial" : "Subscription"} — {daysLeft}d left
                             </span>
                             <button
-                              onClick={() => { setPlanTarget(u as unknown as AdminUser); setPlanAction("activate"); setPlanDays("30"); }}
+                              onClick={() => { setPlanTarget(u as unknown as AdminUser); setPlanAction("activate"); setPlanDays("30"); setActionError(""); }}
                               className="text-xs px-2 py-1 rounded border border-green-400/50 text-green-700 hover:bg-green-50 transition-colors"
                             >
                               Extend
@@ -434,23 +469,23 @@ export default function AdminPage() {
                                   disabled={actionLoading === `pay-${pr.id}`}
                                   title="Approve for 30 days"
                                 >
-                                  {actionLoading === `pay-${pr.id}` ? "..." : "Quick Approve"}
+                                  {actionLoading === `pay-${pr.id}` ? "..." : "Quick Approve (30 days)"}
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   className="h-7 text-xs border-green-500/50 text-green-700 hover:bg-green-50"
-                                  onClick={() => { setApproveTarget(pr); setApproveDays("30"); setApproveNotes(""); }}
+                                  onClick={() => { setApproveTarget(pr); setApproveDays("30"); setApproveNotes(""); setActionError(""); }}
                                   disabled={actionLoading === `pay-${pr.id}`}
                                   title="Approve with custom duration"
                                 >
-                                  Custom...
+                                  Custom Duration...
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="destructive"
                                   className="h-7 text-xs"
-                                  onClick={() => { setRejectTarget(pr); setRejectNotes(""); }}
+                                  onClick={() => { setRejectTarget(pr); setRejectNotes(""); setActionError(""); }}
                                   disabled={actionLoading === `pay-${pr.id}`}
                                 >
                                   Reject
@@ -564,14 +599,14 @@ export default function AdminPage() {
                             </td>
                             <td className="px-4 py-3 text-muted-foreground text-xs hidden md:table-cell">{u.email}</td>
                             <td className="px-4 py-3 text-muted-foreground text-xs hidden sm:table-cell">{u.mobile ?? "—"}</td>
-                            <td className="px-4 py-3">{planBadge(u.plan, u.trialEndsAt)}</td>
+                            <td className="px-4 py-3">{planBadge(u.plan, u.trialEndsAt, u.subscriptionEndsAt)}</td>
                             <td className="px-4 py-3 text-muted-foreground text-xs hidden lg:table-cell">{fmt(u.trialEndsAt)}</td>
                             <td className="px-4 py-3 text-muted-foreground text-xs hidden lg:table-cell">{u.subscriptionEndsAt ? fmt(u.subscriptionEndsAt) : "—"}</td>
                             <td className="px-4 py-3 text-muted-foreground text-xs hidden md:table-cell">{fmt(u.createdAt)}</td>
                             <td className="px-4 py-3">
                               <div className="flex gap-1 flex-wrap">
                                 <button
-                                  onClick={() => { setPlanTarget(u); setPlanAction("activate"); setPlanDays("30"); }}
+                                  onClick={() => { setPlanTarget(u); setPlanAction("activate"); setPlanDays("30"); setActionError(""); }}
                                   disabled={actionLoading === `user-${u.id}`}
                                   className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-green-400/50 text-green-700 hover:bg-green-50 transition-colors disabled:opacity-40"
                                   title="Extend active subscription"
@@ -580,7 +615,7 @@ export default function AdminPage() {
                                   Activate
                                 </button>
                                 <button
-                                  onClick={() => { setPlanTarget(u); setPlanAction("extend_trial"); setPlanDays("7"); }}
+                                  onClick={() => { setPlanTarget(u); setPlanAction("extend_trial"); setPlanDays("7"); setActionError(""); }}
                                   disabled={actionLoading === `user-${u.id}`}
                                   className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-blue-400/50 text-blue-700 hover:bg-blue-50 transition-colors disabled:opacity-40"
                                   title="Extend trial period"
@@ -588,21 +623,24 @@ export default function AdminPage() {
                                   <CalendarClock className="w-3 h-3" />
                                   Trial
                                 </button>
+                                <span className="w-px h-5 bg-border mx-0.5 self-center" aria-hidden="true" />
                                 <button
-                                  onClick={() => { setPlanTarget(u); setPlanAction("expire"); }}
-                                  disabled={actionLoading === `user-${u.id}` || u.plan === "expired"}
-                                  className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-border text-muted-foreground hover:border-red-400/50 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40"
+                                  onClick={() => { setPlanTarget(u); setPlanAction("expire"); setActionError(""); }}
+                                  disabled={actionLoading === `user-${u.id}` || isReallyExpired(u)}
+                                  className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-red-300/60 bg-red-50/50 text-red-600 hover:border-red-400/50 hover:text-red-700 hover:bg-red-50 transition-colors disabled:opacity-40"
                                   title="Expire account immediately"
                                 >
                                   <ShieldOff className="w-3 h-3" />
+                                  Expire Now
                                 </button>
                                 <button
-                                  onClick={() => setDeleteTarget(u)}
+                                  onClick={() => { setDeleteTarget(u); setActionError(""); }}
                                   disabled={actionLoading === `user-${u.id}`}
-                                  className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-border text-muted-foreground hover:border-destructive/50 hover:text-destructive hover:bg-destructive/5 transition-colors disabled:opacity-40"
+                                  className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-red-300/60 bg-red-50/50 text-destructive hover:border-destructive/50 hover:bg-destructive/5 transition-colors disabled:opacity-40"
                                   title="Delete user account"
                                 >
                                   <Trash2 className="w-3 h-3" />
+                                  Delete
                                 </button>
                               </div>
                             </td>
@@ -619,7 +657,7 @@ export default function AdminPage() {
       </main>
 
       {/* ── Approve-custom dialog ──────────────────────────────────────────── */}
-      <Dialog open={!!approveTarget} onOpenChange={v => !v && setApproveTarget(null)}>
+      <Dialog open={!!approveTarget} onOpenChange={v => { if (!v) { setApproveTarget(null); setActionError(""); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -666,8 +704,13 @@ export default function AdminPage() {
               </div>
             </div>
           )}
+          {actionError && (
+            <div className="rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs px-3 py-2">
+              {actionError}
+            </div>
+          )}
           <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setApproveTarget(null)}>Cancel</Button>
+            <Button variant="outline" size="sm" onClick={() => { setApproveTarget(null); setActionError(""); }}>Cancel</Button>
             <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={handleApproveCustom} disabled={actionLoading !== null}>
               Approve {approveDays}d
             </Button>
@@ -676,7 +719,7 @@ export default function AdminPage() {
       </Dialog>
 
       {/* ── Reject dialog ─────────────────────────────────────────────────── */}
-      <Dialog open={!!rejectTarget} onOpenChange={v => !v && setRejectTarget(null)}>
+      <Dialog open={!!rejectTarget} onOpenChange={v => { if (!v) { setRejectTarget(null); setActionError(""); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
@@ -692,20 +735,26 @@ export default function AdminPage() {
                 <div><span className="text-muted-foreground">Amount:</span> {fmtMoney(rejectTarget.amount)}</div>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Reason for rejection (shown to user)</label>
+                <label className="text-xs text-muted-foreground block mb-1">Reason for rejection (shown to user) *</label>
                 <textarea
                   className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-destructive resize-none"
                   rows={3}
                   value={rejectNotes}
                   onChange={e => setRejectNotes(e.target.value)}
                   placeholder="e.g. UTR not found, invalid amount..."
+                  required
                 />
               </div>
             </div>
           )}
+          {actionError && (
+            <div className="rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs px-3 py-2">
+              {actionError}
+            </div>
+          )}
           <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setRejectTarget(null)}>Cancel</Button>
-            <Button size="sm" variant="destructive" onClick={handleReject} disabled={actionLoading !== null}>
+            <Button variant="outline" size="sm" onClick={() => { setRejectTarget(null); setActionError(""); }}>Cancel</Button>
+            <Button size="sm" variant="destructive" onClick={handleReject} disabled={actionLoading !== null || !rejectNotes.trim()}>
               Confirm Reject
             </Button>
           </DialogFooter>
@@ -713,7 +762,7 @@ export default function AdminPage() {
       </Dialog>
 
       {/* ── User plan action dialog ────────────────────────────────────────── */}
-      <Dialog open={!!planTarget && !!planAction} onOpenChange={v => !v && setPlanTarget(null)}>
+      <Dialog open={!!planTarget && !!planAction} onOpenChange={v => { if (!v) { setPlanTarget(null); setActionError(""); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>
@@ -727,7 +776,7 @@ export default function AdminPage() {
               <div className="p-3 rounded-lg bg-muted/30 border border-border text-sm">
                 <div className="font-medium">{planTarget.name}</div>
                 <div className="text-muted-foreground text-xs">{planTarget.shopName} · {planTarget.email}</div>
-                <div className="mt-1">{planBadge(planTarget.plan, planTarget.trialEndsAt)}</div>
+                <div className="mt-1">{planBadge(planTarget.plan, planTarget.trialEndsAt, planTarget.subscriptionEndsAt)}</div>
               </div>
               {planAction !== "expire" && (
                 <div>
@@ -756,13 +805,18 @@ export default function AdminPage() {
               )}
               {planAction === "expire" && (
                 <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-xs text-destructive">
-                  This will immediately expire {planTarget.name}'s account. They will lose access to the app.
+                  This will immediately expire {planTarget.name}'s account. Their account and data are kept — they just lose access until reactivated.
                 </div>
               )}
             </div>
           )}
+          {actionError && (
+            <div className="rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs px-3 py-2">
+              {actionError}
+            </div>
+          )}
           <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setPlanTarget(null)}>Cancel</Button>
+            <Button variant="outline" size="sm" onClick={() => { setPlanTarget(null); setActionError(""); }}>Cancel</Button>
             <Button
               size="sm"
               variant={planAction === "expire" ? "destructive" : "default"}
@@ -779,7 +833,7 @@ export default function AdminPage() {
       </Dialog>
 
       {/* ── Delete user dialog ────────────────────────────────────────────── */}
-      <Dialog open={!!deleteTarget} onOpenChange={v => !v && setDeleteTarget(null)}>
+      <Dialog open={!!deleteTarget} onOpenChange={v => { if (!v) { setDeleteTarget(null); setActionError(""); setDeleteConfirmText(""); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
@@ -796,11 +850,33 @@ export default function AdminPage() {
               <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-xs text-destructive">
                 <strong>This action is permanent.</strong> The account and all associated data will be deleted from the database.
               </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">
+                  Type <strong className="text-destructive">DELETE</strong> to confirm
+                </label>
+                <Input
+                  value={deleteConfirmText}
+                  onChange={e => setDeleteConfirmText(e.target.value)}
+                  placeholder="DELETE"
+                  className="h-8 text-sm"
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+          )}
+          {actionError && (
+            <div className="rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs px-3 py-2">
+              {actionError}
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setDeleteTarget(null)}>Cancel</Button>
-            <Button size="sm" variant="destructive" onClick={handleDeleteUser} disabled={actionLoading !== null}>
+            <Button variant="outline" size="sm" onClick={() => { setDeleteTarget(null); setActionError(""); setDeleteConfirmText(""); }}>Cancel</Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={handleDeleteUser}
+              disabled={actionLoading !== null || deleteConfirmText.trim().toUpperCase() !== "DELETE"}
+            >
               Delete Permanently
             </Button>
           </DialogFooter>

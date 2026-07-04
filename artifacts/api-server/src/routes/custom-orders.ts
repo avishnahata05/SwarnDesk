@@ -1,11 +1,21 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { customOrdersTable, karigarsTable } from "@workspace/db";
-import { eq, and, desc } from "drizzle-orm";
+import { customOrdersTable } from "@workspace/db";
+import { eq, and, desc, sql } from "drizzle-orm";
 
 const router = Router();
 
 const VALID_STATUSES = ["pending", "karigar_assigned", "in_progress", "karigar_returned", "ready", "delivered", "cancelled"];
+
+// An order only counts against a karigar's pending workload while it's assigned to
+// them and still in their hands (not yet returned/ready/delivered/cancelled).
+function isActiveWithKarigar(karigarId: number | null, status: string): boolean {
+  return !!karigarId && (status === "karigar_assigned" || status === "in_progress");
+}
+
+async function adjustPendingOrders(userId: number, karigarId: number, delta: number) {
+  await db.execute(sql`UPDATE karigars SET pending_orders = GREATEST(0, pending_orders + ${delta}) WHERE id = ${karigarId} AND user_id = ${userId}`);
+}
 
 function mapOrder(r: typeof customOrdersTable.$inferSelect) {
   return {
@@ -161,21 +171,29 @@ router.patch("/:id", async (req, res) => {
     if (d.deliveryDate !== undefined) update.deliveryDate = d.deliveryDate ? new Date(d.deliveryDate) : null;
     if (d.finalPrice !== undefined) update.finalPrice = d.finalPrice != null ? String(d.finalPrice) : null;
 
-    // Update karigar pending orders count if status transitions to/from in_progress
     const [existing] = await db.select().from(customOrdersTable)
       .where(and(eq(customOrdersTable.id, parseInt(req.params.id)), eq(customOrdersTable.userId, userId)));
     if (!existing) return res.status(404).json({ error: "Not found" });
 
-    if (d.status && d.karigarId && d.status === "in_progress" && existing.status !== "in_progress") {
-      await db.update(karigarsTable)
-        .set({ pendingOrders: (existing.karigarId === d.karigarId ? 1 : 1) })
-        .where(eq(karigarsTable.id, d.karigarId));
-    }
+    const newKarigarId = (update.karigarId !== undefined ? update.karigarId : existing.karigarId) as number | null;
+    const newStatus = (update.status as string | undefined) ?? existing.status;
+    const wasActive = isActiveWithKarigar(existing.karigarId, existing.status);
+    const isActive = isActiveWithKarigar(newKarigarId, newStatus);
 
     const [updated] = await db.update(customOrdersTable).set(update)
       .where(and(eq(customOrdersTable.id, parseInt(req.params.id)), eq(customOrdersTable.userId, userId)))
       .returning();
     if (!updated) return res.status(404).json({ error: "Not found" });
+
+    // Keep each karigar's pending-order count in sync with reassignment/status changes
+    if (existing.karigarId === newKarigarId) {
+      if (wasActive && !isActive) await adjustPendingOrders(userId, existing.karigarId!, -1);
+      else if (!wasActive && isActive) await adjustPendingOrders(userId, newKarigarId!, 1);
+    } else {
+      if (wasActive) await adjustPendingOrders(userId, existing.karigarId!, -1);
+      if (isActive) await adjustPendingOrders(userId, newKarigarId!, 1);
+    }
+
     res.json(mapOrder(updated));
   } catch (err) {
     req.log.error({ err }, "Failed to update custom order");
@@ -191,6 +209,9 @@ router.delete("/:id", async (req, res) => {
       .where(and(eq(customOrdersTable.id, parseInt(req.params.id)), eq(customOrdersTable.userId, userId)))
       .returning();
     if (!deleted) return res.status(404).json({ error: "Not found" });
+    if (isActiveWithKarigar(deleted.karigarId, deleted.status)) {
+      await adjustPendingOrders(userId, deleted.karigarId!, -1);
+    }
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "Failed to delete custom order");

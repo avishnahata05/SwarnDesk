@@ -20,6 +20,8 @@ function mapSettings(s: typeof businessSettingsTable.$inferSelect) {
     whatsappApiEnabled: s.whatsappApiEnabled,
     whatsappPhoneNumberId: s.whatsappPhoneNumberId ?? "",
     hasAccessToken: !!(s.whatsappAccessToken),
+    loyaltyPointsEnabled: s.loyaltyPointsEnabled,
+    loyaltyPointsRate: parseFloat(s.loyaltyPointsRate),
     updatedAt: s.updatedAt.toISOString(),
   };
 }
@@ -44,6 +46,8 @@ router.get("/", async (req, res) => {
         whatsappApiEnabled: false,
         whatsappPhoneNumberId: "",
         whatsappAccessToken: "",
+        loyaltyPointsEnabled: true,
+        loyaltyPointsRate: 1000,
         updatedAt: new Date().toISOString(),
       });
     }
@@ -79,6 +83,12 @@ router.put("/", async (req, res) => {
     if (data.whatsappApiEnabled !== undefined) updateData.whatsappApiEnabled = data.whatsappApiEnabled;
     if (data.whatsappPhoneNumberId !== undefined) updateData.whatsappPhoneNumberId = data.whatsappPhoneNumberId;
     if (data.whatsappAccessToken !== undefined) updateData.whatsappAccessToken = data.whatsappAccessToken;
+    if (data.loyaltyPointsEnabled !== undefined) updateData.loyaltyPointsEnabled = !!data.loyaltyPointsEnabled;
+    if (data.loyaltyPointsRate !== undefined) {
+      const rate = parseFloat(String(data.loyaltyPointsRate));
+      if (!isFinite(rate) || rate <= 0) return res.status(400).json({ error: "Loyalty points rate must be a positive number" });
+      updateData.loyaltyPointsRate = rate.toString();
+    }
 
     if (existing) {
       [updated] = await db.update(businessSettingsTable).set(updateData).where(and(eq(businessSettingsTable.id, existing.id), eq(businessSettingsTable.userId, userId))).returning();
@@ -94,6 +104,8 @@ router.put("/", async (req, res) => {
         gstRate: (data.gstRate ?? 3).toString(),
         defaultBranch: data.defaultBranch ?? "Main",
         branches: Array.isArray(data.branches) ? data.branches.join(",") : (data.branches ?? "Main"),
+        loyaltyPointsEnabled: data.loyaltyPointsEnabled ?? true,
+        loyaltyPointsRate: (data.loyaltyPointsRate ?? 1000).toString(),
       }).returning();
     }
     res.json(mapSettings(updated));

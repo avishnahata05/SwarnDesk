@@ -19,6 +19,10 @@ interface KarigarForm { name: string; mobile: string; specialization: string; ad
 interface MetalIssueForm { metalType: string; weight: number; purity: string; notes: string; }
 interface MetalReturnForm { metalType: string; issuedWeight: number; returnedWeight: number; wastagePercent: number; notes: string; }
 
+const GOLD_PURITIES = ["24K", "22K", "18K", "14K"];
+const SILVER_PURITIES = ["999", "925"];
+const puritiesForMetal = (metalType: string) => metalType === "silver" ? SILVER_PURITIES : GOLD_PURITIES;
+
 export default function Karigars() {
   const [addOpen, setAddOpen] = useState(false);
   const [issueOpen, setIssueOpen] = useState<number | null>(null);
@@ -36,7 +40,9 @@ export default function Karigars() {
   const returnForm = useForm<MetalReturnForm>({ defaultValues: { metalType: "gold" } });
 
   const issueMetalType = issueForm.watch("metalType") ?? "gold";
+  const issuePurity = issueForm.watch("purity") ?? "22K";
   const returnMetalType = returnForm.watch("metalType") ?? "gold";
+  const returnKarigar = (karigars ?? []).find(k => k.id === returnOpen) ?? null;
 
   const onAdd = (data: KarigarForm) => {
     createKarigar.mutate({ data: { ...data, address: data.address || null } }, {
@@ -71,7 +77,7 @@ export default function Karigars() {
     const issuedW = parseFloat(String(data.issuedWeight));
     const returnedW = parseFloat(String(data.returnedWeight));
     if (isFinite(returnedW) && isFinite(issuedW) && returnedW > issuedW) {
-      toast({ title: "Returned weight cannot exceed issued weight", variant: "destructive" });
+      toast({ title: "Returned weight cannot exceed issued weight (some wastage during making is expected)", variant: "destructive" });
       return;
     }
     returnMetal.mutate({
@@ -106,6 +112,16 @@ export default function Karigars() {
         </Button>
       </div>
 
+      {!isLoading && (karigars ?? []).length === 0 && (
+        <div className="text-center py-16 text-muted-foreground">
+          <Hammer className="w-10 h-10 mx-auto mb-3 opacity-30" />
+          <p className="text-sm">No karigars added yet</p>
+          <Button className="mt-4 gap-2" onClick={() => setAddOpen(true)}>
+            <Plus className="w-4 h-4" />Add Karigar
+          </Button>
+        </div>
+      )}
+
       {/* Grid */}
       <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
         {isLoading && <div className="text-muted-foreground text-sm">Loading...</div>}
@@ -117,7 +133,7 @@ export default function Karigars() {
                   <div className="font-semibold">{k.name}</div>
                   <div className="text-xs text-muted-foreground">{k.specialization} • {k.mobile}</div>
                 </div>
-                <Badge variant="outline">{k.pendingOrders} orders</Badge>
+                <Badge variant="outline">{k.pendingOrders} pending orders</Badge>
               </div>
 
               <div className="grid grid-cols-2 gap-3 text-xs">
@@ -149,7 +165,10 @@ export default function Karigars() {
                   size="sm"
                   variant="outline"
                   className="flex-1 gap-1 text-xs"
-                  onClick={() => setReturnOpen(k.id)}
+                  onClick={() => {
+                    setReturnOpen(k.id);
+                    returnForm.reset({ metalType: "gold", issuedWeight: k.pendingGoldWeight || undefined });
+                  }}
                   data-testid={`button-return-metal-${k.id}`}
                 >
                   <TrendingUp className="w-3 h-3" />Return
@@ -200,7 +219,16 @@ export default function Karigars() {
           <form onSubmit={issueForm.handleSubmit(onIssue)} className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Metal Type</label>
-              <Select value={issueMetalType} onValueChange={v => issueForm.setValue("metalType", v)}>
+              <Select
+                value={issueMetalType}
+                onValueChange={v => {
+                  issueForm.setValue("metalType", v);
+                  const validPurities = puritiesForMetal(v);
+                  if (!validPurities.includes(issueForm.getValues("purity"))) {
+                    issueForm.setValue("purity", v === "silver" ? "925" : "22K");
+                  }
+                }}
+              >
                 <SelectTrigger data-testid="select-issue-metal"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="gold">Gold</SelectItem>
@@ -214,7 +242,12 @@ export default function Karigars() {
             </div>
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Purity</label>
-              <Input defaultValue="22K" {...issueForm.register("purity")} data-testid="input-issue-purity" />
+              <Select value={issuePurity} onValueChange={v => issueForm.setValue("purity", v)}>
+                <SelectTrigger data-testid="select-issue-purity"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {puritiesForMetal(issueMetalType).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Notes</label>
@@ -235,7 +268,16 @@ export default function Karigars() {
           <form onSubmit={returnForm.handleSubmit(onReturn)} className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Metal Type</label>
-              <Select value={returnMetalType} onValueChange={v => returnForm.setValue("metalType", v)}>
+              <Select
+                value={returnMetalType}
+                onValueChange={v => {
+                  returnForm.setValue("metalType", v);
+                  if (returnKarigar) {
+                    const pending = v === "silver" ? returnKarigar.pendingSilverWeight : returnKarigar.pendingGoldWeight;
+                    returnForm.setValue("issuedWeight", pending || undefined as unknown as number);
+                  }
+                }}
+              >
                 <SelectTrigger data-testid="select-return-metal"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="gold">Gold</SelectItem>
@@ -244,7 +286,9 @@ export default function Karigars() {
               </Select>
             </div>
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Issued Weight (g) *</label>
+              <label className="text-xs text-muted-foreground mb-1 block">
+                Issued Weight (g) * <span className="text-muted-foreground/60">pre-filled from pending balance, editable</span>
+              </label>
               <Input type="number" step="0.001" {...returnForm.register("issuedWeight", { required: true })} data-testid="input-issued-weight" />
             </div>
             <div>
@@ -254,6 +298,27 @@ export default function Karigars() {
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Wastage % *</label>
               <Input type="number" step="0.01" {...returnForm.register("wastagePercent", { required: true })} data-testid="input-wastage" />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Wastage % = weight lost while making the piece.{" "}
+                {(() => {
+                  const issuedW = parseFloat(String(returnForm.watch("issuedWeight") ?? ""));
+                  const returnedW = parseFloat(String(returnForm.watch("returnedWeight") ?? ""));
+                  if (!isFinite(issuedW) || !isFinite(returnedW) || issuedW <= 0) return null;
+                  const suggested = ((issuedW - returnedW) / issuedW) * 100;
+                  return (
+                    <>
+                      Based on issued/returned weight:{" "}
+                      <button
+                        type="button"
+                        className="underline text-primary"
+                        onClick={() => returnForm.setValue("wastagePercent", Math.max(0, parseFloat(suggested.toFixed(2))))}
+                      >
+                        use {suggested.toFixed(2)}%
+                      </button>
+                    </>
+                  );
+                })()}
+              </p>
             </div>
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Notes</label>

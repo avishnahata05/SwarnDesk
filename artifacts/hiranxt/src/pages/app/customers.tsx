@@ -3,7 +3,7 @@ import { useBackClose } from "@/hooks/use-back-close";
 import { formatCurrency } from "@/lib/utils";
 import {
   useListCustomers, useCreateCustomer, useGetUpcomingOccasions,
-  useGetCustomer,
+  useGetCustomer, useGetSettings,
   getListCustomersQueryKey, getGetUpcomingOccasionsQueryKey
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { useForm } from "react-hook-form";
 import {
   Plus, Search, Gift, MessageCircle, Star, Send, CheckSquare, Square, Users,
-  Eye, ShoppingBag, Wrench, X,
+  Eye, ShoppingBag, Wrench, X, Banknote, History,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -31,7 +31,7 @@ function getAuthHeaders(): Record<string, string> {
   return { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
 }
 
-function CustomerLedger({ customerId, onClose }: { customerId: number; onClose: () => void }) {
+function CustomerLedger({ customerId, onClose, loyaltyEnabled }: { customerId: number; onClose: () => void; loyaltyEnabled: boolean }) {
   const { data, isLoading } = useGetCustomer(customerId);
 
   if (isLoading) {
@@ -61,7 +61,7 @@ function CustomerLedger({ customerId, onClose }: { customerId: number; onClose: 
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className={`grid gap-3 ${loyaltyEnabled ? "grid-cols-3" : "grid-cols-2"}`}>
         <div className="p-3 rounded-xl bg-primary/10 border border-primary/20 text-center">
           <div className="text-xs text-muted-foreground mb-1">Total Purchases</div>
           <div className="text-base font-bold text-primary">{formatCurrency(customer.totalPurchases)}</div>
@@ -71,11 +71,14 @@ function CustomerLedger({ customerId, onClose }: { customerId: number; onClose: 
           <div className={`text-base font-bold ${customer.balance >= 0 ? "text-green-700" : "text-red-600"}`}>
             {customer.balance >= 0 ? "+" : ""}{formatCurrency(Math.abs(customer.balance))}
           </div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">{customer.balance >= 0 ? "Advance (you owe them)" : "Due (they owe you)"}</div>
         </div>
-        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-center">
-          <div className="text-xs text-muted-foreground mb-1 flex items-center justify-center gap-1"><Star className="w-3 h-3" />Points</div>
-          <div className="text-base font-bold text-amber-700">{customer.loyaltyPoints ?? 0}</div>
-        </div>
+        {loyaltyEnabled && (
+          <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-center">
+            <div className="text-xs text-muted-foreground mb-1 flex items-center justify-center gap-1"><Star className="w-3 h-3" />Points</div>
+            <div className="text-base font-bold text-amber-700">{customer.loyaltyPoints ?? 0}</div>
+          </div>
+        )}
       </div>
 
       {/* Occasions */}
@@ -192,6 +195,242 @@ function CustomerLedger({ customerId, onClose }: { customerId: number; onClose: 
   );
 }
 
+// ─── Customer History (by phone number) ────────────────────────────────────────
+// Works even for people who never got a formal Customer record — Girvi loans are
+// matched directly by the mobile number they were pledged under.
+
+type HistorySale = {
+  id: number;
+  invoiceNumber: string;
+  totalAmount: number;
+  paymentStatus: string;
+  paymentMode: string;
+  saleDate: string;
+};
+
+type HistoryGirviLoan = {
+  id: number;
+  loanNumber: string;
+  status: string;
+  loanAmount: number;
+  currentPrincipal: number;
+  outstandingInterest: number;
+  totalDue: number;
+  itemDescription: string | null;
+  startDate: string;
+  dueDate: string;
+  redeemedDate: string | null;
+  redeemedAmount: number | null;
+};
+
+type CustomerHistoryResult = {
+  customer: { id: number; name: string; mobile: string; loyaltyPoints: number; totalPurchases: number } | null;
+  sales: HistorySale[];
+  girviLoans: HistoryGirviLoan[];
+};
+
+const GIRVI_STATUS_STYLE: Record<string, string> = {
+  active: "bg-green-100 text-green-700 border-green-200",
+  extended: "bg-blue-100 text-blue-700 border-blue-200",
+  redeemed: "bg-muted text-muted-foreground border-border",
+  forfeited: "bg-red-100 text-red-700 border-red-200",
+};
+
+function CustomerHistorySearch({ loyaltyEnabled }: { loyaltyEnabled: boolean }) {
+  const [mobile, setMobile] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<CustomerHistoryResult | null>(null);
+  const [searched, setSearched] = useState(false);
+  const { toast } = useToast();
+
+  const closeResult = useCallback(() => setSearched(false), []);
+  useBackClose(searched, closeResult);
+
+  const runSearch = async () => {
+    const digits = mobile.replace(/\D/g, "");
+    if (digits.length < 4) {
+      toast({ title: "Enter at least 4 digits of the mobile number to search", variant: "destructive" });
+      return;
+    }
+    setLoading(true);
+    try {
+      const r = await fetch(`/api/customers/history?mobile=${encodeURIComponent(digits)}`, { headers: getAuthHeaders() });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to fetch history");
+      const data: CustomerHistoryResult = await r.json();
+      setResult(data);
+      setSearched(true);
+    } catch (err) {
+      toast({ title: (err as Error).message || "Failed to fetch history", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const totalSalesValue = (result?.sales ?? []).reduce((s, sale) => s + sale.totalAmount, 0);
+  const activeLoans = (result?.girviLoans ?? []).filter(l => l.status === "active" || l.status === "extended");
+
+  return (
+    <Card className="border-primary/20 bg-primary/5">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-semibold flex items-center gap-2 text-primary">
+          <History className="w-4 h-4" />
+          Customer History Lookup
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <p className="text-xs text-muted-foreground">
+          Look up a person's full history by mobile number — purchases and Girvi loans together,
+          even if they were never added as a Customer.
+        </p>
+        <div className="flex gap-2">
+          <Input
+            placeholder="Enter mobile number..."
+            value={mobile}
+            onChange={e => setMobile(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") runSearch(); }}
+            className="max-w-xs"
+            data-testid="input-history-mobile"
+          />
+          <Button size="sm" onClick={runSearch} disabled={loading} className="gap-1.5" data-testid="button-history-search">
+            <Search className="w-3.5 h-3.5" />
+            {loading ? "Searching..." : "View History"}
+          </Button>
+        </div>
+      </CardContent>
+
+      <Dialog open={searched} onOpenChange={v => !v && setSearched(false)}>
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
+          {result && (
+            <div className="space-y-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-bold">{result.customer?.name ?? "Unknown Person"}</h2>
+                  <div className="text-sm text-muted-foreground">{mobile}</div>
+                  {!result.customer && (
+                    <div className="text-xs text-amber-600 mt-1">No saved Customer profile for this number — showing available records.</div>
+                  )}
+                </div>
+                <button onClick={() => setSearched(false)} className="text-muted-foreground hover:text-foreground p-1 rounded">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Stats */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="p-3 rounded-xl bg-primary/10 border border-primary/20 text-center">
+                  <div className="text-xs text-muted-foreground mb-1">Purchases</div>
+                  <div className="text-base font-bold text-primary">{formatCurrency(result.customer?.totalPurchases ?? totalSalesValue)}</div>
+                </div>
+                <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-center">
+                  <div className="text-xs text-muted-foreground mb-1">Girvi Loans</div>
+                  <div className="text-base font-bold text-blue-700">{result.girviLoans.length} {activeLoans.length > 0 ? `(${activeLoans.length} active)` : ""}</div>
+                </div>
+                {loyaltyEnabled ? (
+                  <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-center">
+                    <div className="text-xs text-muted-foreground mb-1 flex items-center justify-center gap-1"><Star className="w-3 h-3" />Points</div>
+                    <div className="text-base font-bold text-amber-700">{result.customer?.loyaltyPoints ?? 0}</div>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-muted/20 border border-border text-center">
+                    <div className="text-xs text-muted-foreground mb-1">Sales Count</div>
+                    <div className="text-base font-bold">{result.sales.length}</div>
+                  </div>
+                )}
+              </div>
+
+              {/* Purchase history */}
+              <div>
+                <div className="text-sm font-semibold flex items-center gap-1.5 mb-2">
+                  <ShoppingBag className="w-4 h-4 text-primary" />
+                  Purchase History
+                </div>
+                {result.sales.length === 0 ? (
+                  <div className="text-sm text-muted-foreground py-4 text-center border border-dashed border-border rounded-xl">
+                    {result.customer ? "No purchase history yet." : "Purchase history requires this number to be saved as a Customer."}
+                  </div>
+                ) : (
+                  <div className="border border-border rounded-xl overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-muted/50 border-b border-border text-muted-foreground">
+                          <th className="px-3 py-2 text-left font-medium">Invoice</th>
+                          <th className="px-3 py-2 text-left font-medium">Date</th>
+                          <th className="px-3 py-2 text-right font-medium">Amount</th>
+                          <th className="px-3 py-2 text-center font-medium">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {result.sales.map(sale => (
+                          <tr key={sale.id} className="border-b border-border/50 last:border-0 hover:bg-muted/10">
+                            <td className="px-3 py-2 font-mono">{sale.invoiceNumber}</td>
+                            <td className="px-3 py-2 text-muted-foreground">
+                              {new Date(sale.saleDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })}
+                            </td>
+                            <td className="px-3 py-2 text-right font-semibold text-primary">{formatCurrency(sale.totalAmount)}</td>
+                            <td className="px-3 py-2 text-center">
+                              <Badge
+                                className={`text-[10px] h-4 ${sale.paymentStatus === "paid" ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-100" : "bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-100"}`}
+                                variant="outline"
+                              >
+                                {sale.paymentStatus.charAt(0).toUpperCase() + sale.paymentStatus.slice(1)}
+                              </Badge>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Girvi loan history */}
+              <div>
+                <div className="text-sm font-semibold flex items-center gap-1.5 mb-2">
+                  <Banknote className="w-4 h-4 text-primary" />
+                  Girvi Loan History
+                </div>
+                {result.girviLoans.length === 0 ? (
+                  <div className="text-sm text-muted-foreground py-4 text-center border border-dashed border-border rounded-xl">
+                    No Girvi loans for this number.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {result.girviLoans.map(loan => {
+                      const isActive = loan.status === "active" || loan.status === "extended";
+                      return (
+                        <div key={loan.id} className="p-3 rounded-xl border border-border bg-muted/10 text-xs space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono font-semibold">{loan.loanNumber}</span>
+                            <Badge variant="outline" className={`text-[10px] ${GIRVI_STATUS_STYLE[loan.status] ?? ""}`}>
+                              {loan.status.toUpperCase()}
+                            </Badge>
+                          </div>
+                          {loan.itemDescription && <div className="text-muted-foreground">{loan.itemDescription}</div>}
+                          <div className="flex justify-between text-muted-foreground">
+                            <span>Loan: {formatCurrency(loan.loanAmount)}</span>
+                            <span>{new Date(loan.startDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })} → {new Date(loan.dueDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })}</span>
+                          </div>
+                          {isActive ? (
+                            <div className="font-semibold text-primary">Total due today: {formatCurrency(loan.totalDue)}</div>
+                          ) : loan.status === "redeemed" ? (
+                            <div className="text-green-700">Redeemed {loan.redeemedDate ? `on ${new Date(loan.redeemedDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })}` : ""} · Collected {formatCurrency(loan.redeemedAmount ?? 0)}</div>
+                          ) : (
+                            <div className="text-destructive">Forfeited</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
+
 export default function Customers() {
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
@@ -210,7 +449,9 @@ export default function Customers() {
 
   const { data: customers, isLoading } = useListCustomers({ ...(search ? { search } : {}) });
   const { data: occasions } = useGetUpcomingOccasions();
+  const { data: settings } = useGetSettings();
   const createCustomer = useCreateCustomer();
+  const loyaltyEnabled = (settings as unknown as { loyaltyPointsEnabled?: boolean } | undefined)?.loyaltyPointsEnabled ?? true;
 
   const { register, handleSubmit, reset } = useForm<CustomerForm>();
 
@@ -331,6 +572,9 @@ export default function Customers() {
         </div>
       </div>
 
+      {/* Customer history lookup by phone number */}
+      <CustomerHistorySearch loyaltyEnabled={loyaltyEnabled} />
+
       {/* Upcoming occasions */}
       {occasions && occasions.length > 0 && (
         <Card className="border-primary/20 bg-primary/5">
@@ -395,14 +639,14 @@ export default function Customers() {
                 <th className="px-4 py-3 text-left font-medium hidden sm:table-cell">Mobile</th>
                 <th className="px-4 py-3 text-right font-medium">Purchases</th>
                 <th className="px-4 py-3 text-right font-medium hidden md:table-cell">Balance</th>
-                <th className="px-4 py-3 text-center font-medium hidden md:table-cell">Points</th>
+                {loyaltyEnabled && <th className="px-4 py-3 text-center font-medium hidden md:table-cell">Points</th>}
                 <th className="px-4 py-3 text-center font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {isLoading && <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>}
+              {isLoading && <tr><td colSpan={loyaltyEnabled ? 7 : 6} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>}
               {!isLoading && (!customers || customers.length === 0) && (
-                <tr><td colSpan={7} className="px-4 py-12 text-center">
+                <tr><td colSpan={loyaltyEnabled ? 7 : 6} className="px-4 py-12 text-center">
                   <Users className="w-10 h-10 text-muted-foreground/40 mx-auto mb-2" />
                   <div className="text-muted-foreground">No customers found.</div>
                 </td></tr>
@@ -434,12 +678,15 @@ export default function Customers() {
                     <span className={c.balance >= 0 ? "text-green-600" : "text-destructive"}>
                       {c.balance >= 0 ? "+" : ""}{formatCurrency(Math.abs(c.balance))}
                     </span>
+                    <div className="text-[10px] text-muted-foreground">{c.balance >= 0 ? "Advance" : "Due"}</div>
                   </td>
-                  <td className="px-4 py-3 text-center hidden md:table-cell">
-                    <div className="flex items-center justify-center gap-1 text-amber-600">
-                      <Star className="w-3 h-3 fill-amber-500" />{c.loyaltyPoints}
-                    </div>
-                  </td>
+                  {loyaltyEnabled && (
+                    <td className="px-4 py-3 text-center hidden md:table-cell">
+                      <div className="flex items-center justify-center gap-1 text-amber-600">
+                        <Star className="w-3 h-3 fill-amber-500" />{c.loyaltyPoints}
+                      </div>
+                    </td>
+                  )}
                   <td className="px-4 py-3 text-center">
                     <div className="flex items-center justify-center gap-2">
                       <button
@@ -474,6 +721,7 @@ export default function Customers() {
             <CustomerLedger
               customerId={ledgerCustomerId}
               onClose={() => setLedgerCustomerId(null)}
+              loyaltyEnabled={loyaltyEnabled}
             />
           )}
         </DialogContent>
@@ -497,7 +745,7 @@ export default function Customers() {
 
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">
-                Message Template — use <code className="bg-muted px-1 rounded">{"{name}"}</code> to insert customer name
+                Message Template — type <code className="bg-muted px-1 rounded">{"{name}"}</code> anywhere in the message and it will be replaced with each customer's name automatically.
               </label>
               <textarea
                 className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary resize-none"
@@ -541,15 +789,21 @@ export default function Customers() {
               Open WhatsApp Links
             </Button>
             {waApiEnabled && (
-              <Button size="sm" onClick={sendViaApi} disabled={bulkSending} className="gap-1.5 bg-green-600 hover:bg-green-700">
+              <Button
+                size="sm"
+                onClick={sendViaApi}
+                disabled={bulkSending}
+                className="gap-1.5 bg-green-600 hover:bg-green-700"
+                title="Sends automatically in the background — needs WhatsApp Business API set up in Settings"
+              >
                 <Send className="w-3.5 h-3.5" />
-                {bulkSending ? "Sending..." : "Send via API"}
+                {bulkSending ? "Sending..." : "Send Automatically"}
               </Button>
             )}
           </DialogFooter>
           {!waApiEnabled && (
             <p className="text-xs text-muted-foreground text-center -mt-1">
-              To send directly via API (no window pop-ups), configure WhatsApp Business API in Settings.
+              Want to send automatically without opening WhatsApp for each customer? That's an optional paid upgrade — needs WhatsApp Business API set up in Settings; otherwise use "Open WhatsApp Links" above to send manually.
             </p>
           )}
         </DialogContent>
@@ -578,12 +832,12 @@ export default function Customers() {
                 <Input {...register("address")} placeholder="123 Main St, Mumbai" data-testid="input-customer-address" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Birthday (MM-DD)</label>
-                <Input {...register("birthday")} placeholder="06-15" data-testid="input-customer-birthday" />
+                <label className="text-xs text-muted-foreground mb-1 block">Birthday (Month-Day, e.g. 15 June = 06-15)</label>
+                <Input {...register("birthday")} placeholder="MM-DD, e.g. 06-15" data-testid="input-customer-birthday" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Anniversary (MM-DD)</label>
-                <Input {...register("anniversary")} placeholder="11-20" data-testid="input-customer-anniversary" />
+                <label className="text-xs text-muted-foreground mb-1 block">Anniversary (Month-Day, e.g. 20 Nov = 11-20)</label>
+                <Input {...register("anniversary")} placeholder="MM-DD, e.g. 11-20" data-testid="input-customer-anniversary" />
               </div>
               <div className="col-span-2">
                 <label className="text-xs text-muted-foreground mb-1 block">GSTIN</label>

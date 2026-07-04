@@ -222,6 +222,10 @@ export interface RepairJob {
   deliveredDate?: string | null;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  karigarId?: number | null;
+  /** @nullable */
+  karigarName?: string | null;
   createdAt: string;
 }
 
@@ -387,6 +391,8 @@ export interface RepairJobInput {
   promisedDate: string;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  karigarId?: number | null;
 }
 
 export interface RepairJobUpdate {
@@ -403,6 +409,8 @@ export interface RepairJobUpdate {
   issue?: string;
   estimatedCost?: number;
   promisedDate?: string;
+  /** @nullable */
+  karigarId?: number | null;
 }
 
 export interface Purchase {
