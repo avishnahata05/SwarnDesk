@@ -29,6 +29,24 @@ export const repairJobsTable = pgTable("repair_jobs", {
   index("repairs_karigar_idx").on(t.karigarId),
 ]);
 
+// Records each payment collected against a repair job (advance at drop-off or final at delivery)
+export const repairPaymentTransactionsTable = pgTable("repair_payment_transactions", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(0),
+  repairJobId: integer("repair_job_id").notNull(),
+  customerId: integer("customer_id"),
+  customerName: text("customer_name").notNull(),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  paymentMode: text("payment_mode").notNull().default("cash"),
+  paidAt: timestamp("paid_at").defaultNow().notNull(),
+  notes: text("notes"),
+}, (t) => [
+  index("rpt_repair_idx").on(t.repairJobId),
+  index("rpt_user_idx").on(t.userId),
+  index("rpt_user_date_idx").on(t.userId, t.paidAt),
+]);
+
 export const insertRepairJobSchema = createInsertSchema(repairJobsTable).omit({ id: true, createdAt: true, receivedDate: true });
 export type InsertRepairJob = z.infer<typeof insertRepairJobSchema>;
 export type RepairJob = typeof repairJobsTable.$inferSelect;
+export type RepairPaymentTransaction = typeof repairPaymentTransactionsTable.$inferSelect;

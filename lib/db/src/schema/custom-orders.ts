@@ -52,4 +52,22 @@ export const customOrdersTable = pgTable("custom_orders", {
   index("custom_orders_karigar_idx").on(t.karigarId),
 ]);
 
+// Records each payment collected against a custom order (advance at booking, top-ups, final on delivery)
+export const customOrderPaymentTransactionsTable = pgTable("custom_order_payment_transactions", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(0),
+  customOrderId: integer("custom_order_id").notNull(),
+  customerId: integer("customer_id"),
+  customerName: text("customer_name").notNull(),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  paymentMode: text("payment_mode").notNull().default("cash"),
+  paidAt: timestamp("paid_at").defaultNow().notNull(),
+  notes: text("notes"),
+}, (t) => [
+  index("copt_order_idx").on(t.customOrderId),
+  index("copt_user_idx").on(t.userId),
+  index("copt_user_date_idx").on(t.userId, t.paidAt),
+]);
+
 export type CustomOrder = typeof customOrdersTable.$inferSelect;
+export type CustomOrderPaymentTransaction = typeof customOrderPaymentTransactionsTable.$inferSelect;

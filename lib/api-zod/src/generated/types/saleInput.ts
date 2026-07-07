@@ -12,6 +12,7 @@ export interface SaleInput {
   customerId?: number | null;
   customerName: string;
   totalAmount: number;
+  paidAmount?: number;
   gstAmount: number;
   discountAmount: number;
   exchangeGoldWeight: number;

@@ -1,0 +1,220 @@
+import { db } from "@workspace/db";
+import {
+  chartOfAccountsTable, accountingCountersTable, accountingSettingsTable, businessSettingsTable,
+  journalVouchersTable, journalLinesTable,
+} from "@workspace/db";
+import { eq, and, sql } from "drizzle-orm";
+
+export function safeFloat(val: unknown, fallback = 0): number {
+  const n = parseFloat(String(val ?? ""));
+  return isFinite(n) ? n : fallback;
+}
+
+// Indian financial year: April (month index 3) through March, same convention as Girvi.
+export function getFinancialYear(date: Date, fyStartMonth = 4): string {
+  const month = date.getMonth() + 1;
+  const year = date.getFullYear();
+  const startYear = month >= fyStartMonth ? year : year - 1;
+  return `${startYear}-${String((startYear + 1) % 100).padStart(2, "0")}`;
+}
+
+// Atomic, gap-free voucher numbering — literal port of girvi's nextGirviNumber.
+export async function nextVoucherNumber(userId: number, docType: string, prefix: string, asOf = new Date()): Promise<string> {
+  const financialYear = getFinancialYear(asOf);
+  const [row] = await db.insert(accountingCountersTable)
+    .values({ userId, docType, financialYear, lastNumber: 1 })
+    .onConflictDoUpdate({
+      target: [accountingCountersTable.userId, accountingCountersTable.docType, accountingCountersTable.financialYear],
+      set: { lastNumber: sql`${accountingCountersTable.lastNumber} + 1` },
+    })
+    .returning();
+  return `${prefix}/${financialYear}/${String(row.lastNumber).padStart(4, "0")}`;
+}
+
+export async function getOrCreateAccountingSettings(userId: number) {
+  const [existing] = await db.select().from(accountingSettingsTable).where(eq(accountingSettingsTable.userId, userId));
+  if (existing) return existing;
+  const [mainSettings] = await db.select().from(businessSettingsTable).where(eq(businessSettingsTable.userId, userId));
+  const [created] = await db.insert(accountingSettingsTable).values({
+    userId,
+    financialYearStartMonth: 4,
+  }).returning();
+  void mainSettings; // nothing to seed from today — reserved for future defaults (e.g. FY start by locale)
+  return created;
+}
+
+// ─── Default Chart of Accounts ──────────────────────────────────────────────
+// Every other module posts against these symbolic keys rather than raw account
+// ids, so integration code never has to know real account ids.
+export const DEFAULT_ACCOUNTS = [
+  { key: "CASH", code: "1001", name: "Cash in Hand", accountType: "asset", accountSubType: "cash" },
+  { key: "BANK", code: "1002", name: "Bank Account", accountType: "asset", accountSubType: "bank" },
+  { key: "ACCOUNTS_RECEIVABLE", code: "1101", name: "Accounts Receivable (Debtors)", accountType: "asset", accountSubType: "accounts_receivable" },
+  { key: "INVENTORY_GOLD", code: "1201", name: "Inventory - Gold", accountType: "asset", accountSubType: "inventory" },
+  { key: "INVENTORY_SILVER", code: "1202", name: "Inventory - Silver", accountType: "asset", accountSubType: "inventory" },
+  { key: "INVENTORY_OTHER", code: "1203", name: "Inventory - Other", accountType: "asset", accountSubType: "inventory" },
+  { key: "GIRVI_LOANS_RECEIVABLE", code: "1301", name: "Girvi Loans Receivable", accountType: "asset", accountSubType: "other" },
+  { key: "FORFEITED_GOLD_STOCK", code: "1302", name: "Forfeited Gold Stock", accountType: "asset", accountSubType: "inventory" },
+  { key: "FIXED_ASSETS", code: "1401", name: "Fixed Assets", accountType: "asset", accountSubType: "fixed_asset" },
+  // ITC — GST paid on purchases is a claim against the government (an asset) until it's
+  // offset against output GST payable, not an expense.
+  { key: "INPUT_GST_CREDIT", code: "1501", name: "Input GST Credit (ITC)", accountType: "asset", accountSubType: "other" },
+  { key: "ACCOUNTS_PAYABLE", code: "2001", name: "Accounts Payable (Creditors)", accountType: "liability", accountSubType: "accounts_payable" },
+  { key: "GST_PAYABLE", code: "2101", name: "GST Payable", accountType: "liability", accountSubType: "other" },
+  { key: "CAPITAL_ACCOUNT", code: "3001", name: "Capital Account", accountType: "equity", accountSubType: "capital" },
+  { key: "SALES_REVENUE", code: "4001", name: "Sales Revenue", accountType: "income", accountSubType: "direct_income" },
+  { key: "REPAIR_INCOME", code: "4002", name: "Repair Income", accountType: "income", accountSubType: "direct_income" },
+  { key: "CUSTOM_ORDER_INCOME", code: "4003", name: "Custom Order Income", accountType: "income", accountSubType: "direct_income" },
+  { key: "INTEREST_INCOME", code: "4004", name: "Interest Income (Girvi)", accountType: "income", accountSubType: "indirect_income" },
+  { key: "PROCESSING_FEE_INCOME", code: "4005", name: "Processing Fee Income", accountType: "income", accountSubType: "indirect_income" },
+  { key: "OTHER_INCOME", code: "4006", name: "Other Income", accountType: "income", accountSubType: "indirect_income" },
+  { key: "PURCHASES", code: "5001", name: "Purchases", accountType: "expense", accountSubType: "direct_expense" },
+  { key: "KARIGAR_WAGES_EXPENSE", code: "5002", name: "Karigar Wages Expense", accountType: "expense", accountSubType: "direct_expense" },
+  { key: "RENT_EXPENSE", code: "5101", name: "Rent Expense", accountType: "expense", accountSubType: "indirect_expense" },
+  { key: "SALARY_EXPENSE", code: "5102", name: "Salary Expense", accountType: "expense", accountSubType: "indirect_expense" },
+  { key: "ELECTRICITY_EXPENSE", code: "5103", name: "Electricity Expense", accountType: "expense", accountSubType: "indirect_expense" },
+  { key: "FORFEITURE_LOSS", code: "5104", name: "Forfeiture Loss (Girvi)", accountType: "expense", accountSubType: "indirect_expense" },
+  { key: "MISC_EXPENSE", code: "5199", name: "Miscellaneous Expense", accountType: "expense", accountSubType: "indirect_expense" },
+] as const;
+
+export type DefaultAccountKey = typeof DEFAULT_ACCOUNTS[number]["key"];
+
+// Idempotently seeds any missing default accounts for the user, returns a
+// key -> accountId map. Called lazily by every posting call site (and by the
+// Chart of Accounts list endpoint), same lazy-init pattern as Girvi settings.
+export async function getOrCreateDefaultAccounts(userId: number): Promise<Record<DefaultAccountKey, number>> {
+  const existing = await db.select().from(chartOfAccountsTable).where(eq(chartOfAccountsTable.userId, userId));
+  const byCode = new Map(existing.map(a => [a.code, a]));
+  const missing = DEFAULT_ACCOUNTS.filter(a => !byCode.has(a.code));
+  if (missing.length > 0) {
+    const inserted = await db.insert(chartOfAccountsTable).values(
+      missing.map(a => ({
+        userId, code: a.code, name: a.name, accountType: a.accountType,
+        accountSubType: a.accountSubType, isSystemAccount: true,
+      }))
+    ).onConflictDoNothing().returning();
+    for (const a of inserted) byCode.set(a.code, a);
+  }
+  const map = {} as Record<DefaultAccountKey, number>;
+  for (const a of DEFAULT_ACCOUNTS) {
+    const row = byCode.get(a.code);
+    if (row) map[a.key] = row.id;
+  }
+  return map;
+}
+
+export function cashOrBankKey(paymentMode: string | null | undefined): "CASH" | "BANK" {
+  return paymentMode === "upi" || paymentMode === "card" || paymentMode === "bank" || paymentMode === "cheque" ? "BANK" : "CASH";
+}
+
+export type PartyType = "none" | "customer" | "supplier" | "karigar" | "girvi_customer";
+
+export interface JournalLineInput {
+  accountId: number;
+  debit?: number;
+  credit?: number;
+  partyType?: PartyType;
+  partyId?: number | null;
+  particulars?: string | null;
+}
+
+export interface PostJournalEntryInput {
+  userId: number;
+  voucherDate?: Date;
+  voucherType: "sales" | "purchase" | "receipt" | "payment" | "journal" | "contra";
+  narration?: string | null;
+  sourceModule: "sales" | "purchases" | "girvi" | "repairs" | "custom_orders" | "karigars" | "manual";
+  sourceId?: number | null;
+  lines: JournalLineInput[];
+}
+
+// Db transaction type used across the route files (tx param of db.transaction callback).
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+// The core posting primitive. Every module that moves money calls this from
+// inside its OWN db.transaction (pass that transaction's `tx`) so the journal
+// entry commits or rolls back atomically with the originating write. Throws
+// on an unbalanced entry — that's a programming bug, not a user input error,
+// so callers should let it propagate and roll back the whole transaction.
+export async function postJournalEntry(tx: Tx, input: PostJournalEntryInput) {
+  const lines = input.lines.filter(l => (l.debit ?? 0) > 0.001 || (l.credit ?? 0) > 0.001);
+  if (lines.length === 0) throw new Error("postJournalEntry: at least one non-zero line is required");
+
+  const totalDebit = lines.reduce((s, l) => s + (l.debit ?? 0), 0);
+  const totalCredit = lines.reduce((s, l) => s + (l.credit ?? 0), 0);
+  if (Math.abs(totalDebit - totalCredit) > 0.01) {
+    throw new Error(`postJournalEntry: unbalanced entry (debit ${totalDebit.toFixed(2)} != credit ${totalCredit.toFixed(2)}) for ${input.sourceModule}#${input.sourceId ?? "manual"}`);
+  }
+
+  const settings = await getOrCreateAccountingSettings(input.userId);
+  const voucherDate = input.voucherDate ?? new Date();
+  const docType = input.voucherType === "receipt" ? "receipt" : input.voucherType === "payment" ? "payment" : "journal";
+  const prefix = docType === "receipt" ? settings.receiptPrefix : docType === "payment" ? settings.paymentPrefix : settings.journalPrefix;
+  const voucherNumber = await nextVoucherNumber(input.userId, docType, prefix, voucherDate);
+
+  const [voucher] = await tx.insert(journalVouchersTable).values({
+    userId: input.userId,
+    voucherNumber,
+    voucherType: input.voucherType,
+    voucherDate,
+    narration: input.narration ?? null,
+    sourceModule: input.sourceModule,
+    sourceId: input.sourceId ?? null,
+  }).returning();
+
+  await tx.insert(journalLinesTable).values(lines.map(l => ({
+    userId: input.userId,
+    voucherId: voucher.id,
+    accountId: l.accountId,
+    debit: (l.debit ?? 0).toFixed(2),
+    credit: (l.credit ?? 0).toFixed(2),
+    partyType: l.partyType ?? "none",
+    partyId: l.partyId ?? null,
+    particulars: l.particulars ?? null,
+  })));
+
+  return voucher;
+}
+
+// Voids a voucher without deleting it — inserts a mirror-image reversing
+// voucher (debits <-> credits swapped) and links the two for a full audit trail.
+export async function reverseVoucher(userId: number, voucherId: number, narration?: string) {
+  return db.transaction(async (tx) => {
+    const [voucher] = await tx.select().from(journalVouchersTable)
+      .where(and(eq(journalVouchersTable.id, voucherId), eq(journalVouchersTable.userId, userId)));
+    if (!voucher) throw Object.assign(new Error("Voucher not found"), { statusCode: 404 });
+    if (voucher.reversedByVoucherId) throw Object.assign(new Error("Voucher already voided"), { statusCode: 400 });
+
+    const lines = await tx.select().from(journalLinesTable)
+      .where(and(eq(journalLinesTable.voucherId, voucherId), eq(journalLinesTable.userId, userId)));
+
+    const settings = await getOrCreateAccountingSettings(userId);
+    const voucherNumber = await nextVoucherNumber(userId, "journal", settings.journalPrefix, new Date());
+    const [reversal] = await tx.insert(journalVouchersTable).values({
+      userId,
+      voucherNumber,
+      voucherType: "journal",
+      voucherDate: new Date(),
+      narration: narration ?? `Reversal of ${voucher.voucherNumber}`,
+      sourceModule: voucher.sourceModule,
+      sourceId: voucher.sourceId,
+      reversesVoucherId: voucher.id,
+    }).returning();
+
+    await tx.insert(journalLinesTable).values(lines.map(l => ({
+      userId,
+      voucherId: reversal.id,
+      accountId: l.accountId,
+      debit: l.credit,
+      credit: l.debit,
+      partyType: l.partyType,
+      partyId: l.partyId,
+      particulars: l.particulars,
+    })));
+
+    await tx.update(journalVouchersTable).set({ reversedByVoucherId: reversal.id })
+      .where(eq(journalVouchersTable.id, voucher.id));
+
+    return reversal;
+  });
+}

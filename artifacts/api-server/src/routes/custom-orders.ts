@@ -1,9 +1,23 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { customOrdersTable } from "@workspace/db";
+import { customOrdersTable, customOrderPaymentTransactionsTable } from "@workspace/db";
 import { eq, and, desc, sql } from "drizzle-orm";
+import { postJournalEntry, getOrCreateDefaultAccounts, cashOrBankKey, safeFloat, nextVoucherNumber } from "./accounting-helpers";
 
 const router = Router();
+
+function mapTransaction(t: typeof customOrderPaymentTransactionsTable.$inferSelect) {
+  return {
+    id: t.id,
+    customOrderId: t.customOrderId,
+    customerId: t.customerId,
+    customerName: t.customerName,
+    amount: safeFloat(t.amount),
+    paymentMode: t.paymentMode,
+    paidAt: t.paidAt.toISOString(),
+    notes: t.notes,
+  };
+}
 
 const VALID_STATUSES = ["pending", "karigar_assigned", "in_progress", "karigar_returned", "ready", "delivered", "cancelled"];
 
@@ -50,13 +64,6 @@ function mapOrder(r: typeof customOrdersTable.$inferSelect) {
   };
 }
 
-function genOrderNumber(): string {
-  const d = new Date();
-  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-  const rand = Math.floor(1000 + Math.random() * 9000);
-  return `CO-${ymd}-${rand}`;
-}
-
 // GET / — list all custom orders (optional ?status=)
 router.get("/", async (req, res) => {
   try {
@@ -87,9 +94,10 @@ router.post("/", async (req, res) => {
     const dueDate = new Date(d.dueDate);
     if (isNaN(dueDate.getTime())) return res.status(400).json({ error: "Invalid due date" });
 
+    const orderNumber = await nextVoucherNumber(userId, "custom_order", "CO");
     const [order] = await db.insert(customOrdersTable).values({
       userId,
-      orderNumber: genOrderNumber(),
+      orderNumber,
       customerId: d.customerId ?? null,
       customerName: d.customerName.trim(),
       customerMobile: d.customerMobile.trim(),
@@ -197,6 +205,82 @@ router.patch("/:id", async (req, res) => {
     res.json(mapOrder(updated));
   } catch (err) {
     req.log.error({ err }, "Failed to update custom order");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /:id/payments — payment history for a custom order
+router.get("/:id/payments", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const txns = await db.select().from(customOrderPaymentTransactionsTable)
+      .where(and(eq(customOrderPaymentTransactionsTable.customOrderId, id), eq(customOrderPaymentTransactionsTable.userId, userId)))
+      .orderBy(desc(customOrderPaymentTransactionsTable.paidAt));
+    res.json(txns.map(mapTransaction));
+  } catch (err) {
+    req.log.error({ err }, "Failed to get custom order payment history");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /:id/payments — collect a payment against a custom order (advance at booking, top-ups, final on delivery)
+router.post("/:id/payments", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const amount = safeFloat(req.body.amount);
+    if (!isFinite(amount) || amount <= 0) return res.status(400).json({ error: "Invalid payment amount" });
+    const allowedModes = ["cash", "upi", "card", "bank"];
+    const paymentMode = allowedModes.includes(req.body.paymentMode) ? req.body.paymentMode : "cash";
+    const notes = req.body.notes ? String(req.body.notes).slice(0, 500) : null;
+
+    const accts = await getOrCreateDefaultAccounts(userId);
+
+    const updated = await db.transaction(async (tx) => {
+      const [order] = await tx.select().from(customOrdersTable)
+        .where(and(eq(customOrdersTable.id, id), eq(customOrdersTable.userId, userId)));
+      if (!order) throw Object.assign(new Error("Custom order not found"), { statusCode: 404 });
+
+      await tx.insert(customOrderPaymentTransactionsTable).values({
+        userId,
+        customOrderId: id,
+        customerId: order.customerId,
+        customerName: order.customerName,
+        amount: amount.toString(),
+        paymentMode,
+        notes,
+      });
+
+      const newAdvancePaid = safeFloat(order.advancePaid) + amount;
+      const [u] = await tx.update(customOrdersTable)
+        .set({ advancePaid: newAdvancePaid.toString() })
+        .where(and(eq(customOrdersTable.id, id), eq(customOrdersTable.userId, userId)))
+        .returning();
+
+      await postJournalEntry(tx, {
+        userId,
+        voucherType: "receipt",
+        narration: `Payment received for custom order ${order.orderNumber}`,
+        sourceModule: "custom_orders",
+        sourceId: id,
+        lines: [
+          { accountId: accts[cashOrBankKey(paymentMode)], debit: amount, particulars: "Payment received" },
+          { accountId: accts.CUSTOM_ORDER_INCOME, credit: amount, particulars: "Custom order income" },
+        ],
+      });
+
+      return u;
+    });
+
+    res.status(201).json(mapOrder(updated));
+  } catch (err: unknown) {
+    const e = err as { statusCode?: number; message?: string };
+    if (e.statusCode === 404) return res.status(404).json({ error: e.message });
+    req.log.error({ err }, "Failed to record custom order payment");
     res.status(500).json({ error: "Internal server error" });
   }
 });

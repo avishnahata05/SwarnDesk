@@ -19,7 +19,8 @@ function getAuthHeaders(): Record<string, string> {
 
 interface SettingsForm {
   businessName: string; gstin: string; address: string;
-  mobile: string; email: string; gstRate: number; defaultBranch: string;
+  mobile: string; email: string; gstRate: number; stateCode: string;
+  gstOnExchangeEnabled: boolean; cashTransactionLimit: number; defaultBranch: string;
 }
 
 interface WaConfig {
@@ -62,16 +63,19 @@ export default function Settings() {
         mobile: settings.mobile,
         email: settings.email ?? "",
         gstRate: settings.gstRate,
+        stateCode: settings.stateCode ?? "",
+        gstOnExchangeEnabled: settings.gstOnExchangeEnabled ?? true,
+        cashTransactionLimit: settings.cashTransactionLimit ?? 200000,
         defaultBranch: settings.defaultBranch,
       });
       setWaConfig(prev => ({
-        enabled: (settings as unknown as { whatsappApiEnabled?: boolean }).whatsappApiEnabled ?? false,
-        phoneNumberId: (settings as unknown as { whatsappPhoneNumberId?: string }).whatsappPhoneNumberId ?? "",
+        enabled: settings.whatsappApiEnabled ?? false,
+        phoneNumberId: settings.whatsappPhoneNumberId ?? "",
         accessToken: prev.accessToken, // never overwrite what the user typed; token is not returned by API
       }));
       setLoyaltyConfig({
-        enabled: (settings as unknown as { loyaltyPointsEnabled?: boolean }).loyaltyPointsEnabled ?? true,
-        rate: String((settings as unknown as { loyaltyPointsRate?: number }).loyaltyPointsRate ?? 1000),
+        enabled: settings.loyaltyPointsEnabled ?? true,
+        rate: String(settings.loyaltyPointsRate ?? 1000),
       });
     }
   }, [settings, reset]);
@@ -104,6 +108,9 @@ export default function Settings() {
         mobile: data.mobile,
         email: data.email || null,
         gstRate: parseFloat(String(data.gstRate)),
+        stateCode: data.stateCode || null,
+        gstOnExchangeEnabled: !!data.gstOnExchangeEnabled,
+        cashTransactionLimit: parseFloat(String(data.cashTransactionLimit)) || 200000,
         defaultBranch: data.defaultBranch,
         branches: updatedBranches,
       }
@@ -369,8 +376,8 @@ export default function Settings() {
             </p>
             <div className="grid grid-cols-2 gap-3">
               {[
-                { label: "Gold 22K (₹/10g)", key: "gold22k", placeholder: "e.g. 72500" },
                 { label: "Gold 24K (₹/10g)", key: "gold24k", placeholder: "e.g. 79500" },
+                { label: "Gold 22K (₹/10g)", key: "gold22k", placeholder: "e.g. 72500" },
                 { label: "Gold 18K (₹/10g)", key: "gold18k", placeholder: "e.g. 59400" },
                 { label: "Silver (₹/kg)", key: "silver", placeholder: "e.g. 95000" },
               ].map(({ label, key, placeholder }) => (
@@ -417,6 +424,20 @@ export default function Settings() {
               <label className="text-xs text-muted-foreground mb-1 block">GST Rate (%)</label>
               <Input type="number" step="0.1" {...register("gstRate")} data-testid="input-gst-rate" />
               <p className="text-xs text-muted-foreground mt-1">Standard rate for jewellery is 3%</p>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">GST State Code</label>
+              <Input maxLength={2} placeholder="e.g. 27 (Maharashtra)" {...register("stateCode")} data-testid="input-state-code" />
+              <p className="text-xs text-muted-foreground mt-1">Used to tell intra-state (CGST+SGST) from inter-state (IGST) sales — leave blank to always assume intra-state.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="checkbox" id="gst-on-exchange" className="h-4 w-4" {...register("gstOnExchangeEnabled")} data-testid="checkbox-gst-on-exchange" />
+              <label htmlFor="gst-on-exchange" className="text-xs text-muted-foreground">Net old-gold exchange value out of the taxable base (uncheck to tax the full pre-exchange value instead)</label>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Cash Transaction Limit (₹)</label>
+              <Input type="number" step="1000" {...register("cashTransactionLimit")} data-testid="input-cash-limit" />
+              <p className="text-xs text-muted-foreground mt-1">Same-day cash receipts above this amount are flagged for TCS/Sec. 269ST awareness (informational only).</p>
             </div>
           </CardContent>
         </Card>

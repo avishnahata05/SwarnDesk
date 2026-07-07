@@ -1,4 +1,4 @@
-import type { Loan, LoanItem, Payment, Rates, GirviSettings, Transfer, Branch } from "./types";
+import type { Loan, LoanItem, Payment, Rates, GirviSettings, Transfer, Branch, PartialRelease } from "./types";
 
 function getLiveGirviRate(metalType: string, purity: string, rates: Rates): number {
   if (metalType === "silver") return rates.silver;
@@ -317,6 +317,83 @@ ${!isForfeit ? `<div class="terms"><div class="section-title">Confirmation</div>
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised by ${settings?.shopName || shopName}</div></div>
 </div>
 <div class="footer">This is a computer-generated return voucher. Powered by SwarnDesk Girvi.</div>
+</div></body></html>`;
+
+  openWindow(html, 720, 700);
+}
+
+// ─── Partial release voucher (some, not all, pledged items returned) ──────
+export function openPartialReleaseVoucher(
+  release: PartialRelease, loan: Loan, releasedItems: LoanItem[], remainingItems: LoanItem[],
+  shopName: string, shopAddress: string, shopMobile: string, settings?: GirviSettings,
+) {
+  const totalSettled = release.principalSettled + release.interestSettled;
+  const remainingValue = remainingItems.reduce((s, it) => s + it.estimatedValue, 0);
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+<title>Partial Release Voucher — ${release.releaseNumber}</title>
+<style>${printCss}</style></head><body><div class="page">
+<div class="no-print" style="text-align:right;margin-bottom:16px">
+  <button onclick="window.print()" style="background:#1a3e6e;color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">🖨️ Print Voucher</button>
+</div>
+${shopHeader(settings, shopName, shopAddress, shopMobile)}
+<div class="doc-title">Girvi Partial Release Voucher</div>
+<div class="meta-row">
+  <div class="meta-item"><div class="meta-label">Release Voucher #</div><div class="meta-value">${release.releaseNumber}</div></div>
+  <div class="meta-item"><div class="meta-label">Original Loan #</div><div class="meta-value">${loan.loanNumber}</div></div>
+  <div class="meta-item"><div class="meta-label">Released On</div><div class="meta-value">${fmtDate(release.releaseDate)}</div></div>
+</div>
+<div class="section" style="margin-bottom:12px">
+  <div class="section-title">Customer</div>
+  <div class="field"><span class="field-label">Name</span><span class="field-value">${loan.customerName}</span></div>
+  <div class="field"><span class="field-label">Mobile</span><span class="field-value">${loan.customerMobile}</span></div>
+</div>
+<div class="section" style="margin-bottom:12px">
+  <div class="section-title">Items Released Today</div>
+  <table style="width:100%;border-collapse:collapse;font-size:11px">
+    <thead><tr style="background:#f8f9fa">
+      <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #dee2e6">Item</th>
+      <th style="text-align:center;padding:4px 6px;border-bottom:1px solid #dee2e6">Qty</th>
+      <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #dee2e6">Metal / Purity</th>
+      <th style="text-align:right;padding:4px 6px;border-bottom:1px solid #dee2e6">Gross Wt</th>
+      <th style="text-align:right;padding:4px 6px;border-bottom:1px solid #dee2e6">Est. Value</th>
+    </tr></thead>
+    <tbody>
+      ${releasedItems.map(it => `<tr style="border-bottom:1px solid #f0f0f0">
+        <td style="padding:4px 6px;font-weight:600">${it.itemType}</td>
+        <td style="padding:4px 6px;text-align:center">${it.quantity}</td>
+        <td style="padding:4px 6px">${it.metalType === "silver" ? "Silver" : "Gold"} ${it.purity}</td>
+        <td style="padding:4px 6px;text-align:right">${it.grossWeight.toFixed(3)} g</td>
+        <td style="padding:4px 6px;text-align:right">${fmt(it.estimatedValue)}</td>
+      </tr>`).join("")}
+    </tbody>
+  </table>
+</div>
+<div class="section" style="margin-bottom:12px">
+  <div class="section-title">Settlement Collected Today</div>
+  <div class="field"><span class="field-label">Principal Settled</span><span class="field-value">${fmt(release.principalSettled)}</span></div>
+  <div class="field"><span class="field-label">Interest Settled</span><span class="field-value">${fmt(release.interestSettled)}</span></div>
+  ${release.notes ? `<div class="field"><span class="field-label">Notes</span><span class="field-value" style="max-width:60%">${release.notes}</span></div>` : ""}
+</div>
+<div class="amount-box">
+  <div class="amount-label">Total Settled Today</div>
+  <div class="amount-value">${fmt(totalSettled)}</div>
+</div>
+<div class="section" style="margin-bottom:12px">
+  <div class="section-title">Remaining Pledge (Still Held By Us)</div>
+  <div class="field"><span class="field-label">Items Still Pledged</span><span class="field-value" style="max-width:60%">${loan.itemDescription ?? "—"}</span></div>
+  <div class="field"><span class="field-label">Est. Value of Remaining Items</span><span class="field-value">${fmt(remainingValue)}</span></div>
+  <div class="field"><span class="field-label">Current Principal</span><span class="field-value">${fmt(loan.currentPrincipal)}</span></div>
+  <div class="field"><span class="field-label">Outstanding Interest</span><span class="field-value">${fmt(loan.outstandingInterest)}</span></div>
+  <div class="field" style="font-weight:700"><span class="field-label">Total Due Going Forward</span><span class="field-value">${fmt(loan.totalDue)}</span></div>
+</div>
+<div class="terms"><div class="section-title">Note</div>
+  <p style="font-size:11px;color:#444">The item(s) listed above have been returned to the customer today. The remaining pledged item(s) stay with us as collateral for the balance shown, and continue to accrue interest under loan ${loan.loanNumber}'s original terms.</p>
+</div>
+<div class="sig-row">
+  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Customer Signature</div></div>
+  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised by ${settings?.shopName || shopName}</div></div>
+</div>
+<div class="footer">This is a computer-generated partial release voucher. Powered by SwarnDesk Girvi.</div>
 </div></body></html>`;
 
   openWindow(html, 720, 700);

@@ -17,7 +17,16 @@ export interface BusinessSettings {
   /** @nullable */
   logo: string | null;
   gstRate: number;
+  /** @nullable */
+  stateCode: string | null;
+  gstOnExchangeEnabled: boolean;
+  cashTransactionLimit: number;
   defaultBranch: string;
   branches: string[];
+  whatsappApiEnabled: boolean;
+  whatsappPhoneNumberId: string;
+  hasAccessToken: boolean;
+  loyaltyPointsEnabled: boolean;
+  loyaltyPointsRate: number;
   updatedAt: string;
 }

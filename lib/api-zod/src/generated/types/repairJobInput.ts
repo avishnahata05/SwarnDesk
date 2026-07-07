@@ -17,4 +17,6 @@ export interface RepairJobInput {
   promisedDate: string;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  karigarId?: number | null;
 }

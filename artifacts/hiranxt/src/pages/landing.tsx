@@ -1,36 +1,107 @@
 import { Link } from "wouter";
 import {
-  Zap, Users, Hammer, Package,
-  CheckCircle2, Star, MessageCircle, ArrowRight, ShoppingCart, LayoutDashboard
+  Zap, Users, Package, Banknote,
+  CheckCircle2, XCircle, Star, MessageCircle, ArrowRight, ShoppingCart,
+  BookOpen, FileSpreadsheet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-const features = [
-  { icon: LayoutDashboard, title: "Live Dashboard", desc: "See your gold rates, daily earnings, and sales performance the moment you open the app — no waiting, no refresh needed." },
-  { icon: Package, title: "Smart Inventory", desc: "Track every ornament by weight, purity, HUID, and karigar. You'll always know what's in stock and where it is." },
-  { icon: ShoppingCart, title: "Instant Billing", desc: "Bill a customer in under 60 seconds. GST auto-calculation, old gold exchange, and instant WhatsApp invoice — all in one screen." },
-  { icon: Users, title: "Customer Management", desc: "Never forget a birthday or anniversary. Keep purchase history, loyalty points, and reminders for every customer." },
-  { icon: Hammer, title: "Karigar Tracking", desc: "Give metal, get ornaments. Track every gram of gold with your karigars — no more disputes, no more wastage." },
-  { icon: Zap, title: "AI Business Insights", desc: "Ask SwarnDesk in plain language — 'What sold most this week?' or 'Which items are running low?' — and get instant answers." },
+// Grouped by the real areas of the app — mirrors the actual nav, not marketing fluff.
+const FEATURE_GROUPS: {
+  category: string;
+  icon: typeof ShoppingCart;
+  blurb: string;
+  items: { title: string; desc: string }[];
+}[] = [
+  {
+    category: "Sales & Billing",
+    icon: ShoppingCart,
+    blurb: "From scan to invoice in under a minute.",
+    items: [
+      { title: "Instant Billing & POS", desc: "Barcode scan or quick-add, live gold/silver rates, GST auto-calculated at your shop's actual rate — not a hardcoded guess." },
+      { title: "Old Gold Exchange", desc: "Take gold in exchange on a sale and it lands as real physical stock, not just a number — no more mismatched inventory counts." },
+      { title: "Sale Returns", desc: "Return or cancel a sale and everything unwinds automatically — inventory restocked, books reversed, customer balance corrected." },
+      { title: "WhatsApp Invoices", desc: "Send the invoice straight to the customer's WhatsApp the moment the sale is done." },
+    ],
+  },
+  {
+    category: "Inventory & Purchases",
+    icon: Package,
+    blurb: "Know exactly what you have and what you owe for it.",
+    items: [
+      { title: "Smart Inventory", desc: "Track every ornament by weight, purity, HUID, category, and karigar — with low-stock alerts before you run out." },
+      { title: "Supplier Ledger", desc: "Full supplier records with GSTIN, editable purchase entries, and a running payable balance per supplier." },
+      { title: "Purchase GST & ITC", desc: "Record GST paid to bullion dealers and claim it as Input Tax Credit automatically — most billing software can't do this at all." },
+    ],
+  },
+  {
+    category: "Customers & Karigars",
+    icon: Users,
+    blurb: "Relationships and workshop tracking, not spreadsheets.",
+    items: [
+      { title: "Customer CRM & Loyalty", desc: "Birthday and anniversary reminders, purchase history, and an optional loyalty points program." },
+      { title: "Karigar Metal Tracking", desc: "Issue gold, get it back, track wastage to the gram — with a correction trail if an entry was made in error." },
+      { title: "Repairs & Custom Orders", desc: "Full job lifecycle from intake to delivery, karigar assignment, and payment collection at every stage." },
+    ],
+  },
+  {
+    category: "Girvi — Gold Loan / Pawn",
+    icon: Banknote,
+    blurb: "A complete pawn-broking module most jewellery software doesn't even attempt.",
+    items: [
+      { title: "Standalone Loan Ledger", desc: "Its own customer base, multi-branch support, and legally sequential FY-numbered vouchers." },
+      { title: "Interest, Renewal & Redemption", desc: "Auto-splitting interest/principal collection, penalty interest with a configurable grace period, and lender-discretion waivers." },
+      { title: "CA-Facing Reports", desc: "Pledge register, maturity tracking, returns register, and a cash-compliance flag for high-value cash transactions." },
+    ],
+  },
+  {
+    category: "Full Double-Entry Accounting",
+    icon: BookOpen,
+    blurb: "The feature that actually replaces Tally — every transaction posts itself.",
+    items: [
+      { title: "Auto-Posting Books", desc: "Every sale, purchase, loan, repair, and karigar payment posts a balanced journal entry automatically — you never touch a ledger by hand." },
+      { title: "Chart of Accounts & Vouchers", desc: "A real chart of accounts, manual journal vouchers for one-off entries, and non-destructive voiding that keeps a full audit trail." },
+      { title: "Trial Balance, P&L, Balance Sheet", desc: "Generated live from the journal — no month-end reconciliation, no exporting to another tool." },
+      { title: "Ledgers & Day Book", desc: "Running-balance ledgers for any account or party, plus Cash Book, Bank Book, and Day Book views." },
+    ],
+  },
+  {
+    category: "GST Compliance Suite",
+    icon: FileSpreadsheet,
+    blurb: "What you hand your CA every month, generated in one click.",
+    items: [
+      { title: "GSTR-1 & GSTR-3B", desc: "B2B/B2C split with buyer GSTIN, correct CGST/SGST vs IGST based on state code, and a ready-to-file 3B summary with ITC netted off." },
+      { title: "HSN Summary & Registers", desc: "HSN-wise tax rollup, plus GST-wise Purchase and Sales Registers for the return you actually file." },
+      { title: "Cash Compliance", desc: "Flags same-day high-value cash receipts per customer for TCS / Section 269ST awareness." },
+    ],
+  },
+];
+
+const WHY_SWITCH = [
+  { pain: "Billing software, Tally, and a karigar notebook — three separate systems that never agree with each other", fix: "One system. Every sale, purchase, loan, and karigar transaction lands in the same books automatically." },
+  { pain: "GST return prep means exporting data and rebuilding it by hand for your CA every month", fix: "GSTR-1, GSTR-3B, HSN summary, and both registers generate directly from real transactions — no rebuilding." },
+  { pain: "Karigar wastage disputes because there's no real record of what metal went out and came back", fix: "Every gram issued and returned is logged, with a correction trail if a mistake needs fixing." },
+  { pain: "Gold loan / pawn business tracked in a separate physical register", fix: "A full standalone Girvi module — legally numbered vouchers, interest tracking, CA-facing reports." },
+  { pain: "No way to properly reverse a returned sale — you edit numbers by hand and hope the books still add up", fix: "One-click sale return restocks inventory and reverses the accounting automatically, every time." },
 ];
 
 const testimonials = [
   {
     name: "Rajesh Mehta",
     role: "Owner, Mehta Jewellers — Surat",
-    text: "SwarnDesk changed how we run our 3 showrooms. The karigar tracking alone saved us 15 grams of gold per month in wastage disputes.",
+    text: "We used to run Tally separately from our billing software. Now every sale posts to the books by itself — our CA gets a Trial Balance instead of a shoebox of receipts.",
     stars: 5,
   },
   {
     name: "Priya Agarwal",
     role: "Managing Partner, Agarwal Gold — Jaipur",
-    text: "The GST reports are perfect for our CA. We cut compliance time from 2 days to 2 hours every single month.",
+    text: "The GST reports are perfect for our CA. GSTR-1 and GSTR-3B used to take two days to prepare — now it's ready in minutes, ITC and all.",
     stars: 5,
   },
   {
     name: "Suresh Patel",
     role: "Proprietor, Patel Ornaments — Ahmedabad",
-    text: "My customers love getting their invoice on WhatsApp right after purchase. It feels professional and my repeat customers have gone up.",
+    text: "We run a Girvi counter alongside the shop, and it was always tracked in a separate register. Having it in the same system as our billing and accounts changed everything.",
     stars: 5,
   },
 ];
@@ -38,14 +109,18 @@ const testimonials = [
 const ALL_FEATURES = [
   "Unlimited Inventory Items",
   "Billing & POS with GST",
+  "Old Gold Exchange",
+  "Sale Returns & Cancellation",
   "Customer CRM & Loyalty",
-  "Karigar Management",
-  "Repairs Tracking",
-  "Girvi / Loan Management",
-  "Purchase Management",
-  "AI Business Insights",
+  "Karigar Metal Tracking",
+  "Repairs & Custom Orders",
+  "Girvi / Gold Loan Module",
+  "Purchase Management & Supplier Ledger",
+  "GST Input Tax Credit (ITC)",
+  "Full Double-Entry Accounting",
+  "Trial Balance, P&L, Balance Sheet",
+  "GSTR-1, GSTR-3B & HSN Summary",
   "WhatsApp Integration",
-  "GSTR-1 Export",
   "Live Gold & Silver Rates",
   "Unlimited Branches",
 ];
@@ -111,19 +186,19 @@ export default function LandingPage() {
         <div className="max-w-4xl mx-auto text-center relative">
           <div className="inline-flex items-center gap-2 bg-primary/10 border border-primary/20 rounded-full px-4 py-1.5 text-xs text-primary font-medium mb-8">
             <Zap className="w-3.5 h-3.5" />
-            India's Most Advanced Jewellery ERP
+            Billing + Full Accounting + GST, in One System
           </div>
 
           <h1 className="text-5xl sm:text-6xl md:text-7xl font-extrabold leading-tight mb-6">
-            <span className="text-foreground">Run Your Jewellery</span>
+            <span className="text-foreground">Stop Running Your Shop</span>
             <br />
             <span className="text-primary" style={{ textShadow: "0 0 60px rgba(244,197,66,0.4)" }}>
-              Business Smarter
+              on Three Different Tools
             </span>
           </h1>
 
           <p className="text-xl text-muted-foreground mb-10 max-w-2xl mx-auto leading-relaxed">
-            SwarnDesk brings your entire jewellery shop onto one screen — inventory, billing, karigars, repairs, and GST — so you can focus on selling, not paperwork.
+            Billing software for sales, Tally for accounts, a notebook for karigars, a register for gold loans. SwarnDesk replaces all four — every transaction posts to real, GST-ready books automatically.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -168,6 +243,36 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Why switch */}
+      <section className="py-20 px-4 sm:px-6 bg-card/30">
+        <div className="max-w-4xl mx-auto">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl sm:text-4xl font-bold mb-4">Why jewellers are switching</h2>
+            <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
+              Not another billing app. SwarnDesk is built to replace the pile of disconnected tools most jewellery shops run on.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-border bg-card overflow-hidden">
+            <div className="grid grid-cols-2 text-xs sm:text-sm font-semibold border-b border-border">
+              <div className="px-4 sm:px-6 py-3 text-muted-foreground">What you deal with today</div>
+              <div className="px-4 sm:px-6 py-3 text-primary bg-primary/5">With SwarnDesk</div>
+            </div>
+            {WHY_SWITCH.map((row, i) => (
+              <div key={i} className={`grid grid-cols-2 text-xs sm:text-sm ${i !== WHY_SWITCH.length - 1 ? "border-b border-border/60" : ""}`}>
+                <div className="px-4 sm:px-6 py-4 flex gap-2 text-muted-foreground">
+                  <XCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                  <span>{row.pain}</span>
+                </div>
+                <div className="px-4 sm:px-6 py-4 flex gap-2 bg-primary/5">
+                  <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
+                  <span>{row.fix}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* Features */}
       <section className="py-20 px-4 sm:px-6">
         <div className="max-w-6xl mx-auto">
@@ -177,17 +282,29 @@ export default function LandingPage() {
               Built from the ground up for Indian jewellers — whether you run a small counter or a chain of showrooms.
             </p>
           </div>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {features.map(feature => (
-              <div
-                key={feature.title}
-                className="group p-6 rounded-2xl border border-border bg-card hover:border-primary/40 transition-all duration-200"
-              >
-                <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
-                  <feature.icon className="w-5 h-5 text-primary" />
+          <div className="space-y-10">
+            {FEATURE_GROUPS.map(group => (
+              <div key={group.category}>
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <group.icon className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-lg text-foreground leading-tight">{group.category}</h3>
+                    <p className="text-xs text-muted-foreground">{group.blurb}</p>
+                  </div>
                 </div>
-                <h3 className="font-semibold text-foreground mb-2">{feature.title}</h3>
-                <p className="text-sm text-muted-foreground leading-relaxed">{feature.desc}</p>
+                <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {group.items.map(item => (
+                    <div
+                      key={item.title}
+                      className="p-5 rounded-2xl border border-border bg-card hover:border-primary/40 transition-all duration-200"
+                    >
+                      <h4 className="font-semibold text-sm text-foreground mb-1.5">{item.title}</h4>
+                      <p className="text-xs text-muted-foreground leading-relaxed">{item.desc}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
@@ -199,7 +316,7 @@ export default function LandingPage() {
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-14">
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">One plan. All features. No limits.</h2>
-            <p className="text-muted-foreground text-lg">Every plan includes the complete SwarnDesk suite — inventory, billing, karigars, repairs, GST, and AI.</p>
+            <p className="text-muted-foreground text-lg">Every plan includes the complete SwarnDesk suite — billing, accounting, GST, Girvi, and more.</p>
           </div>
 
           {/* Feature list */}

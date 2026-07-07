@@ -47,4 +47,49 @@ router.post("/", async (req, res) => {
   }
 });
 
+router.patch("/:id", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const data = req.body;
+    const updateData: Record<string, unknown> = {};
+    if (data.name !== undefined) {
+      const name = String(data.name).trim();
+      if (!name) return res.status(400).json({ error: "Name cannot be empty" });
+      updateData.name = name;
+    }
+    if (data.mobile !== undefined) {
+      const mobile = String(data.mobile).trim();
+      if (!mobile) return res.status(400).json({ error: "Mobile cannot be empty" });
+      updateData.mobile = mobile;
+    }
+    if (data.address !== undefined) updateData.address = data.address ? String(data.address).trim() || null : null;
+    if (data.gstin !== undefined) updateData.gstin = data.gstin ? String(data.gstin).trim() || null : null;
+    if (data.email !== undefined) updateData.email = data.email ? String(data.email).trim() || null : null;
+    const [supplier] = await db.update(suppliersTable).set(updateData)
+      .where(and(eq(suppliersTable.id, id), eq(suppliersTable.userId, userId)))
+      .returning();
+    if (!supplier) return res.status(404).json({ error: "Not found" });
+    res.json(mapSupplier(supplier));
+  } catch (err) {
+    req.log.error({ err }, "Failed to update supplier");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.delete("/:id", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const result = await db.delete(suppliersTable).where(and(eq(suppliersTable.id, id), eq(suppliersTable.userId, userId))).returning({ id: suppliersTable.id });
+    if (result.length === 0) return res.status(404).json({ error: "Not found" });
+    res.status(204).send();
+  } catch (err) {
+    req.log.error({ err }, "Failed to delete supplier");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;

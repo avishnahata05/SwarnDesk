@@ -197,4 +197,18 @@ router.get("/:id/statement", async (req, res) => {
   }
 });
 
+router.delete("/:id", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const result = await db.delete(girviCustomersTable).where(and(eq(girviCustomersTable.id, id), eq(girviCustomersTable.userId, userId))).returning({ id: girviCustomersTable.id });
+    if (result.length === 0) return res.status(404).json({ error: "Not found" });
+    res.status(204).send();
+  } catch (err) {
+    req.log.error({ err }, "Failed to delete girvi customer");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;

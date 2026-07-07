@@ -1,9 +1,22 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { karigarsTable, metalIssuesTable, metalReturnsTable } from "@workspace/db";
-import { eq, and, sql } from "drizzle-orm";
+import { karigarsTable, metalIssuesTable, metalReturnsTable, karigarPaymentTransactionsTable } from "@workspace/db";
+import { eq, and, sql, desc } from "drizzle-orm";
+import { postJournalEntry, getOrCreateDefaultAccounts, cashOrBankKey, safeFloat } from "./accounting-helpers";
 
 const router = Router();
+
+function mapTransaction(t: typeof karigarPaymentTransactionsTable.$inferSelect) {
+  return {
+    id: t.id,
+    karigarId: t.karigarId,
+    karigarName: t.karigarName,
+    amount: safeFloat(t.amount),
+    paymentMode: t.paymentMode,
+    paidAt: t.paidAt.toISOString(),
+    notes: t.notes,
+  };
+}
 
 function mapKarigar(k: typeof karigarsTable.$inferSelect) {
   return {
@@ -29,6 +42,7 @@ function mapIssue(i: typeof metalIssuesTable.$inferSelect) {
     purity: i.purity,
     issueDate: i.issueDate.toISOString(),
     notes: i.notes,
+    voidedAt: i.voidedAt ? i.voidedAt.toISOString() : null,
   };
 }
 
@@ -42,6 +56,7 @@ function mapReturn(r: typeof metalReturnsTable.$inferSelect) {
     wastagePercent: parseFloat(r.wastagePercent),
     returnDate: r.returnDate.toISOString(),
     notes: r.notes,
+    voidedAt: r.voidedAt ? r.voidedAt.toISOString() : null,
   };
 }
 
@@ -195,6 +210,153 @@ router.post("/:id/return-metal", async (req, res) => {
     res.status(201).json(mapReturn(ret));
   } catch (err) {
     req.log.error({ err }, "Failed to return metal");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /:id/issues/:issueId/void — reverse a mistaken metal-issue entry (weight adjustment
+// only; the log row is kept and flagged, not deleted, for an auditable correction trail).
+router.post("/:id/issues/:issueId/void", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const karigarId = parseInt(req.params.id);
+    const issueId = parseInt(req.params.issueId);
+    if (isNaN(karigarId) || isNaN(issueId)) return res.status(400).json({ error: "Invalid id" });
+
+    const [issue] = await db.select().from(metalIssuesTable)
+      .where(and(eq(metalIssuesTable.id, issueId), eq(metalIssuesTable.karigarId, karigarId), eq(metalIssuesTable.userId, userId)));
+    if (!issue) return res.status(404).json({ error: "Not found" });
+    if (issue.voidedAt) return res.status(400).json({ error: "Already voided" });
+
+    const weight = safeFloat(issue.weight);
+    await db.transaction(async (tx) => {
+      await tx.update(metalIssuesTable).set({ voidedAt: new Date() })
+        .where(and(eq(metalIssuesTable.id, issueId), eq(metalIssuesTable.userId, userId)));
+      const column = issue.metalType === "gold" ? "pending_gold_weight" : "pending_silver_weight";
+      await tx.execute(sql`UPDATE karigars SET ${sql.raw(column)} = GREATEST(0, ${sql.raw(column)} - ${weight}::numeric) WHERE id = ${karigarId} AND user_id = ${userId}`);
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "Failed to void metal issue");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /:id/returns/:returnId/void — reverse a mistaken metal-return entry.
+router.post("/:id/returns/:returnId/void", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const karigarId = parseInt(req.params.id);
+    const returnId = parseInt(req.params.returnId);
+    if (isNaN(karigarId) || isNaN(returnId)) return res.status(400).json({ error: "Invalid id" });
+
+    const [ret] = await db.select().from(metalReturnsTable)
+      .where(and(eq(metalReturnsTable.id, returnId), eq(metalReturnsTable.karigarId, karigarId), eq(metalReturnsTable.userId, userId)));
+    if (!ret) return res.status(404).json({ error: "Not found" });
+    if (ret.voidedAt) return res.status(400).json({ error: "Already voided" });
+
+    const issuedWeight = safeFloat(ret.issuedWeight);
+    await db.transaction(async (tx) => {
+      await tx.update(metalReturnsTable).set({ voidedAt: new Date() })
+        .where(and(eq(metalReturnsTable.id, returnId), eq(metalReturnsTable.userId, userId)));
+      // The return had decremented pending weight by the full issued amount — voiding it
+      // puts that weight back into the karigar's pending balance.
+      const column = ret.metalType === "gold" ? "pending_gold_weight" : "pending_silver_weight";
+      await tx.execute(sql`UPDATE karigars SET ${sql.raw(column)} = ${sql.raw(column)} + ${issuedWeight}::numeric WHERE id = ${karigarId} AND user_id = ${userId}`);
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "Failed to void metal return");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /:id/payments — wage payment history for a karigar
+router.get("/:id/payments", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const txns = await db.select().from(karigarPaymentTransactionsTable)
+      .where(and(eq(karigarPaymentTransactionsTable.karigarId, id), eq(karigarPaymentTransactionsTable.userId, userId)))
+      .orderBy(desc(karigarPaymentTransactionsTable.paidAt));
+    res.json(txns.map(mapTransaction));
+  } catch (err) {
+    req.log.error({ err }, "Failed to get karigar payment history");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /:id/payments — pay a karigar's wages
+router.post("/:id/payments", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const amount = safeFloat(req.body.amount);
+    if (!isFinite(amount) || amount <= 0) return res.status(400).json({ error: "Invalid payment amount" });
+    const allowedModes = ["cash", "upi", "card", "bank"];
+    const paymentMode = allowedModes.includes(req.body.paymentMode) ? req.body.paymentMode : "cash";
+    const notes = req.body.notes ? String(req.body.notes).slice(0, 500) : null;
+
+    const accts = await getOrCreateDefaultAccounts(userId);
+
+    const karigar = await db.transaction(async (tx) => {
+      const [k] = await tx.select().from(karigarsTable)
+        .where(and(eq(karigarsTable.id, id), eq(karigarsTable.userId, userId)));
+      if (!k) throw Object.assign(new Error("Karigar not found"), { statusCode: 404 });
+
+      await tx.insert(karigarPaymentTransactionsTable).values({
+        userId,
+        karigarId: id,
+        karigarName: k.name,
+        amount: amount.toString(),
+        paymentMode,
+        notes,
+      });
+
+      const [updated] = await tx.update(karigarsTable)
+        .set({ totalWagesPaid: sql`${karigarsTable.totalWagesPaid} + ${amount.toFixed(2)}::numeric` })
+        .where(and(eq(karigarsTable.id, id), eq(karigarsTable.userId, userId)))
+        .returning();
+
+      await postJournalEntry(tx, {
+        userId,
+        voucherType: "payment",
+        narration: `Wage payment to ${k.name}`,
+        sourceModule: "karigars",
+        sourceId: id,
+        lines: [
+          { accountId: accts.KARIGAR_WAGES_EXPENSE, debit: amount, partyType: "karigar", partyId: id, particulars: "Wages paid" },
+          { accountId: accts[cashOrBankKey(paymentMode)], credit: amount, particulars: "Payment made" },
+        ],
+      });
+
+      return updated;
+    });
+
+    res.status(201).json(mapKarigar(karigar));
+  } catch (err: unknown) {
+    const e = err as { statusCode?: number; message?: string };
+    if (e.statusCode === 404) return res.status(404).json({ error: e.message });
+    req.log.error({ err }, "Failed to record karigar payment");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.delete("/:id", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const result = await db.delete(karigarsTable).where(and(eq(karigarsTable.id, id), eq(karigarsTable.userId, userId))).returning({ id: karigarsTable.id });
+    if (result.length === 0) return res.status(404).json({ error: "Not found" });
+    res.status(204).send();
+  } catch (err) {
+    req.log.error({ err }, "Failed to delete karigar");
     res.status(500).json({ error: "Internal server error" });
   }
 });

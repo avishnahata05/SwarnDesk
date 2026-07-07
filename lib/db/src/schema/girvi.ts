@@ -32,6 +32,7 @@ export const girviSettingsTable = pgTable("girvi_settings", {
   receiptPrefix: text("receipt_prefix").notNull().default("GRV"),
   returnPrefix: text("return_prefix").notNull().default("RTN"),
   transferPrefix: text("transfer_prefix").notNull().default("TRF"),
+  partialReleasePrefix: text("partial_release_prefix").notNull().default("PRL"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
@@ -86,7 +87,7 @@ export const girviCustomersTable = pgTable("girvi_customers", {
 export const girviLoansTable = pgTable("girvi_loans", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull().default(0),
-  loanNumber: text("loan_number").notNull().unique(),
+  loanNumber: text("loan_number").notNull(),
   branchId: integer("branch_id"), // pledge/origin branch
   customerId: integer("customer_id"), // -> girviCustomersTable.id (nullable for pre-existing rows)
   // Snapshot of customer details as they were at pledge time — a loan always
@@ -129,7 +130,10 @@ export const girviLoansTable = pgTable("girvi_loans", {
   index("girvi_user_status_idx").on(t.userId, t.status),
   index("girvi_user_due_idx").on(t.userId, t.dueDate),
   index("girvi_mobile_idx").on(t.customerMobile),
-  index("girvi_loan_num_idx").on(t.loanNumber),
+  // Composite, not global — loan numbers are only guaranteed unique within one shop
+  // (userId). A global unique() here let two different shops' first loan of a
+  // financial year collide on the same number and 500.
+  uniqueIndex("girvi_loan_num_idx").on(t.userId, t.loanNumber),
   index("girvi_customer_idx").on(t.customerId),
 ]);
 
@@ -148,6 +152,7 @@ export const girviLoanItemsTable = pgTable("girvi_loan_items", {
   notes: text("notes"), // free-form identification notes (no photo capture in this pass)
   status: text("status").notNull().default("pledged"), // pledged | returned | transferred | forfeited
   currentBranchId: integer("current_branch_id"), // defaults to the loan's branchId; moved by transfers
+  returnedAt: timestamp("returned_at"), // set when status flips to returned/forfeited (partial release, redemption, or forfeiture)
 }, (t) => [
   index("girvi_item_loan_idx").on(t.loanId),
   index("girvi_item_user_idx").on(t.userId),
@@ -178,7 +183,7 @@ export const girviPaymentsTable = pgTable("girvi_payments", {
 export const girviTransfersTable = pgTable("girvi_transfers", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull().default(0),
-  transferNumber: text("transfer_number").notNull().unique(),
+  transferNumber: text("transfer_number").notNull(),
   loanId: integer("loan_id").notNull(),
   fromBranchId: integer("from_branch_id"),
   toBranchId: integer("to_branch_id"),
@@ -194,6 +199,7 @@ export const girviTransfersTable = pgTable("girvi_transfers", {
 }, (t) => [
   index("girvi_transfer_user_idx").on(t.userId),
   index("girvi_transfer_loan_idx").on(t.loanId),
+  uniqueIndex("girvi_transfer_num_idx").on(t.userId, t.transferNumber),
 ]);
 
 // Which loan items were included in a given transfer (supports partial-item transfers)
@@ -206,6 +212,36 @@ export const girviTransferItemsTable = pgTable("girvi_transfer_items", {
   index("girvi_transfer_item_transfer_idx").on(t.transferId),
 ]);
 
+// ─── Partial release: return a subset of a loan's pledged items while the ────
+// loan stays active for the rest, against a proportional (but lender-
+// overridable) paydown. Its own numbered voucher, like return/transfer.
+export const girviPartialReleasesTable = pgTable("girvi_partial_releases", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(0),
+  releaseNumber: text("release_number").notNull(),
+  loanId: integer("loan_id").notNull(),
+  releaseDate: timestamp("release_date").notNull().defaultNow(),
+  itemsDescription: text("items_description"), // denormalized snapshot, same pattern as girviLoansTable.itemDescription
+  principalSettled: numeric("principal_settled", { precision: 12, scale: 2 }).notNull().default("0"),
+  interestSettled: numeric("interest_settled", { precision: 12, scale: 2 }).notNull().default("0"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("girvi_partial_release_user_idx").on(t.userId),
+  index("girvi_partial_release_loan_idx").on(t.loanId),
+  uniqueIndex("girvi_partial_release_num_idx").on(t.userId, t.releaseNumber),
+]);
+
+// Which loan items were returned in a given partial release
+export const girviPartialReleaseItemsTable = pgTable("girvi_partial_release_items", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(0),
+  releaseId: integer("release_id").notNull(),
+  loanItemId: integer("loan_item_id").notNull(),
+}, (t) => [
+  index("girvi_partial_release_item_release_idx").on(t.releaseId),
+]);
+
 export const insertGirviSettingsSchema = createInsertSchema(girviSettingsTable).omit({ id: true, updatedAt: true });
 export const insertGirviBranchSchema = createInsertSchema(girviBranchesTable).omit({ id: true, createdAt: true });
 export const insertGirviCustomerSchema = createInsertSchema(girviCustomersTable).omit({ id: true, createdAt: true, updatedAt: true });
@@ -213,6 +249,7 @@ export const insertGirviLoanSchema = createInsertSchema(girviLoansTable).omit({ 
 export const insertGirviPaymentSchema = createInsertSchema(girviPaymentsTable).omit({ id: true, createdAt: true });
 export const insertGirviLoanItemSchema = createInsertSchema(girviLoanItemsTable).omit({ id: true });
 export const insertGirviTransferSchema = createInsertSchema(girviTransfersTable).omit({ id: true, createdAt: true });
+export const insertGirviPartialReleaseSchema = createInsertSchema(girviPartialReleasesTable).omit({ id: true, createdAt: true });
 
 export type InsertGirviSettings = z.infer<typeof insertGirviSettingsSchema>;
 export type InsertGirviBranch = z.infer<typeof insertGirviBranchSchema>;
@@ -221,6 +258,7 @@ export type InsertGirviLoan = z.infer<typeof insertGirviLoanSchema>;
 export type InsertGirviPayment = z.infer<typeof insertGirviPaymentSchema>;
 export type InsertGirviLoanItem = z.infer<typeof insertGirviLoanItemSchema>;
 export type InsertGirviTransfer = z.infer<typeof insertGirviTransferSchema>;
+export type InsertGirviPartialRelease = z.infer<typeof insertGirviPartialReleaseSchema>;
 
 export type GirviSettings = typeof girviSettingsTable.$inferSelect;
 export type GirviBranch = typeof girviBranchesTable.$inferSelect;
@@ -230,3 +268,5 @@ export type GirviPayment = typeof girviPaymentsTable.$inferSelect;
 export type GirviLoanItem = typeof girviLoanItemsTable.$inferSelect;
 export type GirviTransfer = typeof girviTransfersTable.$inferSelect;
 export type GirviTransferItem = typeof girviTransferItemsTable.$inferSelect;
+export type GirviPartialRelease = typeof girviPartialReleasesTable.$inferSelect;
+export type GirviPartialReleaseItem = typeof girviPartialReleaseItemsTable.$inferSelect;

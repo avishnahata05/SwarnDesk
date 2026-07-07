@@ -18,9 +18,22 @@ export interface Purchase {
   fineWeight: number;
   ratePerGram: number;
   totalAmount: number;
+  paidAmount: number;
+  balanceAmount: number;
+  paymentMode: string;
+  /** @nullable */
+  taxableValue: number | null;
+  /** @nullable */
+  gstRate: number | null;
+  /** @nullable */
+  gstAmount: number | null;
+  /** @nullable */
+  hsnCode: string | null;
   invoiceNumber: string;
   purchaseDate: string;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  cancelledAt: string | null;
   createdAt: string;
 }

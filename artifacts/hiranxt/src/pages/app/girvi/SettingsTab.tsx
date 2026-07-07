@@ -141,11 +141,12 @@ export default function SettingsTab({ branches, onBranchesChanged }: { branches:
 
       <Card className="border-border">
         <CardHeader><CardTitle className="text-sm">Voucher Numbering Prefixes</CardTitle></CardHeader>
-        <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <CardContent className="grid grid-cols-1 sm:grid-cols-4 gap-3">
           <div><label className={lbl}>Loan Receipt Prefix</label><input className={inp} value={settings.receiptPrefix} onChange={e => set("receiptPrefix", e.target.value.toUpperCase())} /></div>
           <div><label className={lbl}>Return Voucher Prefix</label><input className={inp} value={settings.returnPrefix} onChange={e => set("returnPrefix", e.target.value.toUpperCase())} /></div>
           <div><label className={lbl}>Transfer Voucher Prefix</label><input className={inp} value={settings.transferPrefix} onChange={e => set("transferPrefix", e.target.value.toUpperCase())} /></div>
-          <p className="sm:col-span-3 text-xs text-muted-foreground">Numbers are sequential per financial year, e.g. {settings.receiptPrefix}/2026-27/0001, and never reused.</p>
+          <div><label className={lbl}>Partial Release Prefix</label><input className={inp} value={settings.partialReleasePrefix} onChange={e => set("partialReleasePrefix", e.target.value.toUpperCase())} /></div>
+          <p className="sm:col-span-4 text-xs text-muted-foreground">Numbers are sequential per financial year, e.g. {settings.receiptPrefix}/2026-27/0001, and never reused.</p>
         </CardContent>
       </Card>
 

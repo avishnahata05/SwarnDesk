@@ -142,6 +142,8 @@ export interface Customer {
   /** @nullable */
   gstin?: string | null;
   /** @nullable */
+  stateCode?: string | null;
+  /** @nullable */
   notes?: string | null;
   createdAt: string;
 }
@@ -160,6 +162,8 @@ export interface CustomerInput {
   /** @nullable */
   gstin?: string | null;
   /** @nullable */
+  stateCode?: string | null;
+  /** @nullable */
   notes?: string | null;
 }
 
@@ -176,6 +180,8 @@ export interface CustomerUpdate {
   anniversary?: string | null;
   /** @nullable */
   gstin?: string | null;
+  /** @nullable */
+  stateCode?: string | null;
   /** @nullable */
   notes?: string | null;
 }
@@ -413,6 +419,120 @@ export interface RepairJobUpdate {
   karigarId?: number | null;
 }
 
+export interface CustomOrder {
+  id: number;
+  orderNumber: string;
+  /** @nullable */
+  customerId: number | null;
+  customerName: string;
+  customerMobile: string;
+  itemType: string;
+  /** @nullable */
+  description: string | null;
+  metalType: string;
+  purity: string;
+  /** @nullable */
+  targetWeight: number | null;
+  /** @nullable */
+  estimatedPrice: number | null;
+  /** @nullable */
+  agreedPrice: number | null;
+  advancePaid: number;
+  /** pending, karigar_assigned, in_progress, karigar_returned, ready, delivered, cancelled */
+  status: string;
+  /** @nullable */
+  karigarId: number | null;
+  /** @nullable */
+  karigarName: string | null;
+  /** @nullable */
+  metalIssuedWeight: number | null;
+  /** @nullable */
+  metalIssuedDate: string | null;
+  /** @nullable */
+  finishedWeight: number | null;
+  /** @nullable */
+  wastageWeight: number | null;
+  /** @nullable */
+  karigarReturnDate: string | null;
+  /** @nullable */
+  karigarWages: number | null;
+  /** @nullable */
+  karigarNotes: string | null;
+  dueDate: string;
+  /** @nullable */
+  deliveryDate: string | null;
+  /** @nullable */
+  finalPrice: number | null;
+  /** @nullable */
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface CustomOrderInput {
+  /** @nullable */
+  customerId?: number | null;
+  customerName: string;
+  customerMobile: string;
+  itemType: string;
+  /** @nullable */
+  description?: string | null;
+  metalType: string;
+  purity: string;
+  /** @nullable */
+  targetWeight?: number | null;
+  /** @nullable */
+  estimatedPrice?: number | null;
+  /** @nullable */
+  agreedPrice?: number | null;
+  advancePaid?: number;
+  dueDate: string;
+  /** @nullable */
+  notes?: string | null;
+}
+
+export interface CustomOrderUpdate {
+  customerName?: string;
+  customerMobile?: string;
+  itemType?: string;
+  /** @nullable */
+  description?: string | null;
+  metalType?: string;
+  purity?: string;
+  /** @nullable */
+  targetWeight?: number | null;
+  /** @nullable */
+  estimatedPrice?: number | null;
+  /** @nullable */
+  agreedPrice?: number | null;
+  advancePaid?: number;
+  status?: string;
+  /** @nullable */
+  karigarId?: number | null;
+  /** @nullable */
+  karigarName?: string | null;
+  /** @nullable */
+  metalIssuedWeight?: number | null;
+  /** @nullable */
+  metalIssuedDate?: string | null;
+  /** @nullable */
+  finishedWeight?: number | null;
+  /** @nullable */
+  wastageWeight?: number | null;
+  /** @nullable */
+  karigarReturnDate?: string | null;
+  /** @nullable */
+  karigarWages?: number | null;
+  /** @nullable */
+  karigarNotes?: string | null;
+  dueDate?: string;
+  /** @nullable */
+  deliveryDate?: string | null;
+  /** @nullable */
+  finalPrice?: number | null;
+  /** @nullable */
+  notes?: string | null;
+}
+
 export interface Purchase {
   id: number;
   /** @nullable */
@@ -425,10 +545,23 @@ export interface Purchase {
   fineWeight: number;
   ratePerGram: number;
   totalAmount: number;
+  paidAmount: number;
+  balanceAmount: number;
+  paymentMode: string;
+  /** @nullable */
+  taxableValue: number | null;
+  /** @nullable */
+  gstRate: number | null;
+  /** @nullable */
+  gstAmount: number | null;
+  /** @nullable */
+  hsnCode: string | null;
   invoiceNumber: string;
   purchaseDate: string;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  cancelledAt: string | null;
   createdAt: string;
 }
 
@@ -443,7 +576,32 @@ export interface PurchaseInput {
   fineWeight: number;
   ratePerGram: number;
   totalAmount: number;
+  paidAmount?: number;
+  paymentMode?: string;
+  gstRate?: number;
+  hsnCode?: string;
   purchaseDate: string;
+  /** @nullable */
+  notes?: string | null;
+}
+
+export interface PurchaseUpdate {
+  /** @nullable */
+  supplierId?: number | null;
+  supplierName?: string;
+  metalType?: string;
+  purity?: string;
+  grossWeight?: number;
+  netWeight?: number;
+  fineWeight?: number;
+  ratePerGram?: number;
+  totalAmount?: number;
+  paidAmount?: number;
+  paymentMode?: string;
+  /** @nullable */
+  gstRate?: number | null;
+  hsnCode?: string;
+  purchaseDate?: string;
   /** @nullable */
   notes?: string | null;
 }
@@ -483,8 +641,17 @@ export interface BusinessSettings {
   /** @nullable */
   logo: string | null;
   gstRate: number;
+  /** @nullable */
+  stateCode: string | null;
+  gstOnExchangeEnabled: boolean;
+  cashTransactionLimit: number;
   defaultBranch: string;
   branches: string[];
+  whatsappApiEnabled: boolean;
+  whatsappPhoneNumberId: string;
+  hasAccessToken: boolean;
+  loyaltyPointsEnabled: boolean;
+  loyaltyPointsRate: number;
   updatedAt: string;
 }
 
@@ -498,8 +665,17 @@ export interface BusinessSettingsInput {
   /** @nullable */
   logo?: string | null;
   gstRate?: number;
+  /** @nullable */
+  stateCode?: string | null;
+  gstOnExchangeEnabled?: boolean;
+  cashTransactionLimit?: number;
   defaultBranch?: string;
   branches?: string[];
+  whatsappApiEnabled?: boolean;
+  whatsappPhoneNumberId?: string;
+  whatsappAccessToken?: string;
+  loyaltyPointsEnabled?: boolean;
+  loyaltyPointsRate?: number;
 }
 
 export type ListInventoryItemsParams = {
@@ -522,123 +698,7 @@ export type ListRepairsParams = {
 status?: string;
 };
 
-export interface CustomOrder {
-  id: number;
-  orderNumber: string;
-  /** @nullable */
-  customerId?: number | null;
-  customerName: string;
-  customerMobile: string;
-  itemType: string;
-  /** @nullable */
-  description?: string | null;
-  metalType: string;
-  purity: string;
-  /** @nullable */
-  targetWeight?: number | null;
-  /** @nullable */
-  estimatedPrice?: number | null;
-  /** @nullable */
-  agreedPrice?: number | null;
-  advancePaid: number;
-  /** pending | karigar_assigned | in_progress | karigar_returned | ready | delivered | cancelled */
-  status: string;
-  /** @nullable */
-  karigarId?: number | null;
-  /** @nullable */
-  karigarName?: string | null;
-  /** @nullable */
-  metalIssuedWeight?: number | null;
-  /** @nullable */
-  metalIssuedDate?: string | null;
-  /** @nullable */
-  finishedWeight?: number | null;
-  /** @nullable */
-  wastageWeight?: number | null;
-  /** @nullable */
-  karigarReturnDate?: string | null;
-  /** @nullable */
-  karigarWages?: number | null;
-  /** @nullable */
-  karigarNotes?: string | null;
-  dueDate: string;
-  /** @nullable */
-  deliveryDate?: string | null;
-  /** @nullable */
-  finalPrice?: number | null;
-  /** @nullable */
-  notes?: string | null;
-  createdAt: string;
-}
-
-export interface CustomOrderInput {
-  /** @nullable */
-  customerId?: number | null;
-  customerName: string;
-  customerMobile: string;
-  itemType: string;
-  /** @nullable */
-  description?: string | null;
-  metalType: string;
-  purity: string;
-  /** @nullable */
-  targetWeight?: number | null;
-  /** @nullable */
-  estimatedPrice?: number | null;
-  /** @nullable */
-  agreedPrice?: number | null;
-  /** @nullable */
-  advancePaid?: number | null;
-  dueDate: string;
-  /** @nullable */
-  notes?: string | null;
-}
-
-export interface CustomOrderUpdate {
-  customerName?: string;
-  customerMobile?: string;
-  itemType?: string;
-  /** @nullable */
-  description?: string | null;
-  metalType?: string;
-  purity?: string;
-  /** @nullable */
-  targetWeight?: number | null;
-  /** @nullable */
-  estimatedPrice?: number | null;
-  /** @nullable */
-  agreedPrice?: number | null;
-  /** @nullable */
-  advancePaid?: number | null;
-  status?: string;
-  /** @nullable */
-  karigarId?: number | null;
-  /** @nullable */
-  karigarName?: string | null;
-  /** @nullable */
-  metalIssuedWeight?: number | null;
-  /** @nullable */
-  metalIssuedDate?: string | null;
-  /** @nullable */
-  finishedWeight?: number | null;
-  /** @nullable */
-  wastageWeight?: number | null;
-  /** @nullable */
-  karigarReturnDate?: string | null;
-  /** @nullable */
-  karigarWages?: number | null;
-  /** @nullable */
-  karigarNotes?: string | null;
-  dueDate?: string;
-  /** @nullable */
-  deliveryDate?: string | null;
-  /** @nullable */
-  finalPrice?: number | null;
-  /** @nullable */
-  notes?: string | null;
-}
-
 export type ListCustomOrdersParams = {
-  status?: string;
+status?: string;
 };
 

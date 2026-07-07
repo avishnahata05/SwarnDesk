@@ -17,6 +17,10 @@ export interface PurchaseInput {
   fineWeight: number;
   ratePerGram: number;
   totalAmount: number;
+  paidAmount?: number;
+  paymentMode?: string;
+  gstRate?: number;
+  hsnCode?: string;
   purchaseDate: string;
   /** @nullable */
   notes?: string | null;

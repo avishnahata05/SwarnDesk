@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { salesTable, saleLineItemsTable, inventoryItemsTable, customersTable, paymentTransactionsTable, businessSettingsTable } from "@workspace/db";
+import { salesTable, saleLineItemsTable, inventoryItemsTable, customersTable, paymentTransactionsTable, businessSettingsTable, saleReturnsTable, journalVouchersTable } from "@workspace/db";
 import { eq, and, gte, lte, sql, desc, inArray } from "drizzle-orm";
+import { postJournalEntry, getOrCreateDefaultAccounts, cashOrBankKey, nextVoucherNumber, reverseVoucher, safeFloat } from "./accounting-helpers";
 
 const router = Router();
 
@@ -21,6 +22,7 @@ function mapSale(s: typeof salesTable.$inferSelect) {
     exchangeGoldValue: parseFloat(s.exchangeGoldValue) || 0,
     paymentMode: s.paymentMode,
     paymentStatus: s.paymentStatus,
+    status: s.status,
     invoiceNumber: s.invoiceNumber,
     saleDate: s.saleDate.toISOString(),
     notes: s.notes,
@@ -39,14 +41,6 @@ function mapTransaction(t: typeof paymentTransactionsTable.$inferSelect) {
     paidAt: t.paidAt.toISOString(),
     notes: t.notes,
   };
-}
-
-function generateInvoiceNumber() {
-  const now = new Date();
-  const year = now.getFullYear().toString().slice(-2);
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const rand = Math.floor(Math.random() * 900000) + 100000;
-  return `SD${year}${month}${rand}`;
 }
 
 router.get("/stats/by-category", async (req, res) => {
@@ -151,7 +145,10 @@ router.post("/", async (req, res) => {
     if (!data.customerName?.trim()) return res.status(400).json({ error: "Customer name is required" });
     if (!isFinite(totalAmount) || totalAmount < 0) return res.status(400).json({ error: "Invalid total amount" });
 
-    const invoiceNumber = generateInvoiceNumber();
+    // Atomic, gap-free, per-shop sequential numbering — the old scheme (SD + YYMM +
+    // random 6 digits) had no DB-level uniqueness guarantee and could theoretically
+    // collide within the same shop/month.
+    const invoiceNumber = await nextVoucherNumber(userId, "sale", "SD");
     const items: Array<{
       inventoryItemId: number; itemName: string; quantity: number;
       unitPrice: number; metalRate: number; goldWeight: number;
@@ -179,6 +176,7 @@ router.post("/", async (req, res) => {
     }).from(businessSettingsTable).where(eq(businessSettingsTable.userId, userId)).orderBy(desc(businessSettingsTable.id)).limit(1);
     const loyaltyEnabled = loyaltySettings?.loyaltyPointsEnabled ?? true;
     const loyaltyRate = (loyaltySettings ? parseFloat(loyaltySettings.loyaltyPointsRate) : NaN) || 1000;
+    const accts = await getOrCreateDefaultAccounts(userId);
 
     const sale = await db.transaction(async (tx) => {
       // 1. Lock inventory rows and check stock atomically
@@ -281,6 +279,50 @@ router.post("/", async (req, res) => {
           notes: "Initial payment at time of sale",
         });
       }
+
+      // 5b. Old gold taken in exchange becomes real physical stock, not just an accounting
+      // entry — without this, the books show "Inventory-Gold" increasing while the
+      // inventory_items list (what the shop floor actually sees) never reflects it.
+      const exchangeWeight = Math.max(0, parseFloat(data.exchangeGoldWeight) || 0);
+      const exchangeValue = Math.max(0, parseFloat(data.exchangeGoldValue) || 0);
+      if (exchangeWeight > 0) {
+        await tx.insert(inventoryItemsTable).values({
+          userId,
+          name: `Old Gold — Exchanged (Invoice ${invoiceNumber})`,
+          category: "old_gold",
+          purity: data.exchangePurity ? String(data.exchangePurity) : "22K",
+          grossWeight: exchangeWeight.toFixed(3),
+          netWeight: exchangeWeight.toFixed(3),
+          makingCharges: "0",
+          metalRate: (exchangeValue / exchangeWeight).toFixed(2),
+          totalValue: exchangeValue.toFixed(2),
+          quantity: 1,
+        });
+      }
+
+      // 6. Post the journal entry: Dr [Cash/Bank] (cash received) + Dr Old Gold Stock
+      // (in-kind exchange) + Dr Accounts Receivable (balance owed) = Cr Sales Revenue
+      // (net of GST) + Cr GST Payable. totalAmount is already net of the exchange value,
+      // so cash + gold + AR sums back to totalAmount.
+      const goldPortion = Math.max(0, parseFloat(data.exchangeGoldValue) || 0);
+      const cashPortion = Math.max(0, Math.min(paidAmount, totalAmount - goldPortion));
+      const arPortion = Math.max(0, totalAmount - cashPortion - goldPortion);
+      const gstAmount = Math.max(0, parseFloat(data.gstAmount) || 0);
+      await postJournalEntry(tx, {
+        userId,
+        voucherDate: newSale.saleDate,
+        voucherType: "sales",
+        narration: `Sale ${invoiceNumber} to ${data.customerName.trim()}`,
+        sourceModule: "sales",
+        sourceId: newSale.id,
+        lines: [
+          { accountId: accts[cashOrBankKey(data.paymentMode)], debit: cashPortion, particulars: "Cash/bank received" },
+          { accountId: accts.INVENTORY_GOLD, debit: goldPortion, particulars: "Old gold taken in exchange" },
+          { accountId: accts.ACCOUNTS_RECEIVABLE, debit: arPortion, partyType: "customer", partyId: data.customerId ? parseInt(data.customerId) || null : null, particulars: "Balance owed" },
+          { accountId: accts.SALES_REVENUE, credit: totalAmount - gstAmount, particulars: "Sale revenue" },
+          { accountId: accts.GST_PAYABLE, credit: gstAmount, particulars: "GST collected" },
+        ],
+      });
 
       return newSale;
     });
@@ -431,6 +473,19 @@ router.post("/:id/payments", async (req, res) => {
         .where(and(eq(salesTable.id, id), eq(salesTable.userId, userId)))
         .returning();
 
+      const accts = await getOrCreateDefaultAccounts(userId);
+      await postJournalEntry(tx, {
+        userId,
+        voucherType: "receipt",
+        narration: `Payment received against sale ${sale.invoiceNumber}`,
+        sourceModule: "sales",
+        sourceId: id,
+        lines: [
+          { accountId: accts[cashOrBankKey(paymentMode)], debit: amount, particulars: "Payment received" },
+          { accountId: accts.ACCOUNTS_RECEIVABLE, credit: amount, partyType: "customer", partyId: sale.customerId, particulars: "Balance settled" },
+        ],
+      });
+
       return updated;
     });
 
@@ -439,6 +494,88 @@ router.post("/:id/payments", async (req, res) => {
     const e = err as { statusCode?: number; message?: string };
     if (e.statusCode === 404) return res.status(404).json({ error: e.message });
     req.log.error({ err }, "Failed to record payment");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /:id/returns — return history for a sale
+router.get("/:id/returns", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const returns = await db.select().from(saleReturnsTable)
+      .where(and(eq(saleReturnsTable.saleId, id), eq(saleReturnsTable.userId, userId)))
+      .orderBy(desc(saleReturnsTable.returnDate));
+    res.json(returns.map(r => ({
+      id: r.id, saleId: r.saleId, returnDate: r.returnDate.toISOString(),
+      totalRefund: safeFloat(r.totalRefund), refundMode: r.refundMode, notes: r.notes,
+    })));
+  } catch (err) {
+    req.log.error({ err }, "Failed to get sale returns");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /:id/return — full-sale return/cancellation: restocks inventory, reverses every
+// journal entry ever posted against this sale (the original sale + any later payments),
+// reduces the customer's totalPurchases, and marks the sale returned. Loyalty points earned
+// are deliberately left untouched — the exact rate in effect at sale time isn't stored, so
+// clawing back an approximate amount would risk being wrong in either direction.
+router.post("/:id/return", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const [sale] = await db.select().from(salesTable).where(and(eq(salesTable.id, id), eq(salesTable.userId, userId)));
+    if (!sale) return res.status(404).json({ error: "Not found" });
+    if (sale.status === "returned") return res.status(400).json({ error: "Sale already returned" });
+
+    const refundMode = ["cash", "upi", "card", "bank"].includes(req.body?.refundMode) ? req.body.refundMode : sale.paymentMode;
+    const notes = req.body?.notes ? String(req.body.notes).slice(0, 500) : null;
+    const totalRefund = safeFloat(sale.paidAmount);
+    const totalAmount = safeFloat(sale.totalAmount);
+
+    const items = await db.select().from(saleLineItemsTable).where(and(eq(saleLineItemsTable.saleId, id), eq(saleLineItemsTable.userId, userId)));
+    const vouchers = await db.select().from(journalVouchersTable)
+      .where(and(eq(journalVouchersTable.userId, userId), eq(journalVouchersTable.sourceModule, "sales"), eq(journalVouchersTable.sourceId, id)));
+
+    const updated = await db.transaction(async (tx) => {
+      // Restock every line item that references a real inventory item
+      for (const item of items) {
+        if (item.inventoryItemId > 0) {
+          await tx.execute(sql`UPDATE inventory_items SET quantity = quantity + ${item.quantity} WHERE id = ${item.inventoryItemId} AND user_id = ${userId}`);
+        }
+      }
+
+      await tx.insert(saleReturnsTable).values({
+        userId, saleId: id, totalRefund: totalRefund.toFixed(2), refundMode, notes,
+      });
+
+      const [u] = await tx.update(salesTable).set({ status: "returned" })
+        .where(and(eq(salesTable.id, id), eq(salesTable.userId, userId)))
+        .returning();
+
+      if (sale.customerId) {
+        await tx.execute(sql`UPDATE customers SET total_purchases = GREATEST(0, total_purchases - ${totalAmount}::numeric) WHERE id = ${sale.customerId} AND user_id = ${userId}`);
+      }
+
+      return u;
+    });
+
+    // Reverse every non-already-reversed voucher tied to this sale (the original sale entry
+    // plus any subsequent payment-collection entries) — done after the main transaction
+    // since reverseVoucher runs its own transaction per voucher.
+    for (const v of vouchers) {
+      if (!v.reversedByVoucherId) {
+        await reverseVoucher(userId, v.id, `Return of sale ${sale.invoiceNumber}`);
+      }
+    }
+
+    res.json(mapSale(updated));
+  } catch (err) {
+    req.log.error({ err }, "Failed to return sale");
     res.status(500).json({ error: "Internal server error" });
   }
 });

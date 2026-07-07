@@ -202,6 +202,49 @@ export function mapLoan(l: typeof girviLoansTable.$inferSelect, asOf = new Date(
   };
 }
 
+// Rolls a loan's item list up into the aggregate fields stored directly on
+// girvi_loans (grossWeight/netWeight/estimatedValue/metalType/purity/
+// itemDescription). Used both at loan creation (all items) and after a
+// partial release (recomputed from whatever's still pledged), so those
+// aggregates — and everything derived from them (LTV badge, forfeiture
+// default, printed voucher) — always reflect the collateral actually in
+// custody rather than what was originally pledged.
+//
+// Expects each item's grossWeight/netWeight/estimatedValue to already be the
+// LINE TOTAL (quantity already multiplied in), matching how girvi_loan_items
+// rows are stored — callers working from raw per-unit input must multiply by
+// quantity before calling.
+export function computeLoanAggregatesFromItems<T extends { metalType: string; purity: string; grossWeight: number; netWeight: number; estimatedValue: number; itemType: string; quantity: number }>(items: T[]) {
+  const totalGrossWeight = items.reduce((s, it) => s + it.grossWeight, 0);
+  const totalNetWeight = items.reduce((s, it) => s + it.netWeight, 0);
+  const totalEstimatedValue = items.reduce((s, it) => s + it.estimatedValue, 0);
+
+  // Primary metal type = most common among items by gross weight
+  const metalTotals: Record<string, number> = {};
+  items.forEach(it => { metalTotals[it.metalType] = (metalTotals[it.metalType] ?? 0) + it.grossWeight; });
+  const primaryMetal = Object.entries(metalTotals).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "gold";
+
+  // Primary purity = purity of primary metal item with most weight
+  const primaryItems = items.filter(it => it.metalType === primaryMetal);
+  const purityTotals: Record<string, number> = {};
+  primaryItems.forEach(it => { purityTotals[it.purity] = (purityTotals[it.purity] ?? 0) + it.grossWeight; });
+  const primaryPurity = Object.entries(purityTotals).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "22K";
+
+  // Auto-generate description: "1 Necklace (Gold 22K), 2 Bangles (Gold 22K), 3 Rings (Silver 925)"
+  const itemDescription = items.map(it =>
+    `${it.quantity} ${it.itemType}${it.quantity > 1 ? "s" : ""} (${it.metalType === "silver" ? "Silver" : "Gold"} ${it.purity})`
+  ).join(", ");
+
+  return {
+    grossWeight: totalGrossWeight,
+    netWeight: totalNetWeight,
+    estimatedValue: totalEstimatedValue,
+    metalType: primaryMetal,
+    purity: primaryPurity,
+    itemDescription,
+  };
+}
+
 export function mapPayment(p: typeof girviPaymentsTable.$inferSelect) {
   return {
     id: p.id,

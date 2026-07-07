@@ -81,6 +81,8 @@ export const GetRecentSalesResponseItem = zod.object({
   "customerId": zod.number().nullable(),
   "customerName": zod.string(),
   "totalAmount": zod.number(),
+  "paidAmount": zod.number(),
+  "balanceAmount": zod.number(),
   "gstAmount": zod.number(),
   "discountAmount": zod.number(),
   "exchangeGoldWeight": zod.number(),
@@ -295,6 +297,7 @@ export const ListCustomersResponseItem = zod.object({
   "balance": zod.number().describe('positive = credit, negative = debit'),
   "loyaltyPoints": zod.number().optional(),
   "gstin": zod.string().nullish(),
+  "stateCode": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string()
 })
@@ -312,6 +315,7 @@ export const CreateCustomerBody = zod.object({
   "birthday": zod.string().nullish(),
   "anniversary": zod.string().nullish(),
   "gstin": zod.string().nullish(),
+  "stateCode": zod.string().nullish(),
   "notes": zod.string().nullish()
 })
 
@@ -336,6 +340,7 @@ export const GetCustomerResponse = zod.object({
   "balance": zod.number().describe('positive = credit, negative = debit'),
   "loyaltyPoints": zod.number().optional(),
   "gstin": zod.string().nullish(),
+  "stateCode": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string()
 }),
@@ -344,6 +349,8 @@ export const GetCustomerResponse = zod.object({
   "customerId": zod.number().nullable(),
   "customerName": zod.string(),
   "totalAmount": zod.number(),
+  "paidAmount": zod.number(),
+  "balanceAmount": zod.number(),
   "gstAmount": zod.number(),
   "discountAmount": zod.number(),
   "exchangeGoldWeight": zod.number(),
@@ -369,6 +376,8 @@ export const GetCustomerResponse = zod.object({
   "promisedDate": zod.string(),
   "deliveredDate": zod.string().nullish(),
   "notes": zod.string().nullish(),
+  "karigarId": zod.number().nullish(),
+  "karigarName": zod.string().nullish(),
   "createdAt": zod.string()
 }))
 })
@@ -389,6 +398,7 @@ export const UpdateCustomerBody = zod.object({
   "birthday": zod.string().nullish(),
   "anniversary": zod.string().nullish(),
   "gstin": zod.string().nullish(),
+  "stateCode": zod.string().nullish(),
   "notes": zod.string().nullish()
 })
 
@@ -404,6 +414,7 @@ export const UpdateCustomerResponse = zod.object({
   "balance": zod.number().describe('positive = credit, negative = debit'),
   "loyaltyPoints": zod.number().optional(),
   "gstin": zod.string().nullish(),
+  "stateCode": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string()
 })
@@ -445,6 +456,8 @@ export const ListSalesResponseItem = zod.object({
   "customerId": zod.number().nullable(),
   "customerName": zod.string(),
   "totalAmount": zod.number(),
+  "paidAmount": zod.number(),
+  "balanceAmount": zod.number(),
   "gstAmount": zod.number(),
   "discountAmount": zod.number(),
   "exchangeGoldWeight": zod.number(),
@@ -466,6 +479,7 @@ export const CreateSaleBody = zod.object({
   "customerId": zod.number().nullish(),
   "customerName": zod.string(),
   "totalAmount": zod.number(),
+  "paidAmount": zod.number().optional(),
   "gstAmount": zod.number(),
   "discountAmount": zod.number(),
   "exchangeGoldWeight": zod.number(),
@@ -498,6 +512,8 @@ export const GetSaleResponse = zod.object({
   "customerId": zod.number().nullable(),
   "customerName": zod.string(),
   "totalAmount": zod.number(),
+  "paidAmount": zod.number(),
+  "balanceAmount": zod.number(),
   "gstAmount": zod.number(),
   "discountAmount": zod.number(),
   "exchangeGoldWeight": zod.number(),
@@ -543,6 +559,8 @@ export const UpdateSaleResponse = zod.object({
   "customerId": zod.number().nullable(),
   "customerName": zod.string(),
   "totalAmount": zod.number(),
+  "paidAmount": zod.number(),
+  "balanceAmount": zod.number(),
   "gstAmount": zod.number(),
   "discountAmount": zod.number(),
   "exchangeGoldWeight": zod.number(),
@@ -679,6 +697,14 @@ export const UpdateKarigarResponse = zod.object({
 
 
 /**
+ * @summary Delete a karigar
+ */
+export const DeleteKarigarParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+/**
  * @summary Issue gold/silver to a karigar
  */
 export const IssueMetalToKarigarParams = zod.object({
@@ -730,6 +756,8 @@ export const ListRepairsResponseItem = zod.object({
   "promisedDate": zod.string(),
   "deliveredDate": zod.string().nullish(),
   "notes": zod.string().nullish(),
+  "karigarId": zod.number().nullish(),
+  "karigarName": zod.string().nullish(),
   "createdAt": zod.string()
 })
 export const ListRepairsResponse = zod.array(ListRepairsResponseItem)
@@ -746,7 +774,8 @@ export const CreateRepairBody = zod.object({
   "issue": zod.string(),
   "estimatedCost": zod.number(),
   "promisedDate": zod.string(),
-  "notes": zod.string().nullish()
+  "notes": zod.string().nullish(),
+  "karigarId": zod.number().nullish()
 })
 
 
@@ -771,6 +800,8 @@ export const GetRepairResponse = zod.object({
   "promisedDate": zod.string(),
   "deliveredDate": zod.string().nullish(),
   "notes": zod.string().nullish(),
+  "karigarId": zod.number().nullish(),
+  "karigarName": zod.string().nullish(),
   "createdAt": zod.string()
 })
 
@@ -786,7 +817,14 @@ export const UpdateRepairBody = zod.object({
   "status": zod.string().optional(),
   "actualCost": zod.number().nullish(),
   "deliveredDate": zod.string().nullish(),
-  "notes": zod.string().nullish()
+  "notes": zod.string().nullish(),
+  "customerName": zod.string().optional(),
+  "customerMobile": zod.string().optional(),
+  "itemDescription": zod.string().optional(),
+  "issue": zod.string().optional(),
+  "estimatedCost": zod.number().optional(),
+  "promisedDate": zod.string().optional(),
+  "karigarId": zod.number().nullish()
 })
 
 export const UpdateRepairResponse = zod.object({
@@ -803,7 +841,190 @@ export const UpdateRepairResponse = zod.object({
   "promisedDate": zod.string(),
   "deliveredDate": zod.string().nullish(),
   "notes": zod.string().nullish(),
+  "karigarId": zod.number().nullish(),
+  "karigarName": zod.string().nullish(),
   "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Delete a repair job
+ */
+export const DeleteRepairParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+/**
+ * @summary List all custom orders
+ */
+export const ListCustomOrdersQueryParams = zod.object({
+  "status": zod.coerce.string().optional()
+})
+
+export const ListCustomOrdersResponseItem = zod.object({
+  "id": zod.number(),
+  "orderNumber": zod.string(),
+  "customerId": zod.number().nullable(),
+  "customerName": zod.string(),
+  "customerMobile": zod.string(),
+  "itemType": zod.string(),
+  "description": zod.string().nullable(),
+  "metalType": zod.string(),
+  "purity": zod.string(),
+  "targetWeight": zod.number().nullable(),
+  "estimatedPrice": zod.number().nullable(),
+  "agreedPrice": zod.number().nullable(),
+  "advancePaid": zod.number(),
+  "status": zod.string().describe('pending, karigar_assigned, in_progress, karigar_returned, ready, delivered, cancelled'),
+  "karigarId": zod.number().nullable(),
+  "karigarName": zod.string().nullable(),
+  "metalIssuedWeight": zod.number().nullable(),
+  "metalIssuedDate": zod.string().nullable(),
+  "finishedWeight": zod.number().nullable(),
+  "wastageWeight": zod.number().nullable(),
+  "karigarReturnDate": zod.string().nullable(),
+  "karigarWages": zod.number().nullable(),
+  "karigarNotes": zod.string().nullable(),
+  "dueDate": zod.string(),
+  "deliveryDate": zod.string().nullable(),
+  "finalPrice": zod.number().nullable(),
+  "notes": zod.string().nullable(),
+  "createdAt": zod.string()
+})
+export const ListCustomOrdersResponse = zod.array(ListCustomOrdersResponseItem)
+
+
+/**
+ * @summary Create a custom order
+ */
+export const CreateCustomOrderBody = zod.object({
+  "customerId": zod.number().nullish(),
+  "customerName": zod.string(),
+  "customerMobile": zod.string(),
+  "itemType": zod.string(),
+  "description": zod.string().nullish(),
+  "metalType": zod.string(),
+  "purity": zod.string(),
+  "targetWeight": zod.number().nullish(),
+  "estimatedPrice": zod.number().nullish(),
+  "agreedPrice": zod.number().nullish(),
+  "advancePaid": zod.number().optional(),
+  "dueDate": zod.string(),
+  "notes": zod.string().nullish()
+})
+
+
+/**
+ * @summary Get a custom order
+ */
+export const GetCustomOrderParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetCustomOrderResponse = zod.object({
+  "id": zod.number(),
+  "orderNumber": zod.string(),
+  "customerId": zod.number().nullable(),
+  "customerName": zod.string(),
+  "customerMobile": zod.string(),
+  "itemType": zod.string(),
+  "description": zod.string().nullable(),
+  "metalType": zod.string(),
+  "purity": zod.string(),
+  "targetWeight": zod.number().nullable(),
+  "estimatedPrice": zod.number().nullable(),
+  "agreedPrice": zod.number().nullable(),
+  "advancePaid": zod.number(),
+  "status": zod.string().describe('pending, karigar_assigned, in_progress, karigar_returned, ready, delivered, cancelled'),
+  "karigarId": zod.number().nullable(),
+  "karigarName": zod.string().nullable(),
+  "metalIssuedWeight": zod.number().nullable(),
+  "metalIssuedDate": zod.string().nullable(),
+  "finishedWeight": zod.number().nullable(),
+  "wastageWeight": zod.number().nullable(),
+  "karigarReturnDate": zod.string().nullable(),
+  "karigarWages": zod.number().nullable(),
+  "karigarNotes": zod.string().nullable(),
+  "dueDate": zod.string(),
+  "deliveryDate": zod.string().nullable(),
+  "finalPrice": zod.number().nullable(),
+  "notes": zod.string().nullable(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Update a custom order
+ */
+export const UpdateCustomOrderParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateCustomOrderBody = zod.object({
+  "customerName": zod.string().optional(),
+  "customerMobile": zod.string().optional(),
+  "itemType": zod.string().optional(),
+  "description": zod.string().nullish(),
+  "metalType": zod.string().optional(),
+  "purity": zod.string().optional(),
+  "targetWeight": zod.number().nullish(),
+  "estimatedPrice": zod.number().nullish(),
+  "agreedPrice": zod.number().nullish(),
+  "advancePaid": zod.number().optional(),
+  "status": zod.string().optional(),
+  "karigarId": zod.number().nullish(),
+  "karigarName": zod.string().nullish(),
+  "metalIssuedWeight": zod.number().nullish(),
+  "metalIssuedDate": zod.string().nullish(),
+  "finishedWeight": zod.number().nullish(),
+  "wastageWeight": zod.number().nullish(),
+  "karigarReturnDate": zod.string().nullish(),
+  "karigarWages": zod.number().nullish(),
+  "karigarNotes": zod.string().nullish(),
+  "dueDate": zod.string().optional(),
+  "deliveryDate": zod.string().nullish(),
+  "finalPrice": zod.number().nullish(),
+  "notes": zod.string().nullish()
+})
+
+export const UpdateCustomOrderResponse = zod.object({
+  "id": zod.number(),
+  "orderNumber": zod.string(),
+  "customerId": zod.number().nullable(),
+  "customerName": zod.string(),
+  "customerMobile": zod.string(),
+  "itemType": zod.string(),
+  "description": zod.string().nullable(),
+  "metalType": zod.string(),
+  "purity": zod.string(),
+  "targetWeight": zod.number().nullable(),
+  "estimatedPrice": zod.number().nullable(),
+  "agreedPrice": zod.number().nullable(),
+  "advancePaid": zod.number(),
+  "status": zod.string().describe('pending, karigar_assigned, in_progress, karigar_returned, ready, delivered, cancelled'),
+  "karigarId": zod.number().nullable(),
+  "karigarName": zod.string().nullable(),
+  "metalIssuedWeight": zod.number().nullable(),
+  "metalIssuedDate": zod.string().nullable(),
+  "finishedWeight": zod.number().nullable(),
+  "wastageWeight": zod.number().nullable(),
+  "karigarReturnDate": zod.string().nullable(),
+  "karigarWages": zod.number().nullable(),
+  "karigarNotes": zod.string().nullable(),
+  "dueDate": zod.string(),
+  "deliveryDate": zod.string().nullable(),
+  "finalPrice": zod.number().nullable(),
+  "notes": zod.string().nullable(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Delete a custom order
+ */
+export const DeleteCustomOrderParams = zod.object({
+  "id": zod.coerce.number()
 })
 
 
@@ -821,9 +1042,17 @@ export const ListPurchasesResponseItem = zod.object({
   "fineWeight": zod.number(),
   "ratePerGram": zod.number(),
   "totalAmount": zod.number(),
+  "paidAmount": zod.number(),
+  "balanceAmount": zod.number(),
+  "paymentMode": zod.string(),
+  "taxableValue": zod.number().nullable(),
+  "gstRate": zod.number().nullable(),
+  "gstAmount": zod.number().nullable(),
+  "hsnCode": zod.string().nullable(),
   "invoiceNumber": zod.string(),
   "purchaseDate": zod.string(),
   "notes": zod.string().nullish(),
+  "cancelledAt": zod.string().nullable(),
   "createdAt": zod.string()
 })
 export const ListPurchasesResponse = zod.array(ListPurchasesResponseItem)
@@ -842,6 +1071,10 @@ export const CreatePurchaseBody = zod.object({
   "fineWeight": zod.number(),
   "ratePerGram": zod.number(),
   "totalAmount": zod.number(),
+  "paidAmount": zod.number().optional(),
+  "paymentMode": zod.string().optional(),
+  "gstRate": zod.number().optional(),
+  "hsnCode": zod.string().optional(),
   "purchaseDate": zod.string(),
   "notes": zod.string().nullish()
 })
@@ -865,9 +1098,101 @@ export const GetPurchaseResponse = zod.object({
   "fineWeight": zod.number(),
   "ratePerGram": zod.number(),
   "totalAmount": zod.number(),
+  "paidAmount": zod.number(),
+  "balanceAmount": zod.number(),
+  "paymentMode": zod.string(),
+  "taxableValue": zod.number().nullable(),
+  "gstRate": zod.number().nullable(),
+  "gstAmount": zod.number().nullable(),
+  "hsnCode": zod.string().nullable(),
   "invoiceNumber": zod.string(),
   "purchaseDate": zod.string(),
   "notes": zod.string().nullish(),
+  "cancelledAt": zod.string().nullable(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Update a purchase
+ */
+export const UpdatePurchaseParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdatePurchaseBody = zod.object({
+  "supplierId": zod.number().nullish(),
+  "supplierName": zod.string().optional(),
+  "metalType": zod.string().optional(),
+  "purity": zod.string().optional(),
+  "grossWeight": zod.number().optional(),
+  "netWeight": zod.number().optional(),
+  "fineWeight": zod.number().optional(),
+  "ratePerGram": zod.number().optional(),
+  "totalAmount": zod.number().optional(),
+  "paidAmount": zod.number().optional(),
+  "paymentMode": zod.string().optional(),
+  "gstRate": zod.number().nullish(),
+  "hsnCode": zod.string().optional(),
+  "purchaseDate": zod.string().optional(),
+  "notes": zod.string().nullish()
+})
+
+export const UpdatePurchaseResponse = zod.object({
+  "id": zod.number(),
+  "supplierId": zod.number().nullable(),
+  "supplierName": zod.string(),
+  "metalType": zod.string(),
+  "purity": zod.string(),
+  "grossWeight": zod.number(),
+  "netWeight": zod.number(),
+  "fineWeight": zod.number(),
+  "ratePerGram": zod.number(),
+  "totalAmount": zod.number(),
+  "paidAmount": zod.number(),
+  "balanceAmount": zod.number(),
+  "paymentMode": zod.string(),
+  "taxableValue": zod.number().nullable(),
+  "gstRate": zod.number().nullable(),
+  "gstAmount": zod.number().nullable(),
+  "hsnCode": zod.string().nullable(),
+  "invoiceNumber": zod.string(),
+  "purchaseDate": zod.string(),
+  "notes": zod.string().nullish(),
+  "cancelledAt": zod.string().nullable(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Cancel a purchase (reverses its journal entry; only before any follow-up payment)
+ */
+export const CancelPurchaseParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const CancelPurchaseResponse = zod.object({
+  "id": zod.number(),
+  "supplierId": zod.number().nullable(),
+  "supplierName": zod.string(),
+  "metalType": zod.string(),
+  "purity": zod.string(),
+  "grossWeight": zod.number(),
+  "netWeight": zod.number(),
+  "fineWeight": zod.number(),
+  "ratePerGram": zod.number(),
+  "totalAmount": zod.number(),
+  "paidAmount": zod.number(),
+  "balanceAmount": zod.number(),
+  "paymentMode": zod.string(),
+  "taxableValue": zod.number().nullable(),
+  "gstRate": zod.number().nullable(),
+  "gstAmount": zod.number().nullable(),
+  "hsnCode": zod.string().nullable(),
+  "invoiceNumber": zod.string(),
+  "purchaseDate": zod.string(),
+  "notes": zod.string().nullish(),
+  "cancelledAt": zod.string().nullable(),
   "createdAt": zod.string()
 })
 
@@ -900,6 +1225,40 @@ export const CreateSupplierBody = zod.object({
 
 
 /**
+ * @summary Update a supplier
+ */
+export const UpdateSupplierParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateSupplierBody = zod.object({
+  "name": zod.string(),
+  "mobile": zod.string(),
+  "address": zod.string().nullish(),
+  "gstin": zod.string().nullish(),
+  "email": zod.string().nullish()
+})
+
+export const UpdateSupplierResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "mobile": zod.string(),
+  "address": zod.string().nullable(),
+  "gstin": zod.string().nullable(),
+  "email": zod.string().nullish(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Delete a supplier
+ */
+export const DeleteSupplierParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+/**
  * @summary Get business settings
  */
 export const GetSettingsResponse = zod.object({
@@ -911,8 +1270,16 @@ export const GetSettingsResponse = zod.object({
   "email": zod.string().nullable(),
   "logo": zod.string().nullable(),
   "gstRate": zod.number(),
+  "stateCode": zod.string().nullable(),
+  "gstOnExchangeEnabled": zod.boolean(),
+  "cashTransactionLimit": zod.number(),
   "defaultBranch": zod.string(),
   "branches": zod.array(zod.string()),
+  "whatsappApiEnabled": zod.boolean(),
+  "whatsappPhoneNumberId": zod.string(),
+  "hasAccessToken": zod.boolean(),
+  "loyaltyPointsEnabled": zod.boolean(),
+  "loyaltyPointsRate": zod.number(),
   "updatedAt": zod.string()
 })
 
@@ -928,8 +1295,16 @@ export const UpdateSettingsBody = zod.object({
   "email": zod.string().nullish(),
   "logo": zod.string().nullish(),
   "gstRate": zod.number().optional(),
+  "stateCode": zod.string().nullish(),
+  "gstOnExchangeEnabled": zod.boolean().optional(),
+  "cashTransactionLimit": zod.number().optional(),
   "defaultBranch": zod.string().optional(),
-  "branches": zod.array(zod.string()).optional()
+  "branches": zod.array(zod.string()).optional(),
+  "whatsappApiEnabled": zod.boolean().optional(),
+  "whatsappPhoneNumberId": zod.string().optional(),
+  "whatsappAccessToken": zod.string().optional(),
+  "loyaltyPointsEnabled": zod.boolean().optional(),
+  "loyaltyPointsRate": zod.number().optional()
 })
 
 export const UpdateSettingsResponse = zod.object({
@@ -941,8 +1316,16 @@ export const UpdateSettingsResponse = zod.object({
   "email": zod.string().nullable(),
   "logo": zod.string().nullable(),
   "gstRate": zod.number(),
+  "stateCode": zod.string().nullable(),
+  "gstOnExchangeEnabled": zod.boolean(),
+  "cashTransactionLimit": zod.number(),
   "defaultBranch": zod.string(),
   "branches": zod.array(zod.string()),
+  "whatsappApiEnabled": zod.boolean(),
+  "whatsappPhoneNumberId": zod.string(),
+  "hasAccessToken": zod.boolean(),
+  "loyaltyPointsEnabled": zod.boolean(),
+  "loyaltyPointsRate": zod.number(),
   "updatedAt": zod.string()
 })
 

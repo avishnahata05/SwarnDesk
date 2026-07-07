@@ -1,5 +1,17 @@
 export const API = "/api/girvi";
 
+// Adds calendar months (not just 30*n days) so "1 month" from Jan 31 lands on
+// Feb 28/29 the way people expect, not Mar 2/3.
+export function addMonths(date: Date, months: number): Date {
+  const d = new Date(date);
+  d.setMonth(d.getMonth() + months);
+  return d;
+}
+
+export function toDateInputValue(date: Date): string {
+  return date.toISOString().split("T")[0];
+}
+
 export function getAuthHeaders(): Record<string, string> {
   const token = localStorage.getItem("swarndesk_token");
   return { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) };

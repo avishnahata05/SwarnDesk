@@ -120,6 +120,17 @@ export type LoanItem = {
   notes: string | null;
   status: string;
   currentBranchId: number | null;
+  returnedAt: string | null;
+};
+
+export type PartialRelease = {
+  id: number;
+  releaseNumber: string;
+  releaseDate: string;
+  itemsDescription: string | null;
+  principalSettled: number;
+  interestSettled: number;
+  notes: string | null;
 };
 
 export type Transfer = {
@@ -174,5 +185,6 @@ export type GirviSettings = {
   receiptPrefix: string;
   returnPrefix: string;
   transferPrefix: string;
+  partialReleasePrefix: string;
   updatedAt: string;
 };

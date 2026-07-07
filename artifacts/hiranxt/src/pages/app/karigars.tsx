@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { formatCurrency, formatWeight } from "@/lib/utils";
 import {
-  useListKarigars, useCreateKarigar, useIssueMetalToKarigar, useReturnMetalFromKarigar, useGetKarigar,
+  useListKarigars, useCreateKarigar, useIssueMetalToKarigar, useReturnMetalFromKarigar, useGetKarigar, useDeleteKarigar,
   getListKarigarsQueryKey
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useForm } from "react-hook-form";
-import { Plus, Hammer, TrendingDown, TrendingUp } from "lucide-react";
+import { Plus, Hammer, TrendingDown, TrendingUp, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface KarigarForm { name: string; mobile: string; specialization: string; address: string; }
@@ -34,6 +34,15 @@ export default function Karigars() {
   const createKarigar = useCreateKarigar();
   const issueMetal = useIssueMetalToKarigar();
   const returnMetal = useReturnMetalFromKarigar();
+  const deleteKarigar = useDeleteKarigar();
+
+  const handleDelete = (id: number) => {
+    if (!confirm("Delete this karigar? This cannot be undone.")) return;
+    deleteKarigar.mutate({ id }, {
+      onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListKarigarsQueryKey() }); toast({ title: "Karigar deleted" }); },
+      onError: () => toast({ title: "Failed to delete karigar", variant: "destructive" }),
+    });
+  };
 
   const addForm = useForm<KarigarForm>();
   const issueForm = useForm<MetalIssueForm>({ defaultValues: { metalType: "gold", purity: "22K" } });
@@ -133,7 +142,12 @@ export default function Karigars() {
                   <div className="font-semibold">{k.name}</div>
                   <div className="text-xs text-muted-foreground">{k.specialization} • {k.mobile}</div>
                 </div>
-                <Badge variant="outline">{k.pendingOrders} pending orders</Badge>
+                <div className="flex items-center gap-1.5">
+                  <Badge variant="outline">{k.pendingOrders} pending orders</Badge>
+                  <Button size="icon" variant="ghost" className="h-7 w-7 text-red-600" onClick={() => handleDelete(k.id)} data-testid={`button-delete-karigar-${k.id}`}>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3 text-xs">

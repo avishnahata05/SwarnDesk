@@ -24,6 +24,7 @@ function mapCustomer(c: typeof customersTable.$inferSelect) {
     balance: safeFloat(c.balance),
     loyaltyPoints: c.loyaltyPoints,
     gstin: c.gstin,
+    stateCode: c.stateCode,
     notes: c.notes,
     createdAt: c.createdAt.toISOString(),
   };
@@ -154,6 +155,7 @@ router.post("/", async (req, res) => {
       anniversary: data.anniversary || null,
       balance: safeFloat(data.balance).toString(),
       gstin: data.gstin ? String(data.gstin).trim() || null : null,
+      stateCode: data.stateCode ? String(data.stateCode).trim().slice(0, 2) || null : null,
       notes: data.notes ? String(data.notes).slice(0, 500) || null : null,
     }).returning();
     res.status(201).json(mapCustomer(customer));
@@ -254,6 +256,7 @@ router.patch("/:id", async (req, res) => {
       updateData.anniversary = data.anniversary || null;
     }
     if (data.gstin !== undefined) updateData.gstin = String(data.gstin).trim() || null;
+    if (data.stateCode !== undefined) updateData.stateCode = String(data.stateCode).trim().slice(0, 2) || null;
     if (data.notes !== undefined) updateData.notes = String(data.notes).slice(0, 500) || null;
     const [customer] = await db.update(customersTable).set(updateData).where(and(eq(customersTable.id, id), eq(customersTable.userId, userId))).returning();
     if (!customer) return res.status(404).json({ error: "Not found" });

@@ -27,6 +27,15 @@ const AuthContext = createContext<AuthContextType | null>(null);
 const TOKEN_KEY = "swarndesk_token";
 const USER_KEY = "swarndesk_user";
 
+// Registered at module load — i.e. before React even starts rendering — rather than inside
+// AuthProvider's useEffect. React fires child effects before parent effects, so a query
+// hook deep in the tree (e.g. useGetSettings on the very first render) would otherwise fire
+// its initial fetch before this provider's own effect ever ran, sending every first-load
+// request with no Authorization header (401, silently masked by TanStack Query's retry).
+// Reading localStorage live on every call means it's always correct — no need to
+// re-register it on login/logout/token-refresh.
+setAuthTokenGetter(() => localStorage.getItem(TOKEN_KEY));
+
 function extractAuthErrorMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiError) {
     const data = err.data as { error?: string } | null;
@@ -46,7 +55,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    setAuthTokenGetter(() => localStorage.getItem(TOKEN_KEY));
     // Refresh user data from DB on startup to pick up plan changes (e.g. admin approved subscription)
     const storedToken = localStorage.getItem(TOKEN_KEY);
     if (!storedToken) return;
@@ -59,7 +67,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem(USER_KEY, JSON.stringify(data.user));
         setToken(data.token);
         setUser(data.user);
-        setAuthTokenGetter(() => data.token);
       })
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -70,7 +77,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(USER_KEY, JSON.stringify(newUser));
     setToken(newToken);
     setUser(newUser);
-    setAuthTokenGetter(() => newToken);
   };
 
   const login = async (email: string, password: string) => {
@@ -110,7 +116,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(USER_KEY);
     setToken(null);
     setUser(null);
-    setAuthTokenGetter(null);
     queryClient.clear();
   };
 

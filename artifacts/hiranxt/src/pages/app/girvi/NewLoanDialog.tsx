@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, XCircle, AlertTriangle, Search, UserCheck, UserPlus } from "lucide-react";
 import { API, getAuthHeaders, authHeader } from "./api";
 import type { Rates, Branch, Customer } from "./types";
+import DueDatePresets from "./DueDatePresets";
 
 type ItemRow = {
   key: string;
@@ -451,7 +452,11 @@ export default function NewLoanDialog({ open, onClose, onCreated, rates, branche
                 <input className={inp} type="number" step="0.1" value={form.penaltyRate} onChange={e => set("penaltyRate", e.target.value)} placeholder="e.g. 1" />
               </div>
               <div><label className={lbl}>Processing Fee (₹) <span className="text-muted-foreground/60">one-time, taxable</span></label><input className={inp} type="number" value={form.processingFee} onChange={e => set("processingFee", e.target.value)} /></div>
-              <div><label className={lbl}>Due Date *</label><input className={inp} type="date" value={form.dueDate} min={new Date().toISOString().split("T")[0]} onChange={e => set("dueDate", e.target.value)} /></div>
+              <div>
+                <label className={lbl}>Due Date *</label>
+                <input className={inp} type="date" value={form.dueDate} min={new Date().toISOString().split("T")[0]} onChange={e => set("dueDate", e.target.value)} />
+                <DueDatePresets from={new Date()} onPick={v => set("dueDate", v)} />
+              </div>
               <div className="sm:col-span-2">
                 <label className={lbl}>Notes</label>
                 <Textarea value={form.notes} onChange={e => set("notes", e.target.value)} placeholder="Remarks, conditions, etc. (multiple lines allowed)" rows={2} className="text-sm resize-y" />

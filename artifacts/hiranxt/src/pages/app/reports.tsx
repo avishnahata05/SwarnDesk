@@ -20,67 +20,97 @@ const MONTHS = ["January","February","March","April","May","June","July","August
 
 const HSN_CODE = "7113";
 
-async function downloadGSTR1(month: number, year: number, toast: ReturnType<typeof useToast>["toast"]) {
+// Same state (or either side's state unknown) -> CGST+SGST 50/50. Different state -> IGST.
+// Defaulting to "same state" when a state code is missing preserves the app's original
+// behavior for shops that haven't filled in GST state codes yet.
+function splitGst(gstAmount: number, shopStateCode: string | null | undefined, customerStateCode: string | null | undefined) {
+  const interState = !!shopStateCode && !!customerStateCode && shopStateCode !== customerStateCode;
+  if (interState) return { cgst: 0, sgst: 0, igst: gstAmount, interState: true };
+  return { cgst: gstAmount / 2, sgst: gstAmount / 2, igst: 0, interState: false };
+}
+
+async function downloadGSTR1(month: number, year: number, shopStateCode: string | null | undefined, toast: ReturnType<typeof useToast>["toast"]) {
   try {
     const startDate = new Date(year, month - 1, 1).toISOString();
     const endDate = new Date(year, month, 0, 23, 59, 59).toISOString();
     const token = localStorage.getItem("swarndesk_token");
-    const res = await fetch(`/api/sales?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok) throw new Error("Failed to fetch sales data");
+    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+    const [salesRes, customersRes] = await Promise.all([
+      fetch(`/api/sales?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`, { headers }),
+      fetch(`/api/customers`, { headers }),
+    ]);
+    if (!salesRes.ok) throw new Error("Failed to fetch sales data");
     const sales: Array<{
       invoiceNumber: string;
       saleDate: string;
+      customerId: number | null;
       customerName: string;
       totalAmount: number;
       gstAmount: number;
       discountAmount: number;
       paymentMode: string;
       paymentStatus: string;
-    }> = await res.json();
+    }> = await salesRes.json();
+    const customers: Array<{ id: number; gstin: string | null; stateCode: string | null }> = customersRes.ok ? await customersRes.json() : [];
+    const customerById = new Map(customers.map(c => [c.id, c]));
 
     if (sales.length === 0) {
       toast({ title: "No sales found for selected period", variant: "destructive" });
       return;
     }
 
+    // B2B = customer has a GSTIN on file (invoice-wise, buyer GSTIN shown). Everything
+    // else is B2C. This is the split GSTR-1 actually requires — the old export lumped
+    // every sale into one undifferentiated "B2C" list regardless of buyer GSTIN.
+    const enriched = sales.map(s => {
+      const customer = s.customerId != null ? customerById.get(s.customerId) : undefined;
+      const gst = splitGst(s.gstAmount, shopStateCode, customer?.stateCode);
+      const taxable = s.totalAmount - s.gstAmount;
+      return { ...s, customerGstin: customer?.gstin ?? null, taxable, ...gst };
+    });
+    const b2b = enriched.filter(s => !!s.customerGstin);
+    const b2c = enriched.filter(s => !s.customerGstin);
+
+    const section = (title: string, rows2: typeof enriched) => [
+      [title],
+      [
+        "Invoice No.", "Invoice Date", "Customer Name", "Customer GSTIN",
+        "HSN Code", "Taxable Value (₹)", "CGST (₹)", "SGST (₹)", "IGST (₹)",
+        "Total GST (₹)", "Invoice Value (₹)", "Payment Mode", "Payment Status"
+      ],
+      ...rows2.map(s => [
+        s.invoiceNumber,
+        new Date(s.saleDate).toLocaleDateString("en-IN"),
+        s.customerName,
+        s.customerGstin ?? "",
+        HSN_CODE,
+        s.taxable.toFixed(2),
+        s.cgst.toFixed(2),
+        s.sgst.toFixed(2),
+        s.igst.toFixed(2),
+        s.gstAmount.toFixed(2),
+        s.totalAmount.toFixed(2),
+        s.paymentMode,
+        s.paymentStatus,
+      ]),
+      [],
+      [`${title} — Totals`],
+      ["Invoices", rows2.length.toString()],
+      ["Taxable Value", rows2.reduce((a, s) => a + s.taxable, 0).toFixed(2)],
+      ["CGST", rows2.reduce((a, s) => a + s.cgst, 0).toFixed(2)],
+      ["SGST", rows2.reduce((a, s) => a + s.sgst, 0).toFixed(2)],
+      ["IGST", rows2.reduce((a, s) => a + s.igst, 0).toFixed(2)],
+      ["Invoice Value", rows2.reduce((a, s) => a + s.totalAmount, 0).toFixed(2)],
+      [],
+    ];
+
     const rows = [
-      ["GSTR-1 Export — B2C Sales"],
+      ["GSTR-1 Export"],
       [`Period: ${MONTHS[month - 1]} ${year}`],
       [`Generated: ${new Date().toLocaleDateString("en-IN")}`],
       [],
-      [
-        "Invoice No.", "Invoice Date", "Customer Name",
-        "HSN Code", "Taxable Value (₹)", "CGST 1.5% (₹)", "SGST 1.5% (₹)",
-        "Total GST (₹)", "Invoice Value (₹)", "Payment Mode", "Payment Status"
-      ],
-      ...sales.map(s => {
-        const gst = s.gstAmount;
-        const taxable = s.totalAmount - gst;
-        const cgst = gst / 2;
-        const sgst = gst / 2;
-        return [
-          s.invoiceNumber,
-          new Date(s.saleDate).toLocaleDateString("en-IN"),
-          s.customerName,
-          HSN_CODE,
-          taxable.toFixed(2),
-          cgst.toFixed(2),
-          sgst.toFixed(2),
-          gst.toFixed(2),
-          s.totalAmount.toFixed(2),
-          s.paymentMode,
-          s.paymentStatus,
-        ];
-      }),
-      [],
-      ["SUMMARY"],
-      ["Total Invoices", sales.length.toString()],
-      ["Total Taxable Value", sales.reduce((a, s) => a + (s.totalAmount - s.gstAmount), 0).toFixed(2)],
-      ["Total CGST (1.5%)", sales.reduce((a, s) => a + s.gstAmount / 2, 0).toFixed(2)],
-      ["Total SGST (1.5%)", sales.reduce((a, s) => a + s.gstAmount / 2, 0).toFixed(2)],
-      ["Total Invoice Value", sales.reduce((a, s) => a + s.totalAmount, 0).toFixed(2)],
+      ...section("B2B Sales (buyer GSTIN on file)", b2b),
+      ...section("B2C Sales", b2c),
     ];
 
     const csv = rows.map(row => row.map(cell => `"${cell}"`).join(",")).join("\n");
@@ -120,7 +150,7 @@ export default function Reports() {
   const handleExport = async () => {
     setExporting(true);
     try {
-      await downloadGSTR1(parseInt(gstrMonth), parseInt(gstrYear), toast);
+      await downloadGSTR1(parseInt(gstrMonth), parseInt(gstrYear), settings?.stateCode, toast);
     } finally {
       setExporting(false);
     }

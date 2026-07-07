@@ -1,9 +1,23 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { repairJobsTable, karigarsTable } from "@workspace/db";
+import { repairJobsTable, karigarsTable, repairPaymentTransactionsTable } from "@workspace/db";
 import { eq, and, desc, sql } from "drizzle-orm";
+import { postJournalEntry, getOrCreateDefaultAccounts, cashOrBankKey, safeFloat } from "./accounting-helpers";
 
 const router = Router();
+
+function mapTransaction(t: typeof repairPaymentTransactionsTable.$inferSelect) {
+  return {
+    id: t.id,
+    repairJobId: t.repairJobId,
+    customerId: t.customerId,
+    customerName: t.customerName,
+    amount: safeFloat(t.amount),
+    paymentMode: t.paymentMode,
+    paidAt: t.paidAt.toISOString(),
+    notes: t.notes,
+  };
+}
 
 // A repair only counts against a karigar's pending workload while it's assigned
 // to them and not yet handed back (received/in_progress) — mirrors custom_orders'
@@ -172,6 +186,76 @@ router.patch("/:id", async (req, res) => {
     res.json(mapRepair(repair));
   } catch (err) {
     req.log.error({ err }, "Failed to update repair");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /:id/payments — payment history for a repair job
+router.get("/:id/payments", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const txns = await db.select().from(repairPaymentTransactionsTable)
+      .where(and(eq(repairPaymentTransactionsTable.repairJobId, id), eq(repairPaymentTransactionsTable.userId, userId)))
+      .orderBy(desc(repairPaymentTransactionsTable.paidAt));
+    res.json(txns.map(mapTransaction));
+  } catch (err) {
+    req.log.error({ err }, "Failed to get repair payment history");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /:id/payments — collect a payment against a repair job (advance at drop-off, final at delivery)
+router.post("/:id/payments", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const amount = safeFloat(req.body.amount);
+    if (!isFinite(amount) || amount <= 0) return res.status(400).json({ error: "Invalid payment amount" });
+    const allowedModes = ["cash", "upi", "card", "bank"];
+    const paymentMode = allowedModes.includes(req.body.paymentMode) ? req.body.paymentMode : "cash";
+    const notes = req.body.notes ? String(req.body.notes).slice(0, 500) : null;
+
+    const accts = await getOrCreateDefaultAccounts(userId);
+
+    const repair = await db.transaction(async (tx) => {
+      const [job] = await tx.select().from(repairJobsTable)
+        .where(and(eq(repairJobsTable.id, id), eq(repairJobsTable.userId, userId)));
+      if (!job) throw Object.assign(new Error("Repair job not found"), { statusCode: 404 });
+
+      await tx.insert(repairPaymentTransactionsTable).values({
+        userId,
+        repairJobId: id,
+        customerId: job.customerId,
+        customerName: job.customerName,
+        amount: amount.toString(),
+        paymentMode,
+        notes,
+      });
+
+      await postJournalEntry(tx, {
+        userId,
+        voucherType: "receipt",
+        narration: `Payment received for repair #${id} (${job.itemDescription})`,
+        sourceModule: "repairs",
+        sourceId: id,
+        lines: [
+          { accountId: accts[cashOrBankKey(paymentMode)], debit: amount, particulars: "Payment received" },
+          { accountId: accts.REPAIR_INCOME, credit: amount, particulars: "Repair income" },
+        ],
+      });
+
+      return job;
+    });
+
+    res.status(201).json(mapRepair(repair));
+  } catch (err: unknown) {
+    const e = err as { statusCode?: number; message?: string };
+    if (e.statusCode === 404) return res.status(404).json({ error: e.message });
+    req.log.error({ err }, "Failed to record repair payment");
     res.status(500).json({ error: "Internal server error" });
   }
 });

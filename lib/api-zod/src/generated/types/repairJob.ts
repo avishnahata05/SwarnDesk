@@ -25,5 +25,9 @@ export interface RepairJob {
   deliveredDate?: string | null;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  karigarId?: number | null;
+  /** @nullable */
+  karigarName?: string | null;
   createdAt: string;
 }

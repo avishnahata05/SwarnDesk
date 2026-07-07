@@ -3,11 +3,12 @@ import { useBackClose } from "@/hooks/use-back-close";
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import { useGetCurrentRates, useUpdateRates, getGetCurrentRatesQueryKey } from "@workspace/api-client-react";
+import { useMetalRateForm } from "@/hooks/use-metal-rate-form";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboard, Package, ShoppingCart, Users, Hammer, Wrench,
   TruckIcon, BarChart3, Settings, Menu, X, MessageCircle, Globe, Banknote,
-  ChevronRight, Pencil, LogOut, ShieldCheck, Megaphone, Clock, ClipboardList,
+  ChevronRight, Pencil, LogOut, ShieldCheck, Megaphone, Clock, ClipboardList, BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -31,6 +32,7 @@ const navItems = [
   { href: "/app/girvi", label: "Girvi", labelHi: "गिरवी", icon: Banknote },
   // Finance & growth
   { href: "/app/pending-payments", label: "Pending Payments", labelHi: "बकाया भुगतान", icon: Clock },
+  { href: "/app/accounting", label: "Accounting", labelHi: "लेखा", icon: BookOpen },
   { href: "/app/marketing", label: "Marketing", labelHi: "मार्केटिंग", icon: Megaphone },
   { href: "/app/reports", label: "Reports", labelHi: "रिपोर्ट", icon: BarChart3 },
   { href: "/app/settings", label: "Settings", labelHi: "सेटिंग्स", icon: Settings },
@@ -54,12 +56,12 @@ export default function AppLayout({ children }: AppLayoutProps) {
   useBackClose(sidebarOpen, closeSidebar);
   const [lang, setLang] = useState<"en" | "hi">("en");
   const [rateDialogOpen, setRateDialogOpen] = useState(false);
-  const [rateForm, setRateForm] = useState({ gold22k: "", gold24k: "", gold18k: "", silver: "" });
 
   const { data: rates } = useGetCurrentRates();
   const updateRates = useUpdateRates();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { rateForm, setGoldRate: setGoldRateField, setSilver, buildRatePayload } = useMetalRateForm(rates);
 
   useEffect(() => {
     if (rates) {
@@ -67,37 +69,13 @@ export default function AppLayout({ children }: AppLayoutProps) {
       // Persist to localStorage so rates survive page refresh
       localStorage.setItem("sd_gold22k", rates.gold22k.toString());
       localStorage.setItem("sd_silver", rates.silver.toString());
-      setRateForm({
-        gold22k: String(Math.round(rates.gold22k * 10)),
-        gold24k: String(Math.round(rates.gold24k * 10)),
-        gold18k: String(Math.round(rates.gold18k * 10)),
-        silver: String(Math.round(rates.silver * 1000)),
-      });
     }
   }, [rates]);
 
-  const openRateDialog = () => {
-    if (rates) {
-      setRateForm({
-        gold22k: String(Math.round(rates.gold22k * 10)),
-        gold24k: String(Math.round(rates.gold24k * 10)),
-        gold18k: String(Math.round(rates.gold18k * 10)),
-        silver: String(Math.round(rates.silver * 1000)),
-      });
-    }
-    setRateDialogOpen(true);
-  };
+  const openRateDialog = () => setRateDialogOpen(true);
 
   const saveRates = () => {
-    const payload: Record<string, number> = {};
-    const p22k = parseFloat(rateForm.gold22k);
-    const p24k = parseFloat(rateForm.gold24k);
-    const p18k = parseFloat(rateForm.gold18k);
-    const pSilver = parseFloat(rateForm.silver);
-    if (rateForm.gold22k && isFinite(p22k) && p22k > 0) payload.gold22k = p22k / 10;
-    if (rateForm.gold24k && isFinite(p24k) && p24k > 0) payload.gold24k = p24k / 10;
-    if (rateForm.gold18k && isFinite(p18k) && p18k > 0) payload.gold18k = p18k / 10;
-    if (rateForm.silver && isFinite(pSilver) && pSilver > 0) payload.silver = pSilver / 1000;
+    const payload = buildRatePayload();
     if (Object.keys(payload).length === 0) {
       toast({ title: "Enter at least one valid rate", variant: "destructive" }); return;
     }
@@ -324,12 +302,12 @@ export default function AppLayout({ children }: AppLayoutProps) {
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              Check your <strong>local sarafa / bullion market</strong> rates every morning and update manually. Enter gold <strong>per 10 grams</strong> and silver <strong>per kg</strong>.
+              Check your <strong>local sarafa / bullion market</strong> rates every morning and update manually. Enter gold <strong>per 10 grams</strong> and silver <strong>per kg</strong>. Enter any one gold rate and the others auto-fill — edit a field afterward to override it.
             </p>
             <div className="space-y-3">
               {[
-                { label: "Gold 22K (₹ per 10g)", key: "gold22k", placeholder: "e.g. 72500" },
                 { label: "Gold 24K (₹ per 10g)", key: "gold24k", placeholder: "e.g. 79500" },
+                { label: "Gold 22K (₹ per 10g)", key: "gold22k", placeholder: "e.g. 72500" },
                 { label: "Gold 18K (₹ per 10g)", key: "gold18k", placeholder: "e.g. 59400" },
                 { label: "Silver (₹ per kg)", key: "silver", placeholder: "e.g. 95000" },
               ].map(({ label, key, placeholder }) => (
@@ -339,7 +317,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     type="number"
                     step="1"
                     value={rateForm[key as keyof typeof rateForm]}
-                    onChange={e => setRateForm(f => ({ ...f, [key]: e.target.value }))}
+                    onChange={e => key === "silver" ? setSilver(e.target.value) : setGoldRateField(key as "gold22k" | "gold24k" | "gold18k", e.target.value)}
                     placeholder={placeholder}
                     data-testid={`input-rate-${key}`}
                   />

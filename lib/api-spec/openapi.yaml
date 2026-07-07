@@ -550,6 +550,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Karigar"
+    delete:
+      operationId: deleteKarigar
+      tags: [karigars]
+      summary: Delete a karigar
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
 
   /karigars/{id}/issue-metal:
     post:
@@ -680,6 +693,112 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RepairJob"
+    delete:
+      operationId: deleteRepair
+      tags: [repairs]
+      summary: Delete a repair job
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  # ---------- CUSTOM ORDERS ----------
+  /custom-orders:
+    get:
+      operationId: listCustomOrders
+      tags: [custom-orders]
+      summary: List all custom orders
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Custom orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CustomOrder"
+    post:
+      operationId: createCustomOrder
+      tags: [custom-orders]
+      summary: Create a custom order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomOrderInput"
+      responses:
+        "201":
+          description: Created custom order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomOrder"
+
+  /custom-orders/{id}:
+    get:
+      operationId: getCustomOrder
+      tags: [custom-orders]
+      summary: Get a custom order
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Custom order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomOrder"
+    patch:
+      operationId: updateCustomOrder
+      tags: [custom-orders]
+      summary: Update a custom order
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomOrderUpdate"
+      responses:
+        "200":
+          description: Updated custom order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomOrder"
+    delete:
+      operationId: deleteCustomOrder
+      tags: [custom-orders]
+      summary: Delete a custom order
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
 
   # ---------- PURCHASES ----------
   /purchases:
@@ -732,6 +851,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Purchase"
+    patch:
+      operationId: updatePurchase
+      tags: [purchases]
+      summary: Update a purchase
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PurchaseUpdate"
+      responses:
+        "200":
+          description: Updated purchase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Purchase"
+
+  /purchases/{id}/cancel:
+    post:
+      operationId: cancelPurchase
+      tags: [purchases]
+      summary: Cancel a purchase (reverses its journal entry; only before any follow-up payment)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Cancelled purchase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Purchase"
 
   # ---------- SUPPLIERS ----------
   /suppliers:
@@ -765,6 +926,44 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Supplier"
+
+  /suppliers/{id}:
+    patch:
+      operationId: updateSupplier
+      tags: [suppliers]
+      summary: Update a supplier
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupplierInput"
+      responses:
+        "200":
+          description: Updated supplier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Supplier"
+    delete:
+      operationId: deleteSupplier
+      tags: [suppliers]
+      summary: Delete a supplier
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
 
   # ---------- SETTINGS ----------
   /settings:
@@ -1022,6 +1221,8 @@ components:
           type: integer
         gstin:
           type: ["string", "null"]
+        stateCode:
+          type: ["string", "null"]
         notes:
           type: ["string", "null"]
         createdAt:
@@ -1045,6 +1246,8 @@ components:
           type: ["string", "null"]
         gstin:
           type: ["string", "null"]
+        stateCode:
+          type: ["string", "null"]
         notes:
           type: ["string", "null"]
 
@@ -1064,6 +1267,8 @@ components:
         anniversary:
           type: ["string", "null"]
         gstin:
+          type: ["string", "null"]
+        stateCode:
           type: ["string", "null"]
         notes:
           type: ["string", "null"]
@@ -1102,7 +1307,7 @@ components:
 
     Sale:
       type: object
-      required: [id, customerId, customerName, totalAmount, gstAmount, discountAmount, exchangeGoldWeight, exchangeGoldValue, paymentMode, paymentStatus, invoiceNumber, saleDate, createdAt]
+      required: [id, customerId, customerName, totalAmount, paidAmount, balanceAmount, gstAmount, discountAmount, exchangeGoldWeight, exchangeGoldValue, paymentMode, paymentStatus, invoiceNumber, saleDate, createdAt]
       properties:
         id:
           type: integer
@@ -1111,6 +1316,10 @@ components:
         customerName:
           type: string
         totalAmount:
+          type: number
+        paidAmount:
+          type: number
+        balanceAmount:
           type: number
         gstAmount:
           type: number
@@ -1144,6 +1353,8 @@ components:
         customerName:
           type: string
         totalAmount:
+          type: number
+        paidAmount:
           type: number
         gstAmount:
           type: number
@@ -1464,9 +1675,154 @@ components:
         karigarId:
           type: ["integer", "null"]
 
+    CustomOrder:
+      type: object
+      required: [id, orderNumber, customerId, customerName, customerMobile, itemType, description, metalType, purity, targetWeight, estimatedPrice, agreedPrice, advancePaid, status, karigarId, karigarName, metalIssuedWeight, metalIssuedDate, finishedWeight, wastageWeight, karigarReturnDate, karigarWages, karigarNotes, dueDate, deliveryDate, finalPrice, notes, createdAt]
+      properties:
+        id:
+          type: integer
+        orderNumber:
+          type: string
+        customerId:
+          type: ["integer", "null"]
+        customerName:
+          type: string
+        customerMobile:
+          type: string
+        itemType:
+          type: string
+        description:
+          type: ["string", "null"]
+        metalType:
+          type: string
+        purity:
+          type: string
+        targetWeight:
+          type: ["number", "null"]
+        estimatedPrice:
+          type: ["number", "null"]
+        agreedPrice:
+          type: ["number", "null"]
+        advancePaid:
+          type: number
+        status:
+          type: string
+          description: pending, karigar_assigned, in_progress, karigar_returned, ready, delivered, cancelled
+        karigarId:
+          type: ["integer", "null"]
+        karigarName:
+          type: ["string", "null"]
+        metalIssuedWeight:
+          type: ["number", "null"]
+        metalIssuedDate:
+          type: ["string", "null"]
+        finishedWeight:
+          type: ["number", "null"]
+        wastageWeight:
+          type: ["number", "null"]
+        karigarReturnDate:
+          type: ["string", "null"]
+        karigarWages:
+          type: ["number", "null"]
+        karigarNotes:
+          type: ["string", "null"]
+        dueDate:
+          type: string
+        deliveryDate:
+          type: ["string", "null"]
+        finalPrice:
+          type: ["number", "null"]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    CustomOrderInput:
+      type: object
+      required: [customerName, customerMobile, itemType, metalType, purity, dueDate]
+      properties:
+        customerId:
+          type: ["integer", "null"]
+        customerName:
+          type: string
+        customerMobile:
+          type: string
+        itemType:
+          type: string
+        description:
+          type: ["string", "null"]
+        metalType:
+          type: string
+        purity:
+          type: string
+        targetWeight:
+          type: ["number", "null"]
+        estimatedPrice:
+          type: ["number", "null"]
+        agreedPrice:
+          type: ["number", "null"]
+        advancePaid:
+          type: number
+        dueDate:
+          type: string
+        notes:
+          type: ["string", "null"]
+
+    CustomOrderUpdate:
+      type: object
+      properties:
+        customerName:
+          type: string
+        customerMobile:
+          type: string
+        itemType:
+          type: string
+        description:
+          type: ["string", "null"]
+        metalType:
+          type: string
+        purity:
+          type: string
+        targetWeight:
+          type: ["number", "null"]
+        estimatedPrice:
+          type: ["number", "null"]
+        agreedPrice:
+          type: ["number", "null"]
+        advancePaid:
+          type: number
+        status:
+          type: string
+        karigarId:
+          type: ["integer", "null"]
+        karigarName:
+          type: ["string", "null"]
+        metalIssuedWeight:
+          type: ["number", "null"]
+        metalIssuedDate:
+          type: ["string", "null"]
+        finishedWeight:
+          type: ["number", "null"]
+        wastageWeight:
+          type: ["number", "null"]
+        karigarReturnDate:
+          type: ["string", "null"]
+        karigarWages:
+          type: ["number", "null"]
+        karigarNotes:
+          type: ["string", "null"]
+        dueDate:
+          type: string
+        deliveryDate:
+          type: ["string", "null"]
+        finalPrice:
+          type: ["number", "null"]
+        notes:
+          type: ["string", "null"]
+
     Purchase:
       type: object
-      required: [id, supplierId, supplierName, metalType, purity, grossWeight, netWeight, fineWeight, ratePerGram, totalAmount, invoiceNumber, purchaseDate, createdAt]
+      required: [id, supplierId, supplierName, metalType, purity, grossWeight, netWeight, fineWeight, ratePerGram, totalAmount, paidAmount, balanceAmount, paymentMode, taxableValue, gstRate, gstAmount, hsnCode, invoiceNumber, purchaseDate, cancelledAt, createdAt]
       properties:
         id:
           type: integer
@@ -1488,11 +1844,27 @@ components:
           type: number
         totalAmount:
           type: number
+        paidAmount:
+          type: number
+        balanceAmount:
+          type: number
+        paymentMode:
+          type: string
+        taxableValue:
+          type: ["number", "null"]
+        gstRate:
+          type: ["number", "null"]
+        gstAmount:
+          type: ["number", "null"]
+        hsnCode:
+          type: ["string", "null"]
         invoiceNumber:
           type: string
         purchaseDate:
           type: string
         notes:
+          type: ["string", "null"]
+        cancelledAt:
           type: ["string", "null"]
         createdAt:
           type: string
@@ -1519,6 +1891,48 @@ components:
           type: number
         totalAmount:
           type: number
+        paidAmount:
+          type: number
+        paymentMode:
+          type: string
+        gstRate:
+          type: number
+        hsnCode:
+          type: string
+        purchaseDate:
+          type: string
+        notes:
+          type: ["string", "null"]
+
+    PurchaseUpdate:
+      type: object
+      properties:
+        supplierId:
+          type: ["integer", "null"]
+        supplierName:
+          type: string
+        metalType:
+          type: string
+        purity:
+          type: string
+        grossWeight:
+          type: number
+        netWeight:
+          type: number
+        fineWeight:
+          type: number
+        ratePerGram:
+          type: number
+        totalAmount:
+          type: number
+        paidAmount:
+          type: number
+        paymentMode:
+          type: string
+        gstRate:
+          type: ["number", "null"]
+        hsnCode:
+          type: string
         purchaseDate:
           type: string
         notes:
@@ -1560,7 +1974,7 @@ components:
 
     BusinessSettings:
       type: object
-      required: [id, businessName, gstin, address, mobile, email, logo, gstRate, defaultBranch, branches, updatedAt]
+      required: [id, businessName, gstin, address, mobile, email, logo, gstRate, stateCode, gstOnExchangeEnabled, cashTransactionLimit, defaultBranch, branches, whatsappApiEnabled, whatsappPhoneNumberId, hasAccessToken, loyaltyPointsEnabled, loyaltyPointsRate, updatedAt]
       properties:
         id:
           type: integer
@@ -1578,12 +1992,28 @@ components:
           type: ["string", "null"]
         gstRate:
           type: number
+        stateCode:
+          type: ["string", "null"]
+        gstOnExchangeEnabled:
+          type: boolean
+        cashTransactionLimit:
+          type: number
         defaultBranch:
           type: string
         branches:
           type: array
           items:
             type: string
+        whatsappApiEnabled:
+          type: boolean
+        whatsappPhoneNumberId:
+          type: string
+        hasAccessToken:
+          type: boolean
+        loyaltyPointsEnabled:
+          type: boolean
+        loyaltyPointsRate:
+          type: number
         updatedAt:
           type: string
 
@@ -1604,9 +2034,25 @@ components:
           type: ["string", "null"]
         gstRate:
           type: number
+        stateCode:
+          type: ["string", "null"]
+        gstOnExchangeEnabled:
+          type: boolean
+        cashTransactionLimit:
+          type: number
         defaultBranch:
           type: string
         branches:
           type: array
           items:
             type: string
+        whatsappApiEnabled:
+          type: boolean
+        whatsappPhoneNumberId:
+          type: string
+        whatsappAccessToken:
+          type: string
+        loyaltyPointsEnabled:
+          type: boolean
+        loyaltyPointsRate:
+          type: number

@@ -15,6 +15,9 @@ function mapSettings(s: typeof businessSettingsTable.$inferSelect) {
     email: s.email,
     logo: s.logo,
     gstRate: parseFloat(s.gstRate),
+    stateCode: s.stateCode,
+    gstOnExchangeEnabled: s.gstOnExchangeEnabled,
+    cashTransactionLimit: parseFloat(s.cashTransactionLimit),
     defaultBranch: s.defaultBranch,
     branches: s.branches.split(",").map(b => b.trim()).filter(Boolean),
     whatsappApiEnabled: s.whatsappApiEnabled,
@@ -41,6 +44,9 @@ router.get("/", async (req, res) => {
         email: null,
         logo: null,
         gstRate: 3,
+        stateCode: null,
+        gstOnExchangeEnabled: true,
+        cashTransactionLimit: 200000,
         defaultBranch: "Main",
         branches: ["Main"],
         whatsappApiEnabled: false,
@@ -78,6 +84,13 @@ router.put("/", async (req, res) => {
       if (!isFinite(gstRate) || gstRate < 0) return res.status(400).json({ error: "GST rate must be a non-negative number" });
       updateData.gstRate = gstRate.toString();
     }
+    if (data.stateCode !== undefined) updateData.stateCode = data.stateCode ? String(data.stateCode).trim().slice(0, 2) : null;
+    if (data.gstOnExchangeEnabled !== undefined) updateData.gstOnExchangeEnabled = !!data.gstOnExchangeEnabled;
+    if (data.cashTransactionLimit !== undefined) {
+      const limit = parseFloat(String(data.cashTransactionLimit));
+      if (!isFinite(limit) || limit <= 0) return res.status(400).json({ error: "Cash transaction limit must be a positive number" });
+      updateData.cashTransactionLimit = limit.toString();
+    }
     if (data.defaultBranch !== undefined) updateData.defaultBranch = data.defaultBranch;
     if (data.branches !== undefined) updateData.branches = Array.isArray(data.branches) ? data.branches.join(",") : data.branches;
     if (data.whatsappApiEnabled !== undefined) updateData.whatsappApiEnabled = data.whatsappApiEnabled;
@@ -102,6 +115,9 @@ router.put("/", async (req, res) => {
         email: data.email,
         logo: data.logo,
         gstRate: (data.gstRate ?? 3).toString(),
+        stateCode: data.stateCode ? String(data.stateCode).trim().slice(0, 2) : null,
+        gstOnExchangeEnabled: data.gstOnExchangeEnabled ?? true,
+        cashTransactionLimit: (data.cashTransactionLimit ?? 200000).toString(),
         defaultBranch: data.defaultBranch ?? "Main",
         branches: Array.isArray(data.branches) ? data.branches.join(",") : (data.branches ?? "Main"),
         loyaltyPointsEnabled: data.loyaltyPointsEnabled ?? true,

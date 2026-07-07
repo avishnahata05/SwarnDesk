@@ -195,18 +195,22 @@ function MaturityView({ data }: { data: any }) {
   return <>{section("Overdue", safeArr(data.overdue), "text-red-600")}{section("Due This Week", safeArr(data.dueThisWeek), "text-amber-600")}{section("Upcoming (8–30 days)", safeArr(data.upcoming), "text-muted-foreground")}</>;
 }
 
+const RETURN_TYPE_LABEL: Record<string, string> = { redeemed: "Redeemed", forfeited: "Forfeited", partial_release: "Partial Release" };
+
 function ReturnsTable({ rows }: { rows: any[] }) {
   if (rows.length === 0) return <p className="text-sm text-muted-foreground py-8 text-center">No returns in this period.</p>;
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
-        <thead><tr><Th>Return Voucher #</Th><Th>Loan #</Th><Th>Customer</Th><Th>Status</Th><Th>Date</Th><Th>Amount</Th><Th>Loss</Th></tr></thead>
+        <thead><tr><Th>Voucher #</Th><Th>Loan #</Th><Th>Type</Th><Th>Customer / Items</Th><Th>Date</Th><Th>Amount</Th><Th>Loss</Th></tr></thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={i}>
-              <Td>{r.returnVoucherNumber}</Td><Td>{r.loanNumber}</Td><Td>{r.customerName}</Td><Td>{r.status}</Td>
-              <Td>{r.redeemedDate ? new Date(r.redeemedDate).toLocaleDateString("en-IN") : "—"}</Td>
-              <Td right>{formatCurrency(r.redeemedAmount ?? 0)}</Td>
+            <tr key={i} className={r.type === "partial_release" ? "bg-teal-50/40" : ""}>
+              <Td>{r.voucherNumber ?? "—"}</Td><Td>{r.loanNumber}</Td>
+              <Td>{RETURN_TYPE_LABEL[r.type] ?? r.type}</Td>
+              <Td>{r.type === "partial_release" ? r.itemsDescription : r.customerName}</Td>
+              <Td>{r.date ? new Date(r.date).toLocaleDateString("en-IN") : "—"}</Td>
+              <Td right>{formatCurrency(r.amount ?? 0)}</Td>
               <Td right>{r.lossAmount ? formatCurrency(r.lossAmount) : "—"}</Td>
             </tr>
           ))}

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useSearch, useLocation } from "wouter";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { API, authHeader } from "./api";
 import type { Branch } from "./types";
@@ -10,6 +11,15 @@ import SettingsTab from "./SettingsTab";
 
 export default function Girvi() {
   const [branches, setBranches] = useState<Branch[]>([]);
+
+  // Supports a Dashboard quick action linking straight to "/app/girvi?new=1"
+  // that auto-opens the New Loan dialog on the (default) Loans tab.
+  const search = useSearch();
+  const [, navigate] = useLocation();
+  const autoOpenNew = new URLSearchParams(search).get("new") === "1";
+  useEffect(() => {
+    if (autoOpenNew) navigate("/app/girvi", { replace: true });
+  }, [autoOpenNew, navigate]);
 
   const loadBranches = useCallback(async () => {
     try {
@@ -31,7 +41,7 @@ export default function Girvi() {
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
         <TabsContent value="loans">
-          <LoansTab branches={branches} />
+          <LoansTab branches={branches} autoOpenNew={autoOpenNew} />
         </TabsContent>
         <TabsContent value="customers">
           <CustomersTab />

@@ -20,5 +20,7 @@ export interface CustomerUpdate {
   /** @nullable */
   gstin?: string | null;
   /** @nullable */
+  stateCode?: string | null;
+  /** @nullable */
   notes?: string | null;
 }

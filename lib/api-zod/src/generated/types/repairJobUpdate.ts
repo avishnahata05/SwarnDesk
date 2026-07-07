@@ -14,4 +14,12 @@ export interface RepairJobUpdate {
   deliveredDate?: string | null;
   /** @nullable */
   notes?: string | null;
+  customerName?: string;
+  customerMobile?: string;
+  itemDescription?: string;
+  issue?: string;
+  estimatedCost?: number;
+  promisedDate?: string;
+  /** @nullable */
+  karigarId?: number | null;
 }

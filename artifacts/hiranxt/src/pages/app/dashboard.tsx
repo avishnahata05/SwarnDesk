@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import {
   TrendingUp, Package, Users, Wrench, AlertTriangle, Plus,
   Bot, X, Send, ShoppingCart, IndianRupee, ArrowUpRight,
+  Banknote, UserPlus,
 } from "lucide-react";
 import {
   AreaChart, Area, PieChart, Pie, Cell,
@@ -137,11 +138,25 @@ export default function Dashboard() {
             {new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Link href="/app/billing">
             <Button size="sm" className="gap-1.5 shadow-sm" data-testid="button-new-sale">
               <Plus className="w-4 h-4" />
               New Sale
+            </Button>
+          </Link>
+          <Link href="/app/girvi?new=1">
+            <Button size="sm" variant="outline" className="gap-1.5 shadow-xs" data-testid="button-new-girvi-loan">
+              <Banknote className="w-4 h-4" />
+              <span className="hidden sm:inline">New Girvi Loan</span>
+              <span className="sm:hidden">Girvi</span>
+            </Button>
+          </Link>
+          <Link href="/app/customers?new=1">
+            <Button size="sm" variant="outline" className="gap-1.5 shadow-xs" data-testid="button-new-customer">
+              <UserPlus className="w-4 h-4" />
+              <span className="hidden sm:inline">New Customer</span>
+              <span className="sm:hidden">Customer</span>
             </Button>
           </Link>
           <Link href="/app/inventory">

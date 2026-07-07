@@ -12,6 +12,15 @@ export const businessSettingsTable = pgTable("business_settings", {
   email: text("email"),
   logo: text("logo"),
   gstRate: numeric("gst_rate", { precision: 5, scale: 2 }).notNull().default("3"),
+  // 2-digit GST state code (e.g. "27" = Maharashtra) — compared against a customer's own
+  // stateCode to decide CGST+SGST (same state) vs IGST (different state) on a sale.
+  stateCode: text("state_code"),
+  // Whether old-gold-exchange value nets down a sale's GST-taxable base (current/legacy
+  // behavior) or the sale is taxed on its full pre-exchange value instead. Left as a
+  // per-shop toggle rather than a hardcoded legal interpretation — confirm with your CA.
+  gstOnExchangeEnabled: boolean("gst_on_exchange_enabled").notNull().default(true),
+  // Same-day cash-receipt threshold to flag for TCS/Sec.269ST awareness (informational only).
+  cashTransactionLimit: numeric("cash_transaction_limit", { precision: 12, scale: 2 }).notNull().default("200000"),
   defaultBranch: text("default_branch").notNull().default("Main"),
   branches: text("branches").notNull().default("Main"),
   whatsappApiEnabled: boolean("whatsapp_api_enabled").notNull().default(false),

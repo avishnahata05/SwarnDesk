@@ -1,7 +1,9 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useBackClose } from "@/hooks/use-back-close";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
+import { ShortcutsHelpDialog, ShortcutsHelpButton } from "@/components/ShortcutsHelp";
 import { useGetSettings, useGetCurrentRates } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,12 +16,13 @@ import {
   Banknote, AlertTriangle, CheckCircle2, TrendingDown, TrendingUp,
   Plus, RefreshCw, XCircle, ChevronDown, ChevronUp, Calendar,
   MessageCircle, Search, Clock, Coins, Scale,
-  RotateCcw, Flame, ArrowLeftRight,
+  RotateCcw, Flame, ArrowLeftRight, PackageCheck,
 } from "lucide-react";
 import { API, authHeader, getAuthHeaders } from "./api";
-import type { Loan, LoanItem, Payment, Rates, Branch, Summary } from "./types";
-import { printInterestReceipt, openGirviVoucher, openReturnVoucher, computeLiveEstValue } from "./vouchers";
+import type { Loan, LoanItem, Payment, Rates, Branch, Summary, PartialRelease } from "./types";
+import { printInterestReceipt, openGirviVoucher, openReturnVoucher, openPartialReleaseVoucher, computeLiveEstValue } from "./vouchers";
 import NewLoanDialog from "./NewLoanDialog";
+import DueDatePresets from "./DueDatePresets";
 
 function toVikramSamvat(date: Date): string {
   const day = date.getDate();
@@ -35,7 +38,7 @@ function calcDaysElapsed(startDate: string) {
   return Math.floor((Date.now() - new Date(startDate).getTime()) / 86400000);
 }
 
-export default function LoansTab({ branches }: { branches: Branch[] }) {
+export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]; autoOpenNew?: boolean }) {
   const { toast } = useToast();
   const { data: settings } = useGetSettings();
   const { data: rates } = useGetCurrentRates();
@@ -50,10 +53,11 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [loanPayments, setLoanPayments] = useState<Record<number, Payment[]>>({});
   const [loanItems, setLoanItems] = useState<Record<number, LoanItem[]>>({});
+  const [loanReleases, setLoanReleases] = useState<Record<number, PartialRelease[]>>({});
 
   const [showNewLoan, setShowNewLoan] = useState(false);
   const [actionLoan, setActionLoan] = useState<Loan | null>(null);
-  const [actionType, setActionType] = useState<"redeem" | "forfeit" | "extend" | "collect" | "renew" | "transfer" | null>(null);
+  const [actionType, setActionType] = useState<"redeem" | "forfeit" | "extend" | "collect" | "renew" | "transfer" | "partialRelease" | null>(null);
   const [goldSaleValue, setGoldSaleValue] = useState("");
   const [newDueDate, setNewDueDate] = useState("");
   const [collectAmount, setCollectAmount] = useState("");
@@ -68,8 +72,19 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
   const [transferItemIds, setTransferItemIds] = useState<number[]>([]);
   const [transferToBranchId, setTransferToBranchId] = useState("");
   const [transferReason, setTransferReason] = useState("");
+  const [releaseItemIds, setReleaseItemIds] = useState<number[]>([]);
+  const [releaseAmount, setReleaseAmount] = useState("0");
+  const [releaseMode, setReleaseMode] = useState("cash");
+  const [releaseNotes, setReleaseNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [lastPayment, setLastPayment] = useState<Payment | null>(null);
+  const [lastRelease, setLastRelease] = useState<{ release: PartialRelease; loan: Loan; releasedItems: LoanItem[]; remainingItems: LoanItem[] } | null>(null);
+  const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (autoOpenNew) setShowNewLoan(true);
+  }, [autoOpenNew]);
 
   const closeNewLoan = useCallback(() => setShowNewLoan(false), []);
   const closeActionDialog = useCallback(() => { setActionLoan(null); setActionType(null); setRedeemConfirmed(false); }, []);
@@ -81,6 +96,12 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
     const t = setTimeout(() => setLastPayment(null), 10000);
     return () => clearTimeout(t);
   }, [lastPayment]);
+
+  useEffect(() => {
+    if (!lastRelease) return;
+    const t = setTimeout(() => setLastRelease(null), 15000);
+    return () => clearTimeout(t);
+  }, [lastRelease]);
 
   const shopName = settings?.businessName ?? "SwarnDesk Jewellers";
   const shopAddress = settings?.address ?? "";
@@ -124,9 +145,17 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
     } catch { /* silent */ }
   };
 
+  const loadReleases = async (loanId: number) => {
+    if (loanReleases[loanId]) return;
+    try {
+      const r = await fetch(`${API}/${loanId}/partial-releases`, { headers: authHeader() });
+      if (r.ok) { const data = await r.json(); setLoanReleases(prev => ({ ...prev, [loanId]: data })); }
+    } catch { /* silent */ }
+  };
+
   const handleExpand = (id: number) => {
     setExpandedId(expandedId === id ? null : id);
-    if (expandedId !== id) { loadPayments(id); loadItems(id); }
+    if (expandedId !== id) { loadPayments(id); loadItems(id); loadReleases(id); }
   };
 
   const filteredLoans = useMemo(() => {
@@ -174,6 +203,39 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
         setLoanItems(prev => { const n = { ...prev }; delete n[actionLoan.id]; return n; });
         setActionLoan(null); setActionType(null);
         setTransferItemIds([]); setTransferToBranchId(""); setTransferReason("");
+        setSubmitting(false);
+        return;
+      }
+
+      if (actionType === "partialRelease") {
+        if (releaseItemIds.length === 0) { toast({ title: "Select at least one item to release", variant: "destructive" }); setSubmitting(false); return; }
+        const pledgedCount = (loanItems[actionLoan.id] ?? []).filter(it => it.status === "pledged").length;
+        if (releaseItemIds.length >= pledgedCount) {
+          toast({ title: "That's every pledged item — use Redeem to close out the loan instead", variant: "destructive" });
+          setSubmitting(false); return;
+        }
+        const amt = parseFloat(releaseAmount) || 0;
+        if (amt < 0) { toast({ title: "Amount cannot be negative", variant: "destructive" }); setSubmitting(false); return; }
+        if (amt > actionLoan.totalDue + 0.01) {
+          toast({ title: `Amount exceeds total amount due (${formatCurrency(actionLoan.totalDue)})`, variant: "destructive" });
+          setSubmitting(false); return;
+        }
+        const r = await fetch(`${API}/${actionLoan.id}/partial-release`, {
+          method: "POST", headers: getAuthHeaders(),
+          body: JSON.stringify({ itemIds: releaseItemIds, amount: amt, paymentMode: releaseMode, notes: releaseNotes.trim() || null }),
+        });
+        if (!r.ok) throw new Error((await r.json()).error ?? "Failed");
+        const result: { loan: Loan; release: PartialRelease; releasedItems: LoanItem[] } = await r.json();
+        const previousItems = loanItems[actionLoan.id] ?? [];
+        const remainingItems = previousItems.filter(it => !releaseItemIds.includes(it.id));
+        setLoans(prev => prev.map(l => l.id === actionLoan.id ? result.loan : l));
+        setLoanItems(prev => { const n = { ...prev }; delete n[actionLoan.id]; return n; });
+        setLoanPayments(prev => { const n = { ...prev }; delete n[actionLoan.id]; return n; });
+        setLoanReleases(prev => { const n = { ...prev }; delete n[actionLoan.id]; return n; });
+        setLastRelease({ release: result.release, loan: result.loan, releasedItems: result.releasedItems, remainingItems });
+        toast({ title: `${releaseItemIds.length} item${releaseItemIds.length !== 1 ? "s" : ""} released. Print voucher below.` });
+        setActionLoan(null); setActionType(null);
+        setReleaseItemIds([]); setReleaseAmount("0"); setReleaseMode("cash"); setReleaseNotes("");
         setSubmitting(false);
         return;
       }
@@ -284,6 +346,16 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
     toast({ title: `WhatsApp opened for ${overdue.length} overdue customer${overdue.length !== 1 ? "s" : ""}` });
   };
 
+  // Single-key shortcuts — paused while the New Loan dialog or an action dialog is open.
+  const shortcutsEnabled = !showNewLoan && !actionLoan && !shortcutsHelpOpen;
+  useKeyboardShortcuts([
+    { key: "/", description: "Focus loan search", action: () => searchInputRef.current?.focus() },
+    { key: "n", description: "New Girvi loan", action: () => setShowNewLoan(true) },
+    { key: "o", description: "Jump to Overdue tab", action: () => { setStatusFilter("active"); setDueFilter("overdue"); } },
+    { key: "r", description: "Recalculate loans", action: () => loadAll() },
+    { key: "?", description: "Show this help", action: () => setShortcutsHelpOpen(true) },
+  ], shortcutsEnabled);
+
   const FILTER_TABS = [
     { key: "active|all", label: "Active", count: summary?.totalActive },
     { key: "active|overdue", label: "Overdue", count: summary?.overdueCount, urgent: true },
@@ -310,6 +382,9 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
             Girvi Loans
           </h1>
           <p className="text-muted-foreground text-sm mt-0.5">Gold & silver collateral loans with live interest</p>
+          <div className="mt-1">
+            <ShortcutsHelpButton onClick={() => setShortcutsHelpOpen(true)} />
+          </div>
         </div>
         <div className="flex flex-col items-end gap-1.5">
           <div className="flex gap-2 flex-wrap">
@@ -418,6 +493,7 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
+                ref={searchInputRef}
                 placeholder="Search by customer, loan number, mobile, or item..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}
@@ -447,6 +523,7 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
                   expanded={expandedId === loan.id}
                   payments={loanPayments[loan.id]}
                   items={loanItems[loan.id]}
+                  releases={loanReleases[loan.id]}
                   rates={rates}
                   branchName={branchName(loan.branchId)}
                   calendarMode={calendarMode}
@@ -481,6 +558,13 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
                       setTransferToBranchId("");
                       setTransferReason("");
                     }
+                    if (type === "partialRelease") {
+                      loadItems(loan.id);
+                      setReleaseItemIds([]);
+                      setReleaseAmount("0");
+                      setReleaseMode("cash");
+                      setReleaseNotes("");
+                    }
                   }}
                   onWaReminder={sendWaReminder}
                 />
@@ -489,6 +573,19 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
           )}
         </CardContent>
       </Card>
+
+      <ShortcutsHelpDialog
+        open={shortcutsHelpOpen}
+        onClose={() => setShortcutsHelpOpen(false)}
+        title="Girvi Shortcuts"
+        shortcuts={[
+          { keys: "/", description: "Focus loan search" },
+          { keys: "N", description: "New Girvi loan" },
+          { keys: "O", description: "Jump to Overdue tab" },
+          { keys: "R", description: "Recalculate loans" },
+          { keys: "?", description: "Show this help" },
+        ]}
+      />
 
       <NewLoanDialog
         open={showNewLoan}
@@ -508,11 +605,12 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
               {actionType === "forfeit" && <><XCircle className="w-4 h-4 text-destructive" />Forfeit Gold</>}
               {actionType === "extend" && <><Clock className="w-4 h-4" />Extend Due Date</>}
               {actionType === "transfer" && <><ArrowLeftRight className="w-4 h-4 text-blue-500" />Transfer Items</>}
+              {actionType === "partialRelease" && <><PackageCheck className="w-4 h-4 text-teal-600" />Release Items</>}
             </DialogTitle>
           </DialogHeader>
           {actionLoan && (
             <div className="space-y-4">
-              {actionType !== "transfer" && (
+              {actionType !== "transfer" && actionType !== "partialRelease" && (
                 <div className="p-3 rounded-lg bg-muted/30 border border-border text-xs space-y-1">
                   <div className="flex justify-between"><span className="text-muted-foreground">Customer</span><strong>{actionLoan.customerName}</strong></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Loan #</span><span className="font-mono">{actionLoan.loanNumber}</span></div>
@@ -644,6 +742,7 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">New due date</label>
                     <Input type="date" value={renewNewDueDate} onChange={e => setRenewNewDueDate(e.target.value)} min={new Date().toISOString().split("T")[0]} className="h-9" />
+                    <DueDatePresets from={new Date()} onPick={setRenewNewDueDate} />
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">Notes (optional)</label>
@@ -714,7 +813,8 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
                 <div className="space-y-2">
                   <label className="text-xs text-muted-foreground block">Current due: {formatDateDisplay(actionLoan.dueDate)}</label>
                   <Input type="date" value={newDueDate} min={new Date().toISOString().split("T")[0]} onChange={e => setNewDueDate(e.target.value)} className="h-9" />
-                  <p className="text-xs text-muted-foreground">Interest continues from original start date. Consider collecting outstanding interest first.</p>
+                  <DueDatePresets from={new Date(actionLoan.dueDate)} onPick={setNewDueDate} />
+                  <p className="text-xs text-muted-foreground">Interest continues from original start date. Consider collecting outstanding interest first. Quick picks extend from the current due date.</p>
                 </div>
               )}
 
@@ -755,14 +855,97 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
                 </div>
               )}
 
+              {actionType === "partialRelease" && (() => {
+                const pledged = (loanItems[actionLoan.id] ?? []).filter(it => it.status === "pledged");
+                const totalPledgedValue = pledged.reduce((s, it) => s + it.estimatedValue, 0);
+                const selected = pledged.filter(it => releaseItemIds.includes(it.id));
+                const selectedValue = selected.reduce((s, it) => s + it.estimatedValue, 0);
+                const valueShare = totalPledgedValue > 0 ? selectedValue / totalPledgedValue : 0;
+                const recommendedAmount = Math.round(actionLoan.currentPrincipal * valueShare);
+                const selectingAll = releaseItemIds.length > 0 && releaseItemIds.length >= pledged.length;
+                const amt = parseFloat(releaseAmount) || 0;
+                return (
+                <div className="space-y-3">
+                  <div className="text-xs text-muted-foreground">Loan {actionLoan.loanNumber} · {actionLoan.customerName} · {pledged.length} item{pledged.length !== 1 ? "s" : ""} currently pledged</div>
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Items to release</label>
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                      {pledged.map(it => (
+                        <label key={it.id} className="flex items-center gap-2 p-2 rounded-lg border border-border text-xs cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={releaseItemIds.includes(it.id)}
+                            onChange={e => {
+                              const nextIds = e.target.checked ? [...releaseItemIds, it.id] : releaseItemIds.filter(id => id !== it.id);
+                              setReleaseItemIds(nextIds);
+                              const nextSelected = pledged.filter(p => nextIds.includes(p.id));
+                              const nextValue = nextSelected.reduce((s, p) => s + p.estimatedValue, 0);
+                              const nextShare = totalPledgedValue > 0 ? nextValue / totalPledgedValue : 0;
+                              setReleaseAmount(String(Math.round(actionLoan.currentPrincipal * nextShare)));
+                            }}
+                          />
+                          <span>{it.quantity}× {it.itemType} — {it.metalType === "silver" ? "Silver" : "Gold"} {it.purity} · {it.grossWeight.toFixed(3)}g · {formatCurrency(it.estimatedValue)}</span>
+                        </label>
+                      ))}
+                      {pledged.length === 0 && <p className="text-xs text-muted-foreground">No pledged items to release.</p>}
+                    </div>
+                  </div>
+                  {selectingAll && (
+                    <div className="p-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                      That's every pledged item — use <strong>Redeem</strong> instead to close out the whole loan.
+                    </div>
+                  )}
+                  {releaseItemIds.length > 0 && !selectingAll && (
+                    <div className="p-2 rounded-lg bg-teal-50 border border-teal-200 text-xs text-teal-800 space-y-0.5">
+                      <div>Selected items are {(valueShare * 100).toFixed(0)}% of the {formatCurrency(totalPledgedValue)} currently pledged.</div>
+                      <div>Recommended paydown to keep the loan-to-value ratio unchanged: <strong>{formatCurrency(recommendedAmount)}</strong></div>
+                      <div className="text-teal-700/80">This is guidance, not a requirement — you can collect more, less, or nothing now.</div>
+                    </div>
+                  )}
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Amount collected now (₹) <span className="text-muted-foreground/60">optional</span></label>
+                    <Input type="number" value={releaseAmount} onChange={e => setReleaseAmount(e.target.value)} placeholder="0" className="h-9" />
+                    {amt === 0 && releaseItemIds.length > 0 && (
+                      <p className="text-xs text-amber-700 mt-1">No payment being collected — releasing collateral without paydown raises the LTV on what's left pledged.</p>
+                    )}
+                  </div>
+                  {amt > 0 && (
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Payment mode</label>
+                      <Select value={releaseMode} onValueChange={setReleaseMode}>
+                        <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="cash">Cash</SelectItem>
+                          <SelectItem value="bank">Bank Transfer</SelectItem>
+                          <SelectItem value="upi">UPI</SelectItem>
+                          <SelectItem value="cheque">Cheque</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Notes (optional)</label>
+                    <Textarea value={releaseNotes} onChange={e => setReleaseNotes(e.target.value)} placeholder="e.g. Customer took back 2 of 5 items" rows={2} className="text-sm resize-y" />
+                  </div>
+                </div>
+                );
+              })()}
+
               <div className="flex gap-2 justify-end">
                 <Button variant="outline" size="sm" onClick={() => { setActionLoan(null); setActionType(null); setRedeemConfirmed(false); }}>Cancel</Button>
                 <Button
                   size="sm"
                   variant={actionType === "forfeit" ? "destructive" : "default"}
-                  className={actionType === "collect" || actionType === "renew" ? "bg-emerald-600 hover:bg-emerald-700" : actionType === "redeem" ? "bg-green-600 hover:bg-green-700" : ""}
+                  className={actionType === "collect" || actionType === "renew" ? "bg-emerald-600 hover:bg-emerald-700" : actionType === "redeem" ? "bg-green-600 hover:bg-green-700" : actionType === "partialRelease" ? "bg-teal-600 hover:bg-teal-700" : ""}
                   onClick={handleAction}
-                  disabled={submitting || (actionType === "redeem" && !redeemConfirmed)}
+                  disabled={
+                    submitting ||
+                    (actionType === "redeem" && !redeemConfirmed) ||
+                    (actionType === "partialRelease" && (
+                      releaseItemIds.length === 0 ||
+                      releaseItemIds.length >= (loanItems[actionLoan.id] ?? []).filter(it => it.status === "pledged").length
+                    ))
+                  }
                 >
                   {submitting ? "Processing..." :
                    actionType === "collect" ? `${collectType === "waiver" ? "Waive" : "Collect"} ₹${parseFloat(collectAmount || "0").toLocaleString("en-IN")}` :
@@ -770,6 +953,7 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
                    actionType === "redeem" ? "Confirm Redemption" :
                    actionType === "forfeit" ? "Forfeit & Record" :
                    actionType === "transfer" ? "Transfer Items" :
+                   actionType === "partialRelease" ? `Release ${releaseItemIds.length || ""} Item${releaseItemIds.length !== 1 ? "s" : ""}` :
                    "Extend Due Date"}
                 </Button>
               </div>
@@ -798,12 +982,30 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
           </Button>
         </div>
       )}
+
+      {lastRelease && actionLoan === null && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-teal-600 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-3 text-sm">
+          <PackageCheck className="w-4 h-4" />
+          {lastRelease.releasedItems.length} item{lastRelease.releasedItems.length !== 1 ? "s" : ""} released
+          <Button
+            size="sm"
+            variant="secondary"
+            className="h-7 text-xs gap-1"
+            onClick={() => {
+              openPartialReleaseVoucher(lastRelease.release, lastRelease.loan, lastRelease.releasedItems, lastRelease.remainingItems, shopName, shopAddress, shopMobile);
+              setLastRelease(null);
+            }}
+          >
+            Print Voucher
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
 
 function LoanRow({
-  loan, expanded, payments, items, rates, branchName, calendarMode, formatDateDisplay,
+  loan, expanded, payments, items, releases, rates, branchName, calendarMode, formatDateDisplay,
   shopName, shopAddress, shopMobile,
   onExpand, onAction, onWaReminder,
 }: {
@@ -811,6 +1013,7 @@ function LoanRow({
   expanded: boolean;
   payments?: Payment[];
   items?: LoanItem[];
+  releases?: PartialRelease[];
   rates?: Rates;
   branchName: string;
   calendarMode: "en" | "hi";
@@ -819,11 +1022,12 @@ function LoanRow({
   shopAddress: string;
   shopMobile: string;
   onExpand: () => void;
-  onAction: (type: "redeem" | "forfeit" | "extend" | "collect" | "renew" | "transfer") => void;
+  onAction: (type: "redeem" | "forfeit" | "extend" | "collect" | "renew" | "transfer" | "partialRelease") => void;
   onWaReminder: (loan: Loan, type: "due" | "overdue") => void;
 }) {
   const isActive = loan.status === "active" || loan.status === "extended";
   const liveEstValue = computeLiveEstValue(loan, items, rates);
+  const pledgedCount = (items ?? []).filter(it => it.status === "pledged").length;
 
   return (
     <div className={`px-3 md:px-4 py-3 ${loan.isOverdue ? "bg-red-50/50 dark:bg-red-950/10" : ""}`}>
@@ -951,6 +1155,26 @@ function LoanRow({
             </div>
           </div>
 
+          {releases && releases.length > 0 && (
+            <div className="rounded-lg border border-teal-200 bg-teal-50/40 divide-y divide-teal-200/60">
+              <div className="px-3 py-1.5 text-xs font-semibold text-teal-800 flex items-center gap-1.5">
+                <PackageCheck className="w-3.5 h-3.5" />Partial Releases ({releases.length})
+              </div>
+              {releases.map(r => (
+                <div key={r.id} className="flex items-center justify-between px-3 py-1.5 text-xs">
+                  <div>
+                    <span className="font-mono">{r.releaseNumber}</span>
+                    <span className="text-muted-foreground ml-2">{r.itemsDescription}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">{new Date(r.releaseDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
+                    <span className="font-semibold text-teal-700">{formatCurrency(r.principalSettled + r.interestSettled)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {isActive && (
             <div className="flex gap-2 flex-wrap">
               <Button size="sm" className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => onAction("collect")}>
@@ -965,6 +1189,11 @@ function LoanRow({
               <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onAction("transfer")}>
                 <ArrowLeftRight className="w-3.5 h-3.5" />Transfer Items
               </Button>
+              {pledgedCount > 1 && (
+                <Button size="sm" variant="outline" className="gap-1.5 border-teal-400/50 text-teal-700 hover:bg-teal-50" onClick={() => onAction("partialRelease")}>
+                  <PackageCheck className="w-3.5 h-3.5" />Release Items
+                </Button>
+              )}
               <Button size="sm" className="gap-1.5 bg-green-600 hover:bg-green-700 text-white" onClick={() => onAction("redeem")}>
                 <CheckCircle2 className="w-3.5 h-3.5" />Redeem
               </Button>

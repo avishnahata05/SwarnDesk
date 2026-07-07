@@ -25,6 +25,8 @@ export interface Customer {
   /** @nullable */
   gstin?: string | null;
   /** @nullable */
+  stateCode?: string | null;
+  /** @nullable */
   notes?: string | null;
   createdAt: string;
 }

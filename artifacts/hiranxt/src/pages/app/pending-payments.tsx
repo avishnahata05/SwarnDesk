@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Search, ChevronDown, ChevronUp, CheckCircle2, Clock, IndianRupee, History } from "lucide-react";
+import { Search, ChevronDown, ChevronUp, CheckCircle2, Clock, IndianRupee, History, Undo2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
@@ -26,6 +26,7 @@ interface PendingSale {
   balanceAmount: number;
   paymentStatus: string;
   paymentMode: string;
+  status?: string;
 }
 
 interface PaymentTxn {
@@ -45,6 +46,22 @@ function usePendingSales(search: string) {
       if (!r.ok) throw new Error("Failed to load");
       return r.json();
     },
+    staleTime: 10_000,
+  });
+}
+
+function useAllSales(search: string, enabled: boolean) {
+  return useQuery<PendingSale[]>({
+    queryKey: ["all-sales", search],
+    queryFn: async () => {
+      const r = await fetch(`/api/sales?limit=200`, { headers: getAuthHeaders() });
+      if (!r.ok) throw new Error("Failed to load");
+      const sales: PendingSale[] = await r.json();
+      if (!search.trim()) return sales;
+      const q = search.trim().toLowerCase();
+      return sales.filter(s => s.customerName.toLowerCase().includes(q) || s.invoiceNumber.toLowerCase().includes(q));
+    },
+    enabled,
     staleTime: 10_000,
   });
 }
@@ -83,15 +100,36 @@ export default function PendingPayments() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  const [view, setView] = useState<"pending" | "all">("pending");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [payDialogSale, setPayDialogSale] = useState<PendingSale | null>(null);
   const [payAmount, setPayAmount] = useState("");
   const [payMode, setPayMode] = useState("cash");
   const [payNotes, setPayNotes] = useState("");
+  const [returnSale, setReturnSale] = useState<PendingSale | null>(null);
+  const [returnNotes, setReturnNotes] = useState("");
 
-  const { data: sales = [], isLoading } = usePendingSales(search);
+  const { data: pendingSales = [], isLoading: pendingLoading } = usePendingSales(search);
+  const { data: allSales = [], isLoading: allLoading } = useAllSales(search, view === "all");
+  const sales = view === "pending" ? pendingSales : allSales;
+  const isLoading = view === "pending" ? pendingLoading : allLoading;
   const { data: history = [] } = usePaymentHistory(expandedId);
   const recordPayment = useRecordPayment();
+
+  const returnSaleMutation = useMutation({
+    mutationFn: async ({ saleId, notes }: { saleId: number; notes: string }) => {
+      const r = await fetch(`/api/sales/${saleId}/return`, { method: "POST", headers: getAuthHeaders(), body: JSON.stringify({ notes }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to return sale");
+      return r.json() as Promise<PendingSale>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pending-sales"] });
+      queryClient.invalidateQueries({ queryKey: ["all-sales"] });
+      setReturnSale(null);
+      toast({ title: "Sale returned — inventory restocked and books reversed" });
+    },
+    onError: (e: Error) => toast({ title: e.message, variant: "destructive" }),
+  });
 
   const openPayDialog = (sale: PendingSale) => {
     setPayDialogSale(sale);
@@ -161,16 +199,22 @@ export default function PendingPayments() {
         </Card>
       </div>
 
-      {/* Search */}
-      <div className="relative mb-4">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input
-          placeholder="Search by customer name or invoice number..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="pl-9"
-          data-testid="input-pending-search"
-        />
+      {/* Search + view toggle */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            placeholder="Search by customer name or invoice number..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="pl-9"
+            data-testid="input-pending-search"
+          />
+        </div>
+        <div className="flex rounded-lg border border-border overflow-hidden flex-shrink-0">
+          <button className={`px-3 py-2 text-xs font-medium ${view === "pending" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`} onClick={() => setView("pending")}>Pending Only</button>
+          <button className={`px-3 py-2 text-xs font-medium ${view === "all" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`} onClick={() => setView("all")}>All Recent Sales</button>
+        </div>
       </div>
 
       {/* List */}
@@ -225,11 +269,21 @@ export default function PendingPayments() {
               </div>
 
               {/* Actions */}
-              <div className="flex items-center gap-2">
-                <Button size="sm" onClick={() => openPayDialog(sale)} className="gap-1.5" data-testid={`button-pay-${sale.id}`}>
-                  <IndianRupee className="w-3.5 h-3.5" />
-                  Collect Payment
-                </Button>
+              <div className="flex items-center gap-2 flex-wrap">
+                {sale.status !== "returned" && sale.balanceAmount > 0 && (
+                  <Button size="sm" onClick={() => openPayDialog(sale)} className="gap-1.5" data-testid={`button-pay-${sale.id}`}>
+                    <IndianRupee className="w-3.5 h-3.5" />
+                    Collect Payment
+                  </Button>
+                )}
+                {sale.status === "returned" ? (
+                  <Badge variant="secondary" className="text-[10px]">Returned</Badge>
+                ) : (
+                  <Button size="sm" variant="outline" className="gap-1.5 text-red-600" onClick={() => { setReturnSale(sale); setReturnNotes(""); }} data-testid={`button-return-${sale.id}`}>
+                    <Undo2 className="w-3.5 h-3.5" />
+                    Return
+                  </Button>
+                )}
                 <button
                   className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors ml-auto"
                   onClick={() => setExpandedId(prev => prev === sale.id ? null : sale.id)}
@@ -349,6 +403,44 @@ export default function PendingPayments() {
             <Button variant="outline" onClick={() => setPayDialogSale(null)}>Cancel</Button>
             <Button onClick={handleRecordPayment} disabled={recordPayment.isPending} data-testid="button-confirm-payment">
               {recordPayment.isPending ? "Recording..." : "Record Payment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Return Sale Dialog */}
+      <Dialog open={!!returnSale} onOpenChange={open => { if (!open) setReturnSale(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Undo2 className="w-4 h-4 text-red-600" />
+              Return Sale
+            </DialogTitle>
+          </DialogHeader>
+          {returnSale && (
+            <div className="space-y-4">
+              <div className="p-3 rounded-lg bg-muted/30 border border-border text-sm space-y-1">
+                <div className="font-semibold">{returnSale.customerName}</div>
+                <div className="text-xs text-muted-foreground font-mono">{returnSale.invoiceNumber}</div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                This restocks all items back into inventory, reverses the accounting entries for this sale (and any payments already collected), and refunds {formatCurrency(returnSale.paidAmount)}. This cannot be undone.
+              </p>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Notes (optional)</label>
+                <Input value={returnNotes} onChange={e => setReturnNotes(e.target.value)} placeholder="Reason for return" data-testid="input-return-notes" />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReturnSale(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={returnSaleMutation.isPending}
+              onClick={() => returnSale && returnSaleMutation.mutate({ saleId: returnSale.id, notes: returnNotes })}
+              data-testid="button-confirm-return"
+            >
+              {returnSaleMutation.isPending ? "Returning..." : "Confirm Return"}
             </Button>
           </DialogFooter>
         </DialogContent>

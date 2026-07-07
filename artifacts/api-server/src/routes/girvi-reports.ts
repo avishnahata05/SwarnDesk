@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { girviLoansTable, girviPaymentsTable, girviTransfersTable, girviBranchesTable } from "@workspace/db";
+import { girviLoansTable, girviPaymentsTable, girviTransfersTable, girviBranchesTable, girviPartialReleasesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { mapLoan, safeFloat, getOrCreateGirviSettings } from "./girvi-helpers";
 
@@ -67,26 +67,49 @@ router.get("/maturity", async (req, res) => {
   }
 });
 
-// 3. Returns Register — redeemed/forfeited loans with return voucher numbers.
+// 3. Returns Register — every time collateral left the shop: full redemptions,
+// forfeitures, and partial releases, all in one chronological register.
 router.get("/returns", async (req, res) => {
   try {
     const userId = req.user!.userId;
     const { fromDate, toDate } = parseDateRange(req);
     const loans = await db.select().from(girviLoansTable).where(eq(girviLoansTable.userId, userId));
-    const rows = loans
+    const loanNumberById = new Map(loans.map(l => [l.id, l.loanNumber]));
+
+    const fullRows = loans
       .filter(l => (l.status === "redeemed" || l.status === "forfeited") && l.redeemedDate && l.redeemedDate >= fromDate && l.redeemedDate <= toDate)
       .map(l => ({
+        type: l.status as "redeemed" | "forfeited",
         loanNumber: l.loanNumber,
-        returnVoucherNumber: l.returnVoucherNumber,
+        voucherNumber: l.returnVoucherNumber,
         customerName: l.customerName,
         customerMobile: l.customerMobile,
         status: l.status,
-        redeemedDate: l.redeemedDate?.toISOString() ?? null,
-        redeemedAmount: l.redeemedAmount ? safeFloat(l.redeemedAmount) : null,
+        date: l.redeemedDate?.toISOString() ?? null,
+        itemsDescription: null as string | null,
+        amount: l.redeemedAmount ? safeFloat(l.redeemedAmount) : null,
         goldSaleValue: l.goldSaleValue ? safeFloat(l.goldSaleValue) : null,
         lossAmount: l.lossAmount ? safeFloat(l.lossAmount) : null,
-      }))
-      .sort((a, b) => new Date(b.redeemedDate ?? 0).getTime() - new Date(a.redeemedDate ?? 0).getTime());
+      }));
+
+    const allReleases = await db.select().from(girviPartialReleasesTable).where(eq(girviPartialReleasesTable.userId, userId));
+    const releaseRows = allReleases
+      .filter(r => r.releaseDate >= fromDate && r.releaseDate <= toDate)
+      .map(r => ({
+        type: "partial_release" as const,
+        loanNumber: loanNumberById.get(r.loanId) ?? "—",
+        voucherNumber: r.releaseNumber,
+        customerName: null as string | null,
+        customerMobile: null as string | null,
+        status: "partial_release",
+        date: r.releaseDate.toISOString(),
+        itemsDescription: r.itemsDescription,
+        amount: safeFloat(r.principalSettled) + safeFloat(r.interestSettled),
+        goldSaleValue: null as number | null,
+        lossAmount: null as number | null,
+      }));
+
+    const rows = [...fullRows, ...releaseRows].sort((a, b) => new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime());
     res.json(rows);
   } catch (err) {
     req.log.error({ err }, "Failed to build returns register");

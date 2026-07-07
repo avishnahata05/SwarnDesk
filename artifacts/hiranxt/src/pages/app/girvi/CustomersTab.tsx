@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Users, Plus, Search, ChevronDown, ChevronUp, ShieldCheck, ShieldAlert, Pencil } from "lucide-react";
+import { Users, Plus, Search, ChevronDown, ChevronUp, ShieldCheck, ShieldAlert, Pencil, Trash2 } from "lucide-react";
 import { API, getAuthHeaders, authHeader } from "./api";
 import type { Customer, CustomerStatement } from "./types";
 
@@ -79,6 +79,18 @@ export default function CustomersTab() {
   };
 
   const setF = (k: keyof CustomerForm, v: string) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleDelete = async (id: number) => {
+    if (!confirm("Delete this customer? This cannot be undone.")) return;
+    try {
+      const r = await fetch(`${API}/customers/${id}`, { method: "DELETE", headers: getAuthHeaders() });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({ error: "Failed" }))).error ?? "Failed");
+      toast({ title: "Customer deleted" });
+      load();
+    } catch (err) {
+      toast({ title: (err as Error).message || "Failed to delete", variant: "destructive" });
+    }
+  };
 
   const handleSubmit = async () => {
     if (!form.name.trim()) { toast({ title: "Name is required", variant: "destructive" }); return; }
@@ -162,6 +174,9 @@ export default function CustomersTab() {
                       )}
                       <Button size="sm" variant="ghost" className="h-7 w-7 p-0 flex-shrink-0" onClick={e => { e.stopPropagation(); openEdit(c); }}>
                         <Pencil className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 flex-shrink-0 text-red-600" onClick={e => { e.stopPropagation(); handleDelete(c.id); }}>
+                        <Trash2 className="w-3.5 h-3.5" />
                       </Button>
                       <div className="text-muted-foreground flex-shrink-0">{expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</div>
                     </div>

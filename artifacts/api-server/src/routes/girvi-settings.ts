@@ -27,6 +27,7 @@ function mapSettings(s: typeof girviSettingsTable.$inferSelect) {
     receiptPrefix: s.receiptPrefix,
     returnPrefix: s.returnPrefix,
     transferPrefix: s.transferPrefix,
+    partialReleasePrefix: s.partialReleasePrefix,
     updatedAt: s.updatedAt.toISOString(),
   };
 }
@@ -83,6 +84,7 @@ router.patch("/", async (req, res) => {
     if (data.receiptPrefix !== undefined) updates.receiptPrefix = String(data.receiptPrefix).trim().toUpperCase() || "GRV";
     if (data.returnPrefix !== undefined) updates.returnPrefix = String(data.returnPrefix).trim().toUpperCase() || "RTN";
     if (data.transferPrefix !== undefined) updates.transferPrefix = String(data.transferPrefix).trim().toUpperCase() || "TRF";
+    if (data.partialReleasePrefix !== undefined) updates.partialReleasePrefix = String(data.partialReleasePrefix).trim().toUpperCase() || "PRL";
 
     const [updated] = await db.update(girviSettingsTable).set(updates)
       .where(eq(girviSettingsTable.userId, userId))

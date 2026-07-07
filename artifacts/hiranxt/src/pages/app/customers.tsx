@@ -1,4 +1,5 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { useSearch as useQueryString, useLocation } from "wouter";
 import { useBackClose } from "@/hooks/use-back-close";
 import { formatCurrency } from "@/lib/utils";
 import {
@@ -21,7 +22,7 @@ import { useToast } from "@/hooks/use-toast";
 
 interface CustomerForm {
   name: string; mobile: string; email: string; address: string;
-  birthday: string; anniversary: string; gstin: string; notes: string;
+  birthday: string; anniversary: string; gstin: string; stateCode: string; notes: string;
 }
 
 const DEFAULT_TEMPLATE = "Dear {name}, thank you for being a valued customer at our jewellery store! We'd love to see you again. Visit us for our latest collection and exclusive offers.";
@@ -447,6 +448,17 @@ export default function Customers() {
   const closeLedger = useCallback(() => setLedgerCustomerId(null), []);
   useBackClose(ledgerCustomerId !== null, closeLedger);
 
+  // Supports a Dashboard quick action linking straight to "/app/customers?new=1"
+  // that auto-opens the Add Customer dialog.
+  const queryString = useQueryString();
+  const [, navigate] = useLocation();
+  useEffect(() => {
+    if (new URLSearchParams(queryString).get("new") === "1") {
+      setAddOpen(true);
+      navigate("/app/customers", { replace: true });
+    }
+  }, [queryString, navigate]);
+
   const { data: customers, isLoading } = useListCustomers({ ...(search ? { search } : {}) });
   const { data: occasions } = useGetUpcomingOccasions();
   const { data: settings } = useGetSettings();
@@ -465,6 +477,7 @@ export default function Customers() {
         birthday: data.birthday || null,
         anniversary: data.anniversary || null,
         gstin: data.gstin || null,
+        stateCode: data.stateCode || null,
         notes: data.notes || null,
       }
     }, {
@@ -839,9 +852,14 @@ export default function Customers() {
                 <label className="text-xs text-muted-foreground mb-1 block">Anniversary (Month-Day, e.g. 20 Nov = 11-20)</label>
                 <Input {...register("anniversary")} placeholder="MM-DD, e.g. 11-20" data-testid="input-customer-anniversary" />
               </div>
-              <div className="col-span-2">
+              <div>
                 <label className="text-xs text-muted-foreground mb-1 block">GSTIN</label>
                 <Input {...register("gstin")} placeholder="27AAACR5055K1ZS" data-testid="input-customer-gstin" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">GST State Code</label>
+                <Input {...register("stateCode")} placeholder="27" maxLength={2} data-testid="input-customer-state-code" />
+                <p className="text-[10px] text-muted-foreground mt-1">For B2B invoices — decides CGST+SGST vs IGST</p>
               </div>
             </div>
             <DialogFooter>

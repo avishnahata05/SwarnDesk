@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useMetalRateForm } from "@/hooks/use-metal-rate-form";
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
+import { ShortcutsHelpDialog, ShortcutsHelpButton } from "@/components/ShortcutsHelp";
 
 interface CartItem {
   inventoryItemId: number;
@@ -380,6 +382,9 @@ export default function Billing() {
 
   const customerDropdownRef = useRef<HTMLDivElement>(null);
   const itemDropdownRef = useRef<HTMLDivElement>(null);
+  const customerSearchInputRef = useRef<HTMLInputElement>(null);
+  const itemSearchInputRef = useRef<HTMLInputElement>(null);
+  const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -414,6 +419,18 @@ export default function Billing() {
     return () => document.removeEventListener("keydown", handler);
   }, [tab]);
 
+  // Single-key shortcuts — paused on the Scan tab (which already captures every
+  // keypress for the barcode reader above) and while any dialog is open.
+  const shortcutsEnabled = tab !== "scan" && !quickAddOpen && !confirmSaleOpen && !rateEditOpen && !shortcutsHelpOpen;
+  useKeyboardShortcuts([
+    { key: "/", description: "Focus item search", action: () => { setTab("stock"); setTimeout(() => itemSearchInputRef.current?.focus(), 0); } },
+    { key: "c", description: "Focus customer search", action: () => customerSearchInputRef.current?.focus() },
+    { key: "n", description: "Add new customer", action: () => setQuickAddOpen(true) },
+    { key: "1", description: "Stock tab", action: () => setTab("stock") },
+    { key: "2", description: "Quick Entry tab", action: () => setTab("quick") },
+    { key: "3", description: "Barcode Scan tab", action: () => setTab("scan") },
+    { key: "?", description: "Show this help", action: () => setShortcutsHelpOpen(true) },
+  ], shortcutsEnabled);
 
   const { data: settings } = useGetSettings();
   const { data: customers } = useListCustomers({ ...(customerSearch ? { search: customerSearch } : {}) });
@@ -492,7 +509,13 @@ export default function Billing() {
     setTimeout(() => scanInputRef.current?.focus(), 50);
   }, [scanPending, itemsFetching, items]); // getLiveRate intentionally omitted — stable within render
 
-  const GST_RATE = 0.03;
+  // Shop-configured rate (Settings > GST Rate) — was previously hardcoded to 3% regardless
+  // of what the shop had configured.
+  const GST_RATE = (settings?.gstRate ?? 3) / 100;
+  // When disabled (Settings > GST on Exchange), GST is charged on the full pre-exchange
+  // value instead of netting the old-gold value down first — a per-shop toggle rather
+  // than one hardcoded legal interpretation of how trade-ins should be taxed.
+  const gstOnExchangeEnabled = settings?.gstOnExchangeEnabled ?? true;
 
   const GOLD_PURITIES = ["24K", "22K", "18K", "14K"];
   const SILVER_PURITIES = ["999", "925"];
@@ -531,9 +554,11 @@ export default function Billing() {
 
   const subTotal = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity - item.discount, 0);
   const exchangeGoldValue = exchangeGoldWeight * goldRate22k;
-  const taxableBase = Math.max(0, subTotal - discount - exchangeGoldValue);
+  const taxableBase = Math.max(0, subTotal - discount - (gstOnExchangeEnabled ? exchangeGoldValue : 0));
   const gstAmount = taxableBase * GST_RATE;
-  const totalAmount = taxableBase + gstAmount;
+  // The exchange value is still deducted from what the customer owes even when it isn't
+  // netted out of the *taxable* base — it's always a real reduction in cash due.
+  const totalAmount = Math.max(0, subTotal - discount - exchangeGoldValue) + gstAmount;
 
   const handleScanEnter = useCallback(() => {
     const q = scanInput.trim();
@@ -760,10 +785,28 @@ export default function Billing() {
   // ── Main Billing UI ─────────────────────────────────────────────────────
   return (
     <div className="max-w-7xl">
-      <div className="mb-4">
-        <h1 className="text-2xl font-bold">Billing & POS</h1>
-        <p className="text-muted-foreground text-sm">{shopInfo.name}</p>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Billing & POS</h1>
+          <p className="text-muted-foreground text-sm">{shopInfo.name}</p>
+        </div>
+        <ShortcutsHelpButton onClick={() => setShortcutsHelpOpen(true)} />
       </div>
+
+      <ShortcutsHelpDialog
+        open={shortcutsHelpOpen}
+        onClose={() => setShortcutsHelpOpen(false)}
+        title="Billing Shortcuts"
+        shortcuts={[
+          { keys: "/", description: "Focus item search" },
+          { keys: "C", description: "Focus customer search" },
+          { keys: "N", description: "Add new customer" },
+          { keys: "1", description: "Stock tab" },
+          { keys: "2", description: "Quick Entry tab" },
+          { keys: "3", description: "Barcode Scan tab" },
+          { keys: "?", description: "Show this help" },
+        ]}
+      />
 
       <div className="grid xl:grid-cols-3 gap-5">
         {/* Left column */}
@@ -855,6 +898,7 @@ export default function Billing() {
                 <div className="relative" ref={customerDropdownRef}>
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
+                    ref={customerSearchInputRef}
                     placeholder="Search by name or mobile, or leave blank for walk-in..."
                     value={customerSearch}
                     onChange={e => setCustomerSearch(e.target.value)}
@@ -1013,6 +1057,7 @@ export default function Billing() {
                   <div className="relative" ref={itemDropdownRef}>
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                     <Input
+                      ref={itemSearchInputRef}
                       placeholder="Search item by name, HUID or barcode..."
                       value={itemSearch}
                       onChange={e => setItemSearch(e.target.value)}
@@ -1278,10 +1323,10 @@ export default function Billing() {
                   <span>Taxable Base</span><span>{formatCurrency(taxableBase)}</span>
                 </div>
                 <div className="flex justify-between text-muted-foreground">
-                  <span>CGST 1.5%</span><span>{formatCurrency(gstAmount / 2)}</span>
+                  <span>CGST {(GST_RATE * 50).toFixed(2)}%</span><span>{formatCurrency(gstAmount / 2)}</span>
                 </div>
                 <div className="flex justify-between text-muted-foreground">
-                  <span>SGST 1.5%</span><span>{formatCurrency(gstAmount / 2)}</span>
+                  <span>SGST {(GST_RATE * 50).toFixed(2)}%</span><span>{formatCurrency(gstAmount / 2)}</span>
                 </div>
                 <div className="border-t border-border pt-2 flex justify-between font-bold text-lg">
                   <span>Total</span>
@@ -1418,17 +1463,6 @@ export default function Billing() {
             </p>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Gold 22K (₹/10g)</label>
-                <Input
-                  type="number"
-                  step="1"
-                  value={rateForm.gold22k}
-                  onChange={e => setGoldRate("gold22k", e.target.value)}
-                  placeholder="e.g. 72500"
-                  data-testid="input-billing-rate-gold22k"
-                />
-              </div>
-              <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1 block">Gold 24K (₹/10g)</label>
                 <Input
                   type="number"
@@ -1437,6 +1471,17 @@ export default function Billing() {
                   onChange={e => setGoldRate("gold24k", e.target.value)}
                   placeholder="e.g. 79500"
                   data-testid="input-billing-rate-gold24k"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Gold 22K (₹/10g)</label>
+                <Input
+                  type="number"
+                  step="1"
+                  value={rateForm.gold22k}
+                  onChange={e => setGoldRate("gold22k", e.target.value)}
+                  placeholder="e.g. 72500"
+                  data-testid="input-billing-rate-gold22k"
                 />
               </div>
               <div>

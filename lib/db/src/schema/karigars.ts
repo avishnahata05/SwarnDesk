@@ -27,6 +27,9 @@ export const metalIssuesTable = pgTable("metal_issues", {
   purity: text("purity").notNull(),
   issueDate: timestamp("issue_date").defaultNow().notNull(),
   notes: text("notes"),
+  // A mistaken issue is voided (weight adjustment reversed), not edited/deleted, so the
+  // running pendingGoldWeight/pendingSilverWeight math and the log stay auditable.
+  voidedAt: timestamp("voided_at"),
 }, (t) => [
   index("metal_issues_karigar_idx").on(t.karigarId),
   index("metal_issues_user_idx").on(t.userId),
@@ -42,9 +45,26 @@ export const metalReturnsTable = pgTable("metal_returns", {
   wastagePercent: numeric("wastage_percent", { precision: 5, scale: 2 }).notNull(),
   returnDate: timestamp("return_date").defaultNow().notNull(),
   notes: text("notes"),
+  voidedAt: timestamp("voided_at"),
 }, (t) => [
   index("metal_returns_karigar_idx").on(t.karigarId),
   index("metal_returns_user_idx").on(t.userId),
+]);
+
+// Records each wage payment made to a karigar
+export const karigarPaymentTransactionsTable = pgTable("karigar_payment_transactions", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(0),
+  karigarId: integer("karigar_id").notNull(),
+  karigarName: text("karigar_name").notNull(),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  paymentMode: text("payment_mode").notNull().default("cash"),
+  paidAt: timestamp("paid_at").defaultNow().notNull(),
+  notes: text("notes"),
+}, (t) => [
+  index("kpt_karigar_idx").on(t.karigarId),
+  index("kpt_user_idx").on(t.userId),
+  index("kpt_user_date_idx").on(t.userId, t.paidAt),
 ]);
 
 export const insertKarigarSchema = createInsertSchema(karigarsTable).omit({ id: true, createdAt: true, pendingGoldWeight: true, pendingSilverWeight: true, pendingOrders: true, totalWagesPaid: true });
@@ -54,3 +74,4 @@ export type InsertKarigar = z.infer<typeof insertKarigarSchema>;
 export type Karigar = typeof karigarsTable.$inferSelect;
 export type MetalIssue = typeof metalIssuesTable.$inferSelect;
 export type MetalReturn = typeof metalReturnsTable.$inferSelect;
+export type KarigarPaymentTransaction = typeof karigarPaymentTransactionsTable.$inferSelect;
