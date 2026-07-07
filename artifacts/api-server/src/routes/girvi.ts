@@ -1,157 +1,19 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { girviLoansTable, girviPaymentsTable, girviLoanItemsTable } from "@workspace/db";
+import { girviLoansTable, girviPaymentsTable, girviLoanItemsTable, girviCustomersTable } from "@workspace/db";
 import { eq, and, desc, sql } from "drizzle-orm";
+import {
+  safeFloat, mapLoan, mapPayment, calcAccruedInterest, preserveOutstandingBaseline,
+  ensureDefaultBranch, getOrCreateGirviSettings, nextGirviNumber,
+  VALID_METAL_TYPES, VALID_STATUSES, VALID_PERIODS, VALID_PAYMENT_MODES,
+  MAX_NOTES_LEN, MAX_ADDRESS_LEN,
+} from "./girvi-helpers";
 
 const router = Router();
-
-const VALID_METAL_TYPES = new Set(["gold", "silver"]);
-const VALID_STATUSES = new Set(["active", "redeemed", "forfeited", "extended"]);
-const VALID_PERIODS = new Set(["daily", "weekly", "monthly", "yearly"]);
-const MAX_NOTES_LEN = 1000;
-
-function safeFloat(val: unknown, fallback = 0): number {
-  const n = parseFloat(String(val ?? ""));
-  return isFinite(n) ? n : fallback;
-}
-
-function getPeriodDays(period: string): number {
-  if (period === "daily") return 1;
-  if (period === "weekly") return 7;
-  if (period === "yearly") return 365;
-  return 30; // monthly default
-}
-
-// Interest accrues on currentPrincipal (= loanAmount - principalPaid) from startDate.
-// Two phases: normal (startDate → dueDate) + penalty (dueDate → now, at rate+penaltyRate).
-function calcAccruedInterest(loan: typeof girviLoansTable.$inferSelect, asOf = new Date()) {
-  const originalPrincipal = safeFloat(loan.loanAmount);
-  const principalPaid = safeFloat((loan as any).principalPaid ?? "0");
-  const principal = Math.max(0, originalPrincipal - principalPaid);
-  const rate = safeFloat(loan.interestRate);
-  const penaltyRate = safeFloat(loan.penaltyRate);
-  const startDate = new Date(loan.startDate);
-  const dueDate = new Date(loan.dueDate);
-  const periodDays = getPeriodDays(loan.interestPeriod);
-
-  const daysElapsed = Math.max(0, Math.floor((asOf.getTime() - startDate.getTime()) / 86400000));
-  const normalDays = Math.min(daysElapsed, Math.max(0, Math.floor((dueDate.getTime() - startDate.getTime()) / 86400000)));
-  const overdueDays = Math.max(0, Math.floor((asOf.getTime() - dueDate.getTime()) / 86400000));
-
-  const normalInterest = Math.round(principal * (rate / 100) * (normalDays / periodDays));
-  const penaltyInterest = overdueDays > 0
-    ? Math.round(principal * ((rate + penaltyRate) / 100) * (overdueDays / periodDays))
-    : 0;
-
-  return { normalInterest, penaltyInterest, total: normalInterest + penaltyInterest, periodDays };
-}
-
-// When loan terms (due date, penalty rate) change without a payment being collected,
-// preserve the interest already owed as of "now" instead of letting the recalculation
-// under the new terms silently erase it (e.g. pushing the due date forward would
-// otherwise retroactively turn already-accrued penalty interest into normal interest).
-function preserveOutstandingBaseline(
-  loan: typeof girviLoansTable.$inferSelect,
-  changes: Partial<Pick<typeof girviLoansTable.$inferSelect, "dueDate" | "penaltyRate" | "interestRate">>,
-  now: Date,
-): string {
-  const before = calcAccruedInterest(loan, now).total;
-  const after = calcAccruedInterest({ ...loan, ...changes }, now).total;
-  const baselineBefore = safeFloat((loan as any).interestBaseline ?? "0");
-  return (baselineBefore + (after - before)).toFixed(2);
-}
-
-function generateLoanNumber() {
-  const now = new Date();
-  const rand = Math.floor(Math.random() * 90000) + 10000;
-  return `GV${now.getFullYear().toString().slice(-2)}${String(now.getMonth() + 1).padStart(2, "0")}${rand}`;
-}
-
-export function mapLoan(l: typeof girviLoansTable.$inferSelect, asOf = new Date()) {
-  const loanAmount = safeFloat(l.loanAmount);
-  const principalPaid = safeFloat((l as any).principalPaid ?? "0");
-  const currentPrincipal = Math.max(0, loanAmount - principalPaid);
-  // interestBaseline = interest already collected at time of last startDate reset.
-  // Outstanding = accrued(from startDate) - (totalCollected - baseline).
-  // This fixes the renewal bug where cumulative totalInterestCollected exceeded
-  // fresh-start accruedInterest and showed 0 outstanding forever.
-  const interestBaseline = safeFloat((l as any).interestBaseline ?? "0");
-  const totalInterestCollected = safeFloat(l.totalInterestCollected);
-  const collectedSinceReset = Math.max(0, totalInterestCollected - interestBaseline);
-
-  const isActive = l.status === "active" || l.status === "extended";
-  const { normalInterest, penaltyInterest, total: accruedInterest, periodDays } =
-    isActive ? calcAccruedInterest(l, asOf) : { normalInterest: 0, penaltyInterest: 0, total: 0, periodDays: getPeriodDays(l.interestPeriod) };
-
-  const outstandingInterest = Math.max(0, accruedInterest - collectedSinceReset);
-  const totalDue = currentPrincipal + outstandingInterest;
-  const dueDate = new Date(l.dueDate);
-  const daysRemaining = Math.floor((dueDate.getTime() - asOf.getTime()) / 86400000);
-
-  // Daily rate for display
-  const dailyRate = (safeFloat(l.interestRate) / 100) / periodDays;
-
-  return {
-    id: l.id,
-    loanNumber: l.loanNumber,
-    customerId: l.customerId,
-    customerName: l.customerName,
-    customerMobile: l.customerMobile,
-    kycDocType: l.kycDocType,
-    kycDocNumber: l.kycDocNumber,
-    itemDescription: l.itemDescription,
-    metalType: l.metalType,
-    purity: l.purity,
-    grossWeight: safeFloat(l.grossWeight),
-    netWeight: safeFloat(l.netWeight),
-    estimatedValue: safeFloat(l.estimatedValue),
-    loanAmount,         // original loan amount
-    principalPaid,      // cumulative principal repaid
-    currentPrincipal,   // effective principal for interest calc
-    interestRate: safeFloat(l.interestRate),
-    penaltyRate: safeFloat(l.penaltyRate),
-    interestPeriod: l.interestPeriod,
-    periodDays,
-    dailyRate: Math.round(dailyRate * 1e6) / 1e6, // equivalent daily rate fraction
-    startDate: l.startDate.toISOString(),
-    dueDate: l.dueDate.toISOString(),
-    status: l.status,
-    normalInterest,
-    penaltyInterest,
-    accruedInterest,
-    totalInterestCollected,
-    collectedSinceReset,
-    outstandingInterest,
-    totalDue,
-    daysRemaining,
-    isOverdue: daysRemaining < 0 && isActive,
-    redeemedDate: l.redeemedDate?.toISOString() ?? null,
-    redeemedAmount: l.redeemedAmount ? safeFloat(l.redeemedAmount) : null,
-    goldSaleValue: l.goldSaleValue ? safeFloat(l.goldSaleValue) : null,
-    lossAmount: l.lossAmount ? safeFloat(l.lossAmount) : null,
-    notes: l.notes,
-    createdAt: l.createdAt.toISOString(),
-  };
-}
-
-function mapPayment(p: typeof girviPaymentsTable.$inferSelect) {
-  return {
-    id: p.id,
-    loanId: p.loanId,
-    loanNumber: p.loanNumber,
-    customerName: p.customerName,
-    amount: safeFloat(p.amount),
-    paymentType: p.paymentType,
-    paymentDate: p.paymentDate.toISOString(),
-    notes: p.notes,
-    createdAt: p.createdAt.toISOString(),
-  };
-}
 
 router.get("/stats/summary", async (req, res) => {
   try {
     const userId = req.user!.userId;
-    // Single query: all loans for this user
     const loans = await db.select().from(girviLoansTable)
       .where(eq(girviLoansTable.userId, userId))
       .orderBy(desc(girviLoansTable.createdAt));
@@ -165,6 +27,7 @@ router.get("/stats/summary", async (req, res) => {
     const totalInterest = active.reduce((s, l) => s + calcAccruedInterest(l, now).total, 0);
     const totalLoss = loans.filter(l => l.status === "forfeited").reduce((s, l) => s + safeFloat(l.lossAmount), 0);
     const totalCollected = loans.reduce((s, l) => s + safeFloat(l.totalInterestCollected), 0);
+    const totalProcessingFees = loans.reduce((s, l) => s + safeFloat(l.processingFee), 0);
     const totalGoldWeight = active.filter(l => l.metalType === "gold").reduce((s, l) => s + safeFloat(l.grossWeight), 0);
     const totalSilverWeight = active.filter(l => l.metalType === "silver").reduce((s, l) => s + safeFloat(l.grossWeight), 0);
     const dueSoon = active.filter(l => {
@@ -177,6 +40,7 @@ router.get("/stats/summary", async (req, res) => {
       totalLent: Math.round(totalLent),
       totalInterestAccrued: Math.round(totalInterest),
       totalInterestCollected: Math.round(totalCollected),
+      totalProcessingFees: Math.round(totalProcessingFees),
       overdueCount: overdue.length,
       dueSoonCount: dueSoon.length,
       totalLoss: Math.round(totalLoss),
@@ -193,7 +57,7 @@ router.get("/stats/summary", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const userId = req.user!.userId;
-    const { status, due, mobile } = req.query as Record<string, string>;
+    const { status, due, mobile, customerId, branchId } = req.query as Record<string, string>;
     let loans = await db.select().from(girviLoansTable)
       .where(eq(girviLoansTable.userId, userId))
       .orderBy(desc(girviLoansTable.createdAt));
@@ -201,6 +65,14 @@ router.get("/", async (req, res) => {
     if (mobile) {
       const digits = mobile.replace(/\D/g, "");
       if (digits) loans = loans.filter(l => l.customerMobile.replace(/\D/g, "").includes(digits));
+    }
+    if (customerId) {
+      const cid = parseInt(customerId);
+      if (!isNaN(cid)) loans = loans.filter(l => l.customerId === cid);
+    }
+    if (branchId) {
+      const bid = parseInt(branchId);
+      if (!isNaN(bid)) loans = loans.filter(l => l.branchId === bid);
     }
     if (status && status !== "all" && VALID_STATUSES.has(status)) {
       loans = loans.filter(l => l.status === status);
@@ -228,17 +100,48 @@ router.post("/", async (req, res) => {
     const userId = req.user!.userId;
     const data = req.body;
 
-    const customerName = String(data.customerName ?? "").trim();
-    const customerMobile = String(data.customerMobile ?? "").trim();
-    if (!customerName) return res.status(400).json({ error: "Customer name is required" });
-    if (!customerMobile) return res.status(400).json({ error: "Customer mobile is required" });
+    // Resolve the customer: either an existing girvi_customers row, or create
+    // one inline as part of this transaction.
+    let customer: typeof girviCustomersTable.$inferSelect | null = null;
+    if (data.customerId) {
+      const cid = parseInt(data.customerId);
+      if (isNaN(cid)) return res.status(400).json({ error: "Invalid customerId" });
+      const [found] = await db.select().from(girviCustomersTable)
+        .where(and(eq(girviCustomersTable.id, cid), eq(girviCustomersTable.userId, userId)));
+      if (!found) return res.status(404).json({ error: "Customer not found" });
+      customer = found;
+    } else if (data.newCustomer) {
+      const nc = data.newCustomer;
+      const name = String(nc.name ?? "").trim();
+      const mobile = String(nc.mobile ?? "").trim();
+      if (!name) return res.status(400).json({ error: "Customer name is required" });
+      if (!mobile) return res.status(400).json({ error: "Customer mobile is required" });
+      const [created] = await db.insert(girviCustomersTable).values({
+        userId,
+        name,
+        mobile,
+        fatherName: nc.fatherName ? String(nc.fatherName).trim() || null : null,
+        address: nc.address ? String(nc.address).slice(0, MAX_ADDRESS_LEN) || null : null,
+        altMobile: nc.altMobile ? String(nc.altMobile).trim() || null : null,
+        email: nc.email ? String(nc.email).trim() || null : null,
+        idProofType: nc.idProofType ? String(nc.idProofType).trim() || null : null,
+        idProofNumber: nc.idProofNumber ? String(nc.idProofNumber).trim() || null : null,
+        pan: nc.pan ? String(nc.pan).trim().toUpperCase() || null : null,
+        notes: nc.notes ? String(nc.notes).slice(0, MAX_NOTES_LEN) || null : null,
+      }).returning();
+      customer = created;
+    } else {
+      return res.status(400).json({ error: "Either customerId or newCustomer is required" });
+    }
 
     const loanAmount = safeFloat(data.loanAmount);
     const interestRate = safeFloat(data.interestRate, 2);
     const penaltyRate = safeFloat(data.penaltyRate, 0);
+    const processingFee = safeFloat(data.processingFee, 0);
     if (loanAmount <= 0) return res.status(400).json({ error: "Loan amount must be positive" });
     if (interestRate < 0 || interestRate > 100) return res.status(400).json({ error: "Interest rate must be 0–100" });
     if (penaltyRate < 0 || penaltyRate > 100) return res.status(400).json({ error: "Penalty rate must be 0–100" });
+    if (processingFee < 0) return res.status(400).json({ error: "Processing fee cannot be negative" });
 
     const interestPeriod = VALID_PERIODS.has(data.interestPeriod) ? data.interestPeriod : "monthly";
     const startDate = data.startDate ? new Date(data.startDate) : new Date();
@@ -249,8 +152,11 @@ router.post("/", async (req, res) => {
 
     const notes = data.notes ? String(data.notes).slice(0, MAX_NOTES_LEN) : null;
 
+    let branchId = data.branchId ? parseInt(data.branchId) : NaN;
+    if (isNaN(branchId)) branchId = await ensureDefaultBranch(userId);
+
     // Parse items array
-    type ItemInput = { itemType: string; quantity: number; metalType: string; purity: string; grossWeight: number; netWeight: number; estimatedValue: number };
+    type ItemInput = { itemType: string; quantity: number; metalType: string; purity: string; grossWeight: number; netWeight: number; estimatedValue: number; notes?: string };
     const rawItems: ItemInput[] = Array.isArray(data.items) ? data.items : [];
     if (rawItems.length === 0) return res.status(400).json({ error: "At least one item is required" });
 
@@ -262,6 +168,7 @@ router.post("/", async (req, res) => {
       grossWeight: safeFloat(it.grossWeight),
       netWeight: safeFloat(it.netWeight ?? it.grossWeight, safeFloat(it.grossWeight)),
       estimatedValue: safeFloat(it.estimatedValue),
+      notes: it.notes ? String(it.notes).slice(0, MAX_NOTES_LEN) : null,
     }));
 
     const invalidItem = items.find(it => it.grossWeight <= 0);
@@ -288,15 +195,22 @@ router.post("/", async (req, res) => {
       `${it.quantity} ${it.itemType}${it.quantity > 1 ? "s" : ""} (${it.metalType === "silver" ? "Silver" : "Gold"} ${it.purity})`
     ).join(", ");
 
+    const settings = await getOrCreateGirviSettings(userId);
+    const loanNumber = await nextGirviNumber(userId, "loan", settings.receiptPrefix, startDate);
+
     const loan = await db.transaction(async tx => {
       const [newLoan] = await tx.insert(girviLoansTable).values({
         userId,
-        loanNumber: generateLoanNumber(),
-        customerId: data.customerId ? parseInt(data.customerId) || null : null,
-        customerName,
-        customerMobile,
-        kycDocType: data.kycDocType ? String(data.kycDocType).trim() || null : null,
-        kycDocNumber: data.kycDocNumber ? String(data.kycDocNumber).trim() || null : null,
+        loanNumber,
+        branchId,
+        customerId: customer!.id,
+        customerName: customer!.name,
+        customerMobile: customer!.mobile,
+        fatherName: customer!.fatherName,
+        address: customer!.address,
+        kycDocType: customer!.idProofType,
+        kycDocNumber: customer!.idProofNumber,
+        pan: customer!.pan,
         itemDescription: autoDesc,
         metalType: primaryMetal,
         purity: primaryPurity,
@@ -304,6 +218,7 @@ router.post("/", async (req, res) => {
         netWeight: totalNetWeight.toFixed(3),
         estimatedValue: totalEstimatedValue.toFixed(2),
         loanAmount: loanAmount.toString(),
+        processingFee: processingFee.toString(),
         interestRate: interestRate.toString(),
         penaltyRate: penaltyRate.toString(),
         interestPeriod,
@@ -314,7 +229,6 @@ router.post("/", async (req, res) => {
         notes,
       }).returning();
 
-      // Insert individual items
       for (const it of items) {
         await tx.insert(girviLoanItemsTable).values({
           userId,
@@ -326,6 +240,9 @@ router.post("/", async (req, res) => {
           grossWeight: (it.grossWeight * it.quantity).toFixed(3),
           netWeight: (it.netWeight * it.quantity).toFixed(3),
           estimatedValue: (it.estimatedValue * it.quantity).toFixed(2),
+          notes: it.notes,
+          status: "pledged",
+          currentBranchId: branchId,
         });
       }
 
@@ -375,6 +292,9 @@ router.get("/:id/items", async (req, res) => {
       grossWeight: safeFloat(it.grossWeight),
       netWeight: safeFloat(it.netWeight),
       estimatedValue: safeFloat(it.estimatedValue),
+      notes: it.notes,
+      status: it.status,
+      currentBranchId: it.currentBranchId,
     })));
   } catch (err) {
     req.log.error({ err }, "Failed to get girvi items");
@@ -410,10 +330,12 @@ router.post("/:id/collect-interest", async (req, res) => {
       return res.status(400).json({ error: "Can only collect payments on active or extended loans" });
     }
 
-    const { amount, paymentType = "auto", notes } = req.body;
+    const { amount, paymentType = "auto", notes, paymentMode, referenceNumber } = req.body;
     const amt = safeFloat(amount);
     if (amt <= 0 || !isFinite(amt)) return res.status(400).json({ error: "Amount must be a positive number" });
     const resolvedNotes = notes ? String(notes).slice(0, MAX_NOTES_LEN) : null;
+    const resolvedMode = VALID_PAYMENT_MODES.has(paymentMode) ? paymentMode : "cash";
+    const resolvedRef = referenceNumber ? String(referenceNumber).trim().slice(0, 100) || null : null;
     const now = new Date();
 
     const mappedLoan = mapLoan(loan, now);
@@ -444,11 +366,15 @@ router.post("/:id/collect-interest", async (req, res) => {
         interestBaseline: newTotalInterestCollected.toFixed(2),
       };
 
+      let returnVoucherNumber: string | null = null;
       if (remainingPrincipal <= 0) {
         // Loan fully repaid
+        const settings = await getOrCreateGirviSettings(userId);
+        returnVoucherNumber = await nextGirviNumber(userId, "return", settings.returnPrefix, now);
         loanUpdates.status = "redeemed";
         loanUpdates.redeemedDate = now;
         loanUpdates.redeemedAmount = amt.toFixed(2);
+        loanUpdates.returnVoucherNumber = returnVoucherNumber;
       }
 
       // Single atomic transaction: payments + loan update together
@@ -459,6 +385,8 @@ router.post("/:id/collect-interest", async (req, res) => {
             customerName: loan.customerName,
             amount: interestPortion.toFixed(2),
             paymentType: "interest",
+            paymentMode: resolvedMode,
+            referenceNumber: resolvedRef,
             paymentDate: now,
             notes: resolvedNotes ? `${resolvedNotes} [auto: interest portion]` : "Auto: interest portion",
           });
@@ -468,9 +396,16 @@ router.post("/:id/collect-interest", async (req, res) => {
           customerName: loan.customerName,
           amount: principalPortion.toFixed(2),
           paymentType: "principal",
+          paymentMode: resolvedMode,
+          referenceNumber: resolvedRef,
           paymentDate: now,
           notes: resolvedNotes ? `${resolvedNotes} [auto: principal portion]` : "Auto: principal portion",
         });
+        if (remainingPrincipal <= 0) {
+          await tx.update(girviLoanItemsTable)
+            .set({ status: "returned" })
+            .where(and(eq(girviLoanItemsTable.loanId, id), eq(girviLoanItemsTable.userId, userId)));
+        }
         const [u] = await tx.update(girviLoansTable)
           .set(loanUpdates as Partial<typeof girviLoansTable.$inferInsert>)
           .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
@@ -487,6 +422,8 @@ router.post("/:id/collect-interest", async (req, res) => {
           customerName: loan.customerName,
           amount: amt.toFixed(2),
           paymentType: resolvedType,
+          paymentMode: resolvedMode,
+          referenceNumber: resolvedRef,
           paymentDate: now,
           notes: resolvedNotes,
         });
@@ -518,7 +455,7 @@ router.post("/:id/renew", async (req, res) => {
       return res.status(400).json({ error: "Can only renew active or extended loans" });
     }
 
-    const { interestPaid, newDueDate, notes } = req.body;
+    const { interestPaid, newDueDate, notes, paymentMode, referenceNumber } = req.body;
     const paid = safeFloat(interestPaid, 0);
     if (paid < 0 || !isFinite(paid)) return res.status(400).json({ error: "Interest amount must be zero or positive" });
 
@@ -526,6 +463,8 @@ router.post("/:id/renew", async (req, res) => {
     if (isNaN(renewedDueDate.getTime())) return res.status(400).json({ error: "Invalid new due date" });
 
     const resolvedNotes = notes ? String(notes).slice(0, MAX_NOTES_LEN) : null;
+    const resolvedMode = VALID_PAYMENT_MODES.has(paymentMode) ? paymentMode : "cash";
+    const resolvedRef = referenceNumber ? String(referenceNumber).trim().slice(0, 100) || null : null;
     const mergedNotes = resolvedNotes
       ? (loan.notes ? `${loan.notes}\n${resolvedNotes}`.slice(0, MAX_NOTES_LEN) : resolvedNotes)
       : loan.notes;
@@ -544,6 +483,8 @@ router.post("/:id/renew", async (req, res) => {
         customerName: loan.customerName,
         amount: paid.toString(),
         paymentType: "renewal",
+        paymentMode: resolvedMode,
+        referenceNumber: resolvedRef,
         paymentDate: now,
         notes: resolvedNotes,
       });
@@ -613,6 +554,10 @@ router.patch("/:id", async (req, res) => {
       const principalPaid = safeFloat((loan as any).principalPaid ?? "0");
       const currentPrincipal = Math.max(0, safeFloat(loan.loanAmount) - principalPaid);
       const totalDue = currentPrincipal + outstanding;
+      const resolvedMode = VALID_PAYMENT_MODES.has(data.paymentMode) ? data.paymentMode : "cash";
+
+      const settings = await getOrCreateGirviSettings(userId);
+      const returnVoucherNumber = await nextGirviNumber(userId, "return", settings.returnPrefix, now);
 
       // Record the final interest + principal settlement as payments (mirrors the
       // auto-redeem path in collect-interest) so payment history and the
@@ -621,22 +566,26 @@ router.patch("/:id", async (req, res) => {
         if (outstanding > 0) {
           await tx.insert(girviPaymentsTable).values({
             userId, loanId: id, loanNumber: loan.loanNumber, customerName: loan.customerName,
-            amount: outstanding.toFixed(2), paymentType: "interest", paymentDate: now,
+            amount: outstanding.toFixed(2), paymentType: "interest", paymentMode: resolvedMode, paymentDate: now,
             notes: "Redemption: final interest settlement",
           });
         }
         if (currentPrincipal > 0) {
           await tx.insert(girviPaymentsTable).values({
             userId, loanId: id, loanNumber: loan.loanNumber, customerName: loan.customerName,
-            amount: currentPrincipal.toFixed(2), paymentType: "principal", paymentDate: now,
+            amount: currentPrincipal.toFixed(2), paymentType: "principal", paymentMode: resolvedMode, paymentDate: now,
             notes: "Redemption: final principal settlement",
           });
         }
+        await tx.update(girviLoanItemsTable)
+          .set({ status: "returned" })
+          .where(and(eq(girviLoanItemsTable.loanId, id), eq(girviLoanItemsTable.userId, userId)));
         const [u] = await tx.update(girviLoansTable)
           .set({
             status: "redeemed",
             redeemedDate: now,
             redeemedAmount: totalDue.toFixed(2),
+            returnVoucherNumber,
             totalInterestCollected: (safeFloat(loan.totalInterestCollected) + outstanding).toFixed(2),
             principalPaid: loan.loanAmount,
           })
@@ -660,6 +609,9 @@ router.patch("/:id", async (req, res) => {
       const goldSaleValue = safeFloat(data.goldSaleValue, safeFloat(loan.estimatedValue));
       if (goldSaleValue < 0) return res.status(400).json({ error: "Gold sale value cannot be negative" });
       const lossAmount = Math.max(0, totalDue - goldSaleValue);
+
+      const settings = await getOrCreateGirviSettings(userId);
+      updates.returnVoucherNumber = await nextGirviNumber(userId, "return", settings.returnPrefix, now);
       updates.status = "forfeited";
       updates.redeemedDate = now;
       updates.goldSaleValue = goldSaleValue.toString();
@@ -667,6 +619,9 @@ router.patch("/:id", async (req, res) => {
       // Loan is closed out (via gold sale) — clear the remaining principal so
       // currentPrincipal doesn't keep showing a stale nonzero balance afterwards.
       updates.principalPaid = loan.loanAmount;
+      await db.update(girviLoanItemsTable)
+        .set({ status: "forfeited" })
+        .where(and(eq(girviLoanItemsTable.loanId, id), eq(girviLoanItemsTable.userId, userId)));
     } else if (data.status === "extended") {
       if (loan.status !== "active" && loan.status !== "extended") {
         return res.status(400).json({ error: "Only active/extended loans can be extended" });
@@ -684,6 +639,14 @@ router.patch("/:id", async (req, res) => {
       // General field updates
       if (data.notes !== undefined) updates.notes = String(data.notes).slice(0, MAX_NOTES_LEN) || null;
       if (data.itemDescription !== undefined) updates.itemDescription = String(data.itemDescription).slice(0, 500) || null;
+      if (data.fatherName !== undefined) updates.fatherName = String(data.fatherName).trim() || null;
+      if (data.address !== undefined) updates.address = String(data.address).slice(0, MAX_ADDRESS_LEN) || null;
+      if (data.pan !== undefined) updates.pan = String(data.pan).trim().toUpperCase() || null;
+      if (data.processingFee !== undefined) {
+        const pf = safeFloat(data.processingFee);
+        if (pf < 0) return res.status(400).json({ error: "Processing fee cannot be negative" });
+        updates.processingFee = pf.toString();
+      }
       if (data.penaltyRate !== undefined) {
         const pr = safeFloat(data.penaltyRate);
         if (pr < 0 || pr > 100) return res.status(400).json({ error: "Penalty rate must be 0–100" });
@@ -692,6 +655,7 @@ router.patch("/:id", async (req, res) => {
       }
     }
 
+    updates.updatedAt = now;
     const [updated] = await db.update(girviLoansTable).set(updates)
       .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
       .returning();

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { customersTable, salesTable, repairJobsTable, girviLoansTable } from "@workspace/db";
 import { eq, ilike, and, or, desc, inArray } from "drizzle-orm";
-import { mapLoan as mapGirviLoan } from "./girvi";
+import { mapLoan as mapGirviLoan } from "./girvi-helpers";
 
 const router = Router();
 

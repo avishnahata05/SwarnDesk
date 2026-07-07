@@ -1,0 +1,201 @@
+import { db } from "@workspace/db";
+import { girviLoansTable, girviCountersTable, girviBranchesTable, girviSettingsTable, businessSettingsTable, girviPaymentsTable } from "@workspace/db";
+import { eq, and, sql } from "drizzle-orm";
+
+export const VALID_METAL_TYPES = new Set(["gold", "silver"]);
+export const VALID_STATUSES = new Set(["active", "redeemed", "forfeited", "extended"]);
+export const VALID_PERIODS = new Set(["daily", "weekly", "monthly", "yearly"]);
+export const VALID_PAYMENT_MODES = new Set(["cash", "bank", "upi", "cheque"]);
+export const MAX_NOTES_LEN = 1000;
+export const MAX_ADDRESS_LEN = 500;
+
+export function safeFloat(val: unknown, fallback = 0): number {
+  const n = parseFloat(String(val ?? ""));
+  return isFinite(n) ? n : fallback;
+}
+
+export function getPeriodDays(period: string): number {
+  if (period === "daily") return 1;
+  if (period === "weekly") return 7;
+  if (period === "yearly") return 365;
+  return 30; // monthly default
+}
+
+// Indian financial year: April (month index 3) through March.
+// fyStartMonth is 1-indexed (default 4 = April) per girvi_settings.financialYearStartMonth.
+export function getFinancialYear(date: Date, fyStartMonth = 4): string {
+  const month = date.getMonth() + 1; // 1-indexed
+  const year = date.getFullYear();
+  const startYear = month >= fyStartMonth ? year : year - 1;
+  return `${startYear}-${String((startYear + 1) % 100).padStart(2, "0")}`;
+}
+
+// Atomically issues the next sequential number for a document type + financial year,
+// formatted as "<prefix>/<financialYear>/<0000>". Race-safe via ON CONFLICT row locking.
+export async function nextGirviNumber(userId: number, docType: string, prefix: string, asOf = new Date()): Promise<string> {
+  const financialYear = getFinancialYear(asOf);
+  const [row] = await db.insert(girviCountersTable)
+    .values({ userId, docType, financialYear, lastNumber: 1 })
+    .onConflictDoUpdate({
+      target: [girviCountersTable.userId, girviCountersTable.docType, girviCountersTable.financialYear],
+      set: { lastNumber: sql`${girviCountersTable.lastNumber} + 1` },
+    })
+    .returning();
+  return `${prefix}/${financialYear}/${String(row.lastNumber).padStart(4, "0")}`;
+}
+
+// Every user gets a "Main" branch lazily on first use — keeps single-branch
+// shops frictionless while still giving multi-branch shops a real model.
+export async function ensureDefaultBranch(userId: number): Promise<number> {
+  const [existing] = await db.select().from(girviBranchesTable)
+    .where(and(eq(girviBranchesTable.userId, userId), eq(girviBranchesTable.isDefault, true)));
+  if (existing) return existing.id;
+  const [anyBranch] = await db.select().from(girviBranchesTable).where(eq(girviBranchesTable.userId, userId));
+  if (anyBranch) return anyBranch.id;
+  const [created] = await db.insert(girviBranchesTable)
+    .values({ userId, name: "Main", isDefault: true, isActive: true })
+    .returning();
+  return created.id;
+}
+
+// Lazily creates girvi_settings for a user, one-time-prefilled from the main
+// business settings as a convenience default only — never read live again.
+export async function getOrCreateGirviSettings(userId: number) {
+  const [existing] = await db.select().from(girviSettingsTable).where(eq(girviSettingsTable.userId, userId));
+  if (existing) return existing;
+  const [mainSettings] = await db.select().from(businessSettingsTable).where(eq(businessSettingsTable.userId, userId));
+  const [created] = await db.insert(girviSettingsTable).values({
+    userId,
+    shopName: mainSettings?.businessName || "SwarnDesk Jewellers",
+    gstin: mainSettings?.gstin || null,
+    address: mainSettings?.address || null,
+    mobile: mainSettings?.mobile || null,
+    email: mainSettings?.email || null,
+  }).returning();
+  return created;
+}
+
+// Interest accrues on currentPrincipal (= loanAmount - principalPaid) from startDate.
+// Two phases: normal (startDate -> dueDate) + penalty (dueDate -> now, at rate+penaltyRate).
+export function calcAccruedInterest(loan: typeof girviLoansTable.$inferSelect, asOf = new Date()) {
+  const originalPrincipal = safeFloat(loan.loanAmount);
+  const principalPaid = safeFloat((loan as any).principalPaid ?? "0");
+  const principal = Math.max(0, originalPrincipal - principalPaid);
+  const rate = safeFloat(loan.interestRate);
+  const penaltyRate = safeFloat(loan.penaltyRate);
+  const startDate = new Date(loan.startDate);
+  const dueDate = new Date(loan.dueDate);
+  const periodDays = getPeriodDays(loan.interestPeriod);
+
+  const daysElapsed = Math.max(0, Math.floor((asOf.getTime() - startDate.getTime()) / 86400000));
+  const normalDays = Math.min(daysElapsed, Math.max(0, Math.floor((dueDate.getTime() - startDate.getTime()) / 86400000)));
+  const overdueDays = Math.max(0, Math.floor((asOf.getTime() - dueDate.getTime()) / 86400000));
+
+  const normalInterest = Math.round(principal * (rate / 100) * (normalDays / periodDays));
+  const penaltyInterest = overdueDays > 0
+    ? Math.round(principal * ((rate + penaltyRate) / 100) * (overdueDays / periodDays))
+    : 0;
+
+  return { normalInterest, penaltyInterest, total: normalInterest + penaltyInterest, periodDays };
+}
+
+// When loan terms (due date, penalty rate) change without a payment being collected,
+// preserve the interest already owed as of "now" instead of letting the recalculation
+// under the new terms silently erase it (e.g. pushing the due date forward would
+// otherwise retroactively turn already-accrued penalty interest into normal interest).
+export function preserveOutstandingBaseline(
+  loan: typeof girviLoansTable.$inferSelect,
+  changes: Partial<Pick<typeof girviLoansTable.$inferSelect, "dueDate" | "penaltyRate" | "interestRate">>,
+  now: Date,
+): string {
+  const before = calcAccruedInterest(loan, now).total;
+  const after = calcAccruedInterest({ ...loan, ...changes }, now).total;
+  const baselineBefore = safeFloat((loan as any).interestBaseline ?? "0");
+  return (baselineBefore + (after - before)).toFixed(2);
+}
+
+export function mapLoan(l: typeof girviLoansTable.$inferSelect, asOf = new Date()) {
+  const loanAmount = safeFloat(l.loanAmount);
+  const principalPaid = safeFloat((l as any).principalPaid ?? "0");
+  const currentPrincipal = Math.max(0, loanAmount - principalPaid);
+  // interestBaseline = interest already collected at time of last startDate reset.
+  // Outstanding = accrued(from startDate) - (totalCollected - baseline).
+  const interestBaseline = safeFloat((l as any).interestBaseline ?? "0");
+  const totalInterestCollected = safeFloat(l.totalInterestCollected);
+  const collectedSinceReset = Math.max(0, totalInterestCollected - interestBaseline);
+
+  const isActive = l.status === "active" || l.status === "extended";
+  const { normalInterest, penaltyInterest, total: accruedInterest, periodDays } =
+    isActive ? calcAccruedInterest(l, asOf) : { normalInterest: 0, penaltyInterest: 0, total: 0, periodDays: getPeriodDays(l.interestPeriod) };
+
+  const outstandingInterest = Math.max(0, accruedInterest - collectedSinceReset);
+  const totalDue = currentPrincipal + outstandingInterest;
+  const dueDate = new Date(l.dueDate);
+  const daysRemaining = Math.floor((dueDate.getTime() - asOf.getTime()) / 86400000);
+
+  const dailyRate = (safeFloat(l.interestRate) / 100) / periodDays;
+
+  return {
+    id: l.id,
+    loanNumber: l.loanNumber,
+    branchId: l.branchId,
+    customerId: l.customerId,
+    customerName: l.customerName,
+    customerMobile: l.customerMobile,
+    fatherName: l.fatherName,
+    address: l.address,
+    kycDocType: l.kycDocType,
+    kycDocNumber: l.kycDocNumber,
+    pan: l.pan,
+    itemDescription: l.itemDescription,
+    metalType: l.metalType,
+    purity: l.purity,
+    grossWeight: safeFloat(l.grossWeight),
+    netWeight: safeFloat(l.netWeight),
+    estimatedValue: safeFloat(l.estimatedValue),
+    loanAmount,
+    processingFee: safeFloat(l.processingFee),
+    principalPaid,
+    currentPrincipal,
+    interestRate: safeFloat(l.interestRate),
+    penaltyRate: safeFloat(l.penaltyRate),
+    interestPeriod: l.interestPeriod,
+    periodDays,
+    dailyRate: Math.round(dailyRate * 1e6) / 1e6,
+    startDate: l.startDate.toISOString(),
+    dueDate: l.dueDate.toISOString(),
+    status: l.status,
+    normalInterest,
+    penaltyInterest,
+    accruedInterest,
+    totalInterestCollected,
+    collectedSinceReset,
+    outstandingInterest,
+    totalDue,
+    daysRemaining,
+    isOverdue: daysRemaining < 0 && isActive,
+    redeemedDate: l.redeemedDate?.toISOString() ?? null,
+    redeemedAmount: l.redeemedAmount ? safeFloat(l.redeemedAmount) : null,
+    returnVoucherNumber: l.returnVoucherNumber,
+    goldSaleValue: l.goldSaleValue ? safeFloat(l.goldSaleValue) : null,
+    lossAmount: l.lossAmount ? safeFloat(l.lossAmount) : null,
+    notes: l.notes,
+    createdAt: l.createdAt.toISOString(),
+  };
+}
+
+export function mapPayment(p: typeof girviPaymentsTable.$inferSelect) {
+  return {
+    id: p.id,
+    loanId: p.loanId,
+    loanNumber: p.loanNumber,
+    customerName: p.customerName,
+    amount: safeFloat(p.amount),
+    paymentType: p.paymentType,
+    paymentMode: p.paymentMode,
+    referenceNumber: p.referenceNumber,
+    paymentDate: p.paymentDate.toISOString(),
+    notes: p.notes,
+    createdAt: p.createdAt.toISOString(),
+  };
+}
