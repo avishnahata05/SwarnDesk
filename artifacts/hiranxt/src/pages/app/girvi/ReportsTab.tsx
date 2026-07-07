@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/lib/utils";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -21,15 +21,27 @@ const REPORTS: { key: ReportKey; label: string }[] = [
 
 const needsDateRange: Record<ReportKey, boolean> = { pledge: false, maturity: false, returns: true, transfers: true, financial: true, cash: true };
 
+// Each report's response has a different shape (some are arrays, some are
+// objects like { overdue, dueThisWeek, upcoming }). Sharing one "data" slot
+// across all six caused a crash: switching tabs updates `active` before the
+// new fetch resolves, so for one render a table expecting an array could
+// receive the previous report's object (or vice versa) and call `.map` on
+// it. Keeping a separate cache slot per report key means a tab can only ever
+// render the shape its own endpoint returns.
+type ReportCache = Partial<Record<ReportKey, unknown>>;
+
 export default function ReportsTab() {
   const { toast } = useToast();
   const [active, setActive] = useState<ReportKey>("pledge");
   const [from, setFrom] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return d.toISOString().split("T")[0]; });
   const [to, setTo] = useState(() => new Date().toISOString().split("T")[0]);
   const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<any>(null);
+  const [cache, setCache] = useState<ReportCache>({});
+  const requestIdRef = useRef(0);
 
   const load = useCallback(async () => {
+    const key = active;
+    const myRequestId = ++requestIdRef.current;
     setLoading(true);
     try {
       const endpoint: Record<ReportKey, string> = {
@@ -40,24 +52,32 @@ export default function ReportsTab() {
         financial: `/reports/financial-summary?from=${from}&to=${to}`,
         cash: `/reports/cash-compliance?from=${from}&to=${to}`,
       };
-      const r = await fetch(`${API}${endpoint[active]}`, { headers: authHeader() });
-      if (r.ok) setData(await r.json());
-      else { toast({ title: "Failed to load report", variant: "destructive" }); setData(null); }
+      const r = await fetch(`${API}${endpoint[key]}`, { headers: authHeader() });
+      const json = r.ok ? await r.json() : null;
+      if (requestIdRef.current !== myRequestId) return; // a newer request has since started — ignore this stale response
+      if (r.ok) setCache(prev => ({ ...prev, [key]: json }));
+      else { toast({ title: "Failed to load report", variant: "destructive" }); setCache(prev => ({ ...prev, [key]: null })); }
     } catch {
-      toast({ title: "Network error — please check your connection", variant: "destructive" });
-    } finally { setLoading(false); }
+      if (requestIdRef.current === myRequestId) toast({ title: "Network error — please check your connection", variant: "destructive" });
+    } finally {
+      if (requestIdRef.current === myRequestId) setLoading(false);
+    }
   }, [active, from, to]);
 
   useEffect(() => { load(); }, [load]);
 
+  const data = cache[active];
+  const arr = (v: unknown): any[] => Array.isArray(v) ? v : [];
+
   const doExport = () => {
     let rows: Record<string, unknown>[] = [];
-    if (active === "pledge") rows = data ?? [];
-    else if (active === "maturity") rows = [...(data?.overdue ?? []), ...(data?.dueThisWeek ?? []), ...(data?.upcoming ?? [])];
-    else if (active === "returns") rows = data ?? [];
-    else if (active === "transfers") rows = data ?? [];
-    else if (active === "financial") rows = data ? [data] : [];
-    else if (active === "cash") rows = data?.flagged ?? [];
+    const d = data as any;
+    if (active === "pledge") rows = arr(d);
+    else if (active === "maturity") rows = [...arr(d?.overdue), ...arr(d?.dueThisWeek), ...arr(d?.upcoming)];
+    else if (active === "returns") rows = arr(d);
+    else if (active === "transfers") rows = arr(d);
+    else if (active === "financial") rows = d ? [d] : [];
+    else if (active === "cash") rows = arr(d?.flagged);
     const ok = exportToCsv(`girvi-${active}-${new Date().toISOString().slice(0, 10)}.csv`, rows);
     if (!ok) toast({ title: "No data to export", variant: "destructive" });
   };
@@ -106,17 +126,17 @@ export default function ReportsTab() {
           {loading ? (
             <div className="text-center py-12 text-muted-foreground text-sm">Loading report...</div>
           ) : active === "pledge" ? (
-            <PledgeRegisterTable rows={data ?? []} />
+            <PledgeRegisterTable rows={arr(data)} />
           ) : active === "maturity" ? (
-            <MaturityView data={data} />
+            <MaturityView data={data as any} />
           ) : active === "returns" ? (
-            <ReturnsTable rows={data ?? []} />
+            <ReturnsTable rows={arr(data)} />
           ) : active === "transfers" ? (
-            <TransfersTable rows={data ?? []} />
+            <TransfersTable rows={arr(data)} />
           ) : active === "financial" ? (
-            <FinancialSummaryView data={data} />
+            <FinancialSummaryView data={data as any} />
           ) : (
-            <CashComplianceView data={data} />
+            <CashComplianceView data={data as any} />
           )}
         </CardContent>
       </Card>
@@ -171,7 +191,8 @@ function MaturityView({ data }: { data: any }) {
       )}
     </div>
   );
-  return <>{section("Overdue", data.overdue ?? [], "text-red-600")}{section("Due This Week", data.dueThisWeek ?? [], "text-amber-600")}{section("Upcoming (8–30 days)", data.upcoming ?? [], "text-muted-foreground")}</>;
+  const safeArr = (v: unknown): any[] => Array.isArray(v) ? v : [];
+  return <>{section("Overdue", safeArr(data.overdue), "text-red-600")}{section("Due This Week", safeArr(data.dueThisWeek), "text-amber-600")}{section("Upcoming (8–30 days)", safeArr(data.upcoming), "text-muted-foreground")}</>;
 }
 
 function ReturnsTable({ rows }: { rows: any[] }) {
@@ -217,15 +238,17 @@ function TransfersTable({ rows }: { rows: any[] }) {
 
 function FinancialSummaryView({ data }: { data: any }) {
   if (!data) return null;
+  const num = (v: unknown): number => typeof v === "number" && isFinite(v) ? v : 0;
   const rows: { label: string; value: number; color?: string }[] = [
-    { label: "Principal Disbursed", value: data.principalDisbursed },
-    { label: "Principal Collected", value: data.principalCollected },
-    { label: "Interest Income (cash basis)", value: data.interestIncome, color: "text-emerald-600" },
-    { label: "Processing Fee Income", value: data.processingFeeIncome, color: "text-emerald-600" },
-    { label: "Forfeiture Loss", value: data.forfeitureLoss, color: "text-red-600" },
-    { label: "Closing Outstanding Principal", value: data.closingOutstandingPrincipal },
-    { label: "Closing Outstanding Interest", value: data.closingOutstandingInterest },
-    { label: "Stock Value at Cost (all active pledges)", value: data.stockValueAtCost },
+    { label: "Principal Disbursed", value: num(data.principalDisbursed) },
+    { label: "Principal Collected", value: num(data.principalCollected) },
+    { label: "Interest Income (cash basis)", value: num(data.interestIncome), color: "text-emerald-600" },
+    { label: "Interest Waived", value: num(data.interestWaived), color: "text-blue-600" },
+    { label: "Processing Fee Income", value: num(data.processingFeeIncome), color: "text-emerald-600" },
+    { label: "Forfeiture Loss", value: num(data.forfeitureLoss), color: "text-red-600" },
+    { label: "Closing Outstanding Principal", value: num(data.closingOutstandingPrincipal) },
+    { label: "Closing Outstanding Interest", value: num(data.closingOutstandingInterest) },
+    { label: "Stock Value at Cost (all active pledges)", value: num(data.stockValueAtCost) },
   ];
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -237,7 +260,7 @@ function FinancialSummaryView({ data }: { data: any }) {
       ))}
       <div className="p-3 rounded-lg border border-border bg-muted/10">
         <div className="text-xs text-muted-foreground">Gold / Silver in Custody</div>
-        <div className="text-sm font-semibold">{data.goldWeightInCustody}g Au · {data.silverWeightInCustody}g Ag</div>
+        <div className="text-sm font-semibold">{num(data.goldWeightInCustody)}g Au · {num(data.silverWeightInCustody)}g Ag</div>
       </div>
     </div>
   );
@@ -245,17 +268,18 @@ function FinancialSummaryView({ data }: { data: any }) {
 
 function CashComplianceView({ data }: { data: any }) {
   if (!data) return null;
+  const flagged: any[] = Array.isArray(data.flagged) ? data.flagged : [];
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">Flags same-day cash receipts per customer above ₹{data.limit?.toLocaleString("en-IN")} (Section 269ST awareness — not a hard block, review for compliance).</p>
-      {(!data.flagged || data.flagged.length === 0) ? (
+      {flagged.length === 0 ? (
         <p className="text-sm text-emerald-600 py-4 text-center">No flagged cash transactions in this period.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead><tr><Th>Customer</Th><Th>Date</Th><Th>Total Cash Received</Th></tr></thead>
             <tbody>
-              {data.flagged.map((f: any, i: number) => (
+              {flagged.map((f: any, i: number) => (
                 <tr key={i} className="bg-amber-50/50">
                   <Td>{f.customerName}</Td><Td>{f.date}</Td><Td right>{formatCurrency(f.total)}</Td>
                 </tr>

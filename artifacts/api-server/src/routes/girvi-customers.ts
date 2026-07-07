@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { girviCustomersTable, girviLoansTable, girviPaymentsTable } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
-import { mapLoan, mapPayment, MAX_NOTES_LEN, MAX_ADDRESS_LEN } from "./girvi-helpers";
+import { mapLoan, mapPayment, getOrCreateGirviSettings, MAX_NOTES_LEN, MAX_ADDRESS_LEN } from "./girvi-helpers";
 
 const router = Router();
 
@@ -145,11 +145,12 @@ router.get("/:id/statement", async (req, res) => {
       .where(and(eq(girviCustomersTable.id, id), eq(girviCustomersTable.userId, userId)));
     if (!customer) return res.status(404).json({ error: "Not found" });
 
+    const settings = await getOrCreateGirviSettings(userId);
     const loans = await db.select().from(girviLoansTable)
       .where(and(eq(girviLoansTable.customerId, id), eq(girviLoansTable.userId, userId)))
       .orderBy(desc(girviLoansTable.createdAt));
 
-    const mappedLoans = loans.map(l => mapLoan(l));
+    const mappedLoans = loans.map(l => mapLoan(l, new Date(), settings.overdueGraceDays));
     const loanIds = loans.map(l => l.id);
     const payments = loanIds.length > 0
       ? (await db.select().from(girviPaymentsTable).where(eq(girviPaymentsTable.userId, userId)))

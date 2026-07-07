@@ -90,11 +90,15 @@ export type Loan = {
   penaltyInterest: number;
   accruedInterest: number;
   totalInterestCollected: number;
+  interestWaived: number;
   collectedSinceReset: number;
   outstandingInterest: number;
   totalDue: number;
   daysRemaining: number;
   isOverdue: boolean;
+  overdueDaysRaw: number;
+  graceDaysApplied: number;
+  withinGracePeriod: boolean;
   redeemedDate: string | null;
   redeemedAmount: number | null;
   returnVoucherNumber: string | null;
@@ -166,6 +170,7 @@ export type GirviSettings = {
   defaultPenaltyRate: number;
   defaultLoanDurationDays: number;
   cashTransactionLimit: number;
+  overdueGraceDays: number;
   receiptPrefix: string;
   returnPrefix: string;
   transferPrefix: string;

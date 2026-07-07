@@ -64,6 +64,7 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
   const [renewNewDueDate, setRenewNewDueDate] = useState("");
   const [renewNotes, setRenewNotes] = useState("");
   const [redeemConfirmed, setRedeemConfirmed] = useState(false);
+  const [waiveRedeemInterest, setWaiveRedeemInterest] = useState("0");
   const [transferItemIds, setTransferItemIds] = useState<number[]>([]);
   const [transferToBranchId, setTransferToBranchId] = useState("");
   const [transferReason, setTransferReason] = useState("");
@@ -190,7 +191,11 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
           toast({ title: `Amount exceeds total due (${formatCurrency(actionLoan.totalDue)})`, variant: "destructive" });
           setSubmitting(false); return;
         }
-        body = { amount: amt, paymentType: collectType, paymentMode: collectMode, notes: collectNotes.trim() || null };
+        if (collectType === "waiver" && amt > actionLoan.outstandingInterest + 0.01) {
+          toast({ title: `Cannot waive more than the outstanding interest (${formatCurrency(actionLoan.outstandingInterest)})`, variant: "destructive" });
+          setSubmitting(false); return;
+        }
+        body = { amount: amt, paymentType: collectType, paymentMode: collectType === "waiver" ? undefined : collectMode, notes: collectNotes.trim() || null };
       } else if (actionType === "renew") {
         url = `${API}/${actionLoan.id}/renew`;
         method = "POST";
@@ -205,7 +210,12 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
           toast({ title: "Please confirm the pledged item(s) have been returned", variant: "destructive" });
           setSubmitting(false); return;
         }
-        body = { status: "redeemed" };
+        const waive = parseFloat(waiveRedeemInterest) || 0;
+        if (waive < 0 || waive > actionLoan.outstandingInterest + 0.01) {
+          toast({ title: `Waived interest must be between 0 and ${formatCurrency(actionLoan.outstandingInterest)}`, variant: "destructive" });
+          setSubmitting(false); return;
+        }
+        body = { status: "redeemed", waiveInterest: waive };
       } else if (actionType === "forfeit") {
         const saleVal = parseFloat(goldSaleValue);
         if (!isFinite(saleVal) || saleVal < 0) { toast({ title: "Enter a valid gold sale value (0 or more)", variant: "destructive" }); setSubmitting(false); return; }
@@ -227,12 +237,13 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
         if (pRes.ok) {
           const payments: Payment[] = await pRes.json();
           setLoanPayments(prev => ({ ...prev, [actionLoan.id]: payments }));
-          if (payments.length > 0 && actionType === "collect") setLastPayment(payments[0]);
+          if (payments.length > 0 && actionType === "collect" && collectType !== "waiver") setLastPayment(payments[0]);
         }
         setLoans(prev => prev.map(l => l.id === actionLoan.id ? updatedLoan : l));
         if (actionType === "collect") {
           const amt = parseFloat(collectAmount);
-          toast({ title: `₹${isFinite(amt) ? amt.toLocaleString("en-IN") : "0"} collected. Print receipt below.` });
+          const amtStr = isFinite(amt) ? amt.toLocaleString("en-IN") : "0";
+          toast({ title: collectType === "waiver" ? `₹${amtStr} interest waived.` : `₹${amtStr} collected. Print receipt below.` });
         } else {
           toast({ title: "Loan renewed — interest clock reset!" });
         }
@@ -461,6 +472,9 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
                       const liveVal = computeLiveEstValue(loan, loanItems[loan.id], rates);
                       setGoldSaleValue(String(Math.round(liveVal ?? loan.estimatedValue)));
                     }
+                    if (type === "redeem") {
+                      setWaiveRedeemInterest("0");
+                    }
                     if (type === "transfer") {
                       loadItems(loan.id);
                       setTransferItemIds([]);
@@ -523,9 +537,15 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
 
               {actionType === "collect" && (
                 <div className="space-y-3">
+                  {actionLoan.withinGracePeriod && (
+                    <div className="p-2 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-800">
+                      This loan is {actionLoan.overdueDaysRaw} day{actionLoan.overdueDaysRaw !== 1 ? "s" : ""} past due, within the {actionLoan.graceDaysApplied}-day grace period — no penalty interest has accrued yet.
+                    </div>
+                  )}
                   <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Amount received (₹)</label>
-                    <Input type="number" value={collectAmount} onChange={e => setCollectAmount(e.target.value)} placeholder="Any amount, any time" className="h-9" autoFocus />
+                    <label className="text-xs text-muted-foreground block mb-1">{collectType === "waiver" ? "Amount to waive (₹)" : "Amount received (₹)"}</label>
+                    <Input type="number" value={collectAmount} onChange={e => setCollectAmount(e.target.value)} placeholder={collectType === "waiver" ? "Interest to forgive" : "Any amount, any time"} className="h-9" autoFocus />
+                    {collectType === "waiver" && <p className="text-xs text-muted-foreground mt-1">Outstanding interest: {formatCurrency(actionLoan.outstandingInterest)}</p>}
                   </div>
 
                   {collectAmount !== "" && parseFloat(collectAmount) > 0 && collectType === "auto" && (() => {
@@ -569,36 +589,42 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
                   })()}
 
                   <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Payment mode</label>
-                    <Select value={collectMode} onValueChange={setCollectMode}>
-                      <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="cash">Cash</SelectItem>
-                        <SelectItem value="bank">Bank Transfer</SelectItem>
-                        <SelectItem value="upi">UPI</SelectItem>
-                        <SelectItem value="cheque">Cheque</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Payment mode (allocation)</label>
+                    <label className="text-xs text-muted-foreground block mb-1">Type</label>
                     <Select value={collectType} onValueChange={setCollectType}>
                       <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="auto">Auto-allocate (interest first, then principal)</SelectItem>
                         <SelectItem value="interest">Interest only (Byaj)</SelectItem>
                         <SelectItem value="penalty">Penalty / Overdue charge</SelectItem>
+                        <SelectItem value="waiver">Waive interest (forgive — no cash received)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
 
+                  {collectType !== "waiver" && (
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Payment mode</label>
+                      <Select value={collectMode} onValueChange={setCollectMode}>
+                        <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="cash">Cash</SelectItem>
+                          <SelectItem value="bank">Bank Transfer</SelectItem>
+                          <SelectItem value="upi">UPI</SelectItem>
+                          <SelectItem value="cheque">Cheque</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">Notes (optional)</label>
-                    <Textarea value={collectNotes} onChange={e => setCollectNotes(e.target.value)} placeholder="e.g. Cash paid, hand receipt" rows={2} className="text-sm resize-y" />
+                    <Textarea value={collectNotes} onChange={e => setCollectNotes(e.target.value)} placeholder={collectType === "waiver" ? "e.g. Customer 15 days late, waived as a courtesy" : "e.g. Cash paid, hand receipt"} rows={2} className="text-sm resize-y" />
                   </div>
-                  {collectType !== "auto" && (
+                  {collectType !== "auto" && collectType !== "waiver" && (
                     <p className="text-xs text-muted-foreground">Interest-only or penalty payments do not change the principal or reset the clock.</p>
+                  )}
+                  {collectType === "waiver" && (
+                    <p className="text-xs text-muted-foreground">Recorded as its own entry so reports don't count it as cash income — it still clears the outstanding interest on this loan.</p>
                   )}
                 </div>
               )}
@@ -626,17 +652,34 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
                 </div>
               )}
 
-              {actionType === "redeem" && (
+              {actionType === "redeem" && (() => {
+                const waive = Math.min(actionLoan.outstandingInterest, Math.max(0, parseFloat(waiveRedeemInterest) || 0));
+                const cashDue = actionLoan.currentPrincipal + actionLoan.outstandingInterest - waive;
+                return (
                 <div className="space-y-2">
                   <div className="p-3 rounded-lg bg-green-50 border border-green-200 text-xs text-green-800 space-y-1">
-                    <div>Collect <strong>{formatCurrency(actionLoan.totalDue)}</strong> from the customer and return the pledged {actionLoan.metalType} ornament(s).</div>
+                    <div>Collect <strong>{formatCurrency(cashDue)}</strong> from the customer and return the pledged {actionLoan.metalType} ornament(s).</div>
                     <div className="text-[10px] space-y-0.5">
                       <div>Principal: {formatCurrency(actionLoan.currentPrincipal)}</div>
-                      <div>Interest due: {formatCurrency(actionLoan.outstandingInterest)}</div>
+                      <div>Interest due: {formatCurrency(actionLoan.outstandingInterest)}{waive > 0 ? ` (of which ${formatCurrency(waive)} waived)` : ""}</div>
                     </div>
                     {actionLoan.itemDescription && <div className="mt-1 font-medium">Items: {actionLoan.itemDescription}</div>}
                     <div className="mt-1 text-[10px]">A numbered Return Voucher will be generated for this redemption.</div>
                   </div>
+                  {actionLoan.outstandingInterest > 0 && (
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">
+                        Waive some interest? (₹, optional) <span className="text-muted-foreground/60">your call — e.g. customer is well past the grace period</span>
+                      </label>
+                      <Input
+                        type="number"
+                        value={waiveRedeemInterest}
+                        onChange={e => setWaiveRedeemInterest(e.target.value)}
+                        placeholder="0"
+                        className="h-9"
+                      />
+                    </div>
+                  )}
                   <label className="flex items-start gap-2 p-2.5 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-900 cursor-pointer">
                     <input
                       type="checkbox"
@@ -647,7 +690,8 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
                     <span>I confirm the pledged item(s) have been physically returned to the customer</span>
                   </label>
                 </div>
-              )}
+                );
+              })()}
 
               {actionType === "forfeit" && (
                 <div className="space-y-2">
@@ -721,7 +765,7 @@ export default function LoansTab({ branches }: { branches: Branch[] }) {
                   disabled={submitting || (actionType === "redeem" && !redeemConfirmed)}
                 >
                   {submitting ? "Processing..." :
-                   actionType === "collect" ? `Collect ₹${parseFloat(collectAmount || "0").toLocaleString("en-IN")}` :
+                   actionType === "collect" ? `${collectType === "waiver" ? "Waive" : "Collect"} ₹${parseFloat(collectAmount || "0").toLocaleString("en-IN")}` :
                    actionType === "renew" ? "Renew Loan" :
                    actionType === "redeem" ? "Confirm Redemption" :
                    actionType === "forfeit" ? "Forfeit & Record" :
@@ -822,8 +866,11 @@ function LoanRow({
           <div className="text-xs text-muted-foreground hidden sm:block">
             {formatCurrency(loan.currentPrincipal)} + {formatCurrency(loan.outstandingInterest)} int.
           </div>
-          {loan.totalInterestCollected > 0 && (
-            <div className="text-[10px] text-emerald-600">✓ {formatCurrency(loan.totalInterestCollected)} coll.</div>
+          {loan.totalInterestCollected - loan.interestWaived > 0 && (
+            <div className="text-[10px] text-emerald-600">✓ {formatCurrency(loan.totalInterestCollected - loan.interestWaived)} coll.</div>
+          )}
+          {loan.interestWaived > 0 && (
+            <div className="text-[10px] text-blue-600">waived {formatCurrency(loan.interestWaived)}</div>
           )}
         </div>
         <div className="text-muted-foreground flex-shrink-0">

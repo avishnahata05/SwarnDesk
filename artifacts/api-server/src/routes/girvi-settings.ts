@@ -23,6 +23,7 @@ function mapSettings(s: typeof girviSettingsTable.$inferSelect) {
     defaultPenaltyRate: safeFloat(s.defaultPenaltyRate),
     defaultLoanDurationDays: s.defaultLoanDurationDays,
     cashTransactionLimit: safeFloat(s.cashTransactionLimit),
+    overdueGraceDays: s.overdueGraceDays,
     receiptPrefix: s.receiptPrefix,
     returnPrefix: s.returnPrefix,
     transferPrefix: s.transferPrefix,
@@ -74,6 +75,11 @@ router.patch("/", async (req, res) => {
       updates.defaultLoanDurationDays = d;
     }
     if (data.cashTransactionLimit !== undefined) updates.cashTransactionLimit = safeFloat(data.cashTransactionLimit, 200000).toString();
+    if (data.overdueGraceDays !== undefined) {
+      const g = parseInt(data.overdueGraceDays);
+      if (isNaN(g) || g < 0) return res.status(400).json({ error: "overdueGraceDays must be 0 or more" });
+      updates.overdueGraceDays = g;
+    }
     if (data.receiptPrefix !== undefined) updates.receiptPrefix = String(data.receiptPrefix).trim().toUpperCase() || "GRV";
     if (data.returnPrefix !== undefined) updates.returnPrefix = String(data.returnPrefix).trim().toUpperCase() || "RTN";
     if (data.transferPrefix !== undefined) updates.transferPrefix = String(data.transferPrefix).trim().toUpperCase() || "TRF";

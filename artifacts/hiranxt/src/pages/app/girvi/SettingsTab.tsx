@@ -126,6 +126,16 @@ export default function SettingsTab({ branches, onBranchesChanged }: { branches:
           <div><label className={lbl}>Default Loan Duration (days)</label><input className={inp} type="number" value={settings.defaultLoanDurationDays} onChange={e => set("defaultLoanDurationDays", parseInt(e.target.value) || 90)} /></div>
           <div><label className={lbl}>Cash Transaction Limit (₹) <span className="text-muted-foreground/60">Sec. 269ST awareness</span></label><input className={inp} type="number" value={settings.cashTransactionLimit} onChange={e => set("cashTransactionLimit", parseFloat(e.target.value) || 200000)} /></div>
           <div><label className={lbl}>Financial Year Start Month</label><input className={inp} type="number" min="1" max="12" value={settings.financialYearStartMonth} onChange={e => set("financialYearStartMonth", parseInt(e.target.value) || 4)} /></div>
+          <div className="sm:col-span-2">
+            <label className={lbl}>Overdue Grace Period (days)</label>
+            <input className={inp} type="number" min="0" value={settings.overdueGraceDays} onChange={e => set("overdueGraceDays", Math.max(0, parseInt(e.target.value) || 0))} />
+            <p className="text-xs text-muted-foreground mt-1">
+              No lender charges interest to the exact day — a customer a few days late is routinely let off. Penalty interest
+              won't start accruing until a loan is this many days past its due date. Beyond that, interest does accrue, but you
+              can still choose to waive it for a specific customer when collecting interest or redeeming (e.g. someone 15 days
+              late — your call whether to charge for it).
+            </p>
+          </div>
         </CardContent>
       </Card>
 

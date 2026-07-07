@@ -6,6 +6,9 @@ export const VALID_METAL_TYPES = new Set(["gold", "silver"]);
 export const VALID_STATUSES = new Set(["active", "redeemed", "forfeited", "extended"]);
 export const VALID_PERIODS = new Set(["daily", "weekly", "monthly", "yearly"]);
 export const VALID_PAYMENT_MODES = new Set(["cash", "bank", "upi", "cheque"]);
+// "waiver" records the lender choosing to forgive some/all accrued interest —
+// no cash changes hands, so it's excluded from "Interest Income" in reports.
+export const VALID_PAYMENT_TYPES = new Set(["auto", "interest", "penalty", "principal", "renewal", "waiver"]);
 export const MAX_NOTES_LEN = 1000;
 export const MAX_ADDRESS_LEN = 500;
 
@@ -77,7 +80,13 @@ export async function getOrCreateGirviSettings(userId: number) {
 
 // Interest accrues on currentPrincipal (= loanAmount - principalPaid) from startDate.
 // Two phases: normal (startDate -> dueDate) + penalty (dueDate -> now, at rate+penaltyRate).
-export function calcAccruedInterest(loan: typeof girviLoansTable.$inferSelect, asOf = new Date()) {
+//
+// graceDays (girvi_settings.overdueGraceDays): real lenders don't pro-rate a
+// handful of late days to the rupee — penalty interest simply doesn't start
+// accruing until you're graceDays past due. Beyond that window it does accrue
+// (the lender can still choose to waive it via a "waiver" payment later; see
+// VALID_PAYMENT_TYPES) — this only auto-forgives the routine small overage.
+export function calcAccruedInterest(loan: typeof girviLoansTable.$inferSelect, asOf = new Date(), graceDays = 0) {
   const originalPrincipal = safeFloat(loan.loanAmount);
   const principalPaid = safeFloat((loan as any).principalPaid ?? "0");
   const principal = Math.max(0, originalPrincipal - principalPaid);
@@ -89,14 +98,15 @@ export function calcAccruedInterest(loan: typeof girviLoansTable.$inferSelect, a
 
   const daysElapsed = Math.max(0, Math.floor((asOf.getTime() - startDate.getTime()) / 86400000));
   const normalDays = Math.min(daysElapsed, Math.max(0, Math.floor((dueDate.getTime() - startDate.getTime()) / 86400000)));
-  const overdueDays = Math.max(0, Math.floor((asOf.getTime() - dueDate.getTime()) / 86400000));
+  const overdueDaysRaw = Math.max(0, Math.floor((asOf.getTime() - dueDate.getTime()) / 86400000));
+  const overdueDays = Math.max(0, overdueDaysRaw - Math.max(0, graceDays));
 
   const normalInterest = Math.round(principal * (rate / 100) * (normalDays / periodDays));
   const penaltyInterest = overdueDays > 0
     ? Math.round(principal * ((rate + penaltyRate) / 100) * (overdueDays / periodDays))
     : 0;
 
-  return { normalInterest, penaltyInterest, total: normalInterest + penaltyInterest, periodDays };
+  return { normalInterest, penaltyInterest, total: normalInterest + penaltyInterest, periodDays, overdueDaysRaw, overdueDays };
 }
 
 // When loan terms (due date, penalty rate) change without a payment being collected,
@@ -107,31 +117,35 @@ export function preserveOutstandingBaseline(
   loan: typeof girviLoansTable.$inferSelect,
   changes: Partial<Pick<typeof girviLoansTable.$inferSelect, "dueDate" | "penaltyRate" | "interestRate">>,
   now: Date,
+  graceDays = 0,
 ): string {
-  const before = calcAccruedInterest(loan, now).total;
-  const after = calcAccruedInterest({ ...loan, ...changes }, now).total;
+  const before = calcAccruedInterest(loan, now, graceDays).total;
+  const after = calcAccruedInterest({ ...loan, ...changes }, now, graceDays).total;
   const baselineBefore = safeFloat((loan as any).interestBaseline ?? "0");
   return (baselineBefore + (after - before)).toFixed(2);
 }
 
-export function mapLoan(l: typeof girviLoansTable.$inferSelect, asOf = new Date()) {
+export function mapLoan(l: typeof girviLoansTable.$inferSelect, asOf = new Date(), graceDays = 0) {
   const loanAmount = safeFloat(l.loanAmount);
   const principalPaid = safeFloat((l as any).principalPaid ?? "0");
   const currentPrincipal = Math.max(0, loanAmount - principalPaid);
-  // interestBaseline = interest already collected at time of last startDate reset.
+  // interestBaseline = interest already collected (incl. waived) at time of last startDate reset.
   // Outstanding = accrued(from startDate) - (totalCollected - baseline).
   const interestBaseline = safeFloat((l as any).interestBaseline ?? "0");
   const totalInterestCollected = safeFloat(l.totalInterestCollected);
   const collectedSinceReset = Math.max(0, totalInterestCollected - interestBaseline);
 
   const isActive = l.status === "active" || l.status === "extended";
-  const { normalInterest, penaltyInterest, total: accruedInterest, periodDays } =
-    isActive ? calcAccruedInterest(l, asOf) : { normalInterest: 0, penaltyInterest: 0, total: 0, periodDays: getPeriodDays(l.interestPeriod) };
+  const { normalInterest, penaltyInterest, total: accruedInterest, periodDays, overdueDaysRaw } =
+    isActive ? calcAccruedInterest(l, asOf, graceDays) : { normalInterest: 0, penaltyInterest: 0, total: 0, periodDays: getPeriodDays(l.interestPeriod), overdueDaysRaw: 0 };
 
   const outstandingInterest = Math.max(0, accruedInterest - collectedSinceReset);
   const totalDue = currentPrincipal + outstandingInterest;
   const dueDate = new Date(l.dueDate);
   const daysRemaining = Math.floor((dueDate.getTime() - asOf.getTime()) / 86400000);
+  // Whether today's penalty interest is still fully (or partially) inside the grace window —
+  // surfaced so the UI can show "3 days overdue (within grace)" instead of implying ₹0 is final.
+  const withinGracePeriod = isActive && overdueDaysRaw > 0 && overdueDaysRaw <= graceDays;
 
   const dailyRate = (safeFloat(l.interestRate) / 100) / periodDays;
 
@@ -169,11 +183,15 @@ export function mapLoan(l: typeof girviLoansTable.$inferSelect, asOf = new Date(
     penaltyInterest,
     accruedInterest,
     totalInterestCollected,
+    interestWaived: safeFloat((l as any).interestWaived ?? "0"),
     collectedSinceReset,
     outstandingInterest,
     totalDue,
     daysRemaining,
     isOverdue: daysRemaining < 0 && isActive,
+    overdueDaysRaw,
+    graceDaysApplied: graceDays,
+    withinGracePeriod,
     redeemedDate: l.redeemedDate?.toISOString() ?? null,
     redeemedAmount: l.redeemedAmount ? safeFloat(l.redeemedAmount) : null,
     returnVoucherNumber: l.returnVoucherNumber,

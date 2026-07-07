@@ -24,6 +24,11 @@ export const girviSettingsTable = pgTable("girvi_settings", {
   defaultPenaltyRate: numeric("default_penalty_rate", { precision: 5, scale: 2 }).notNull().default("1"),
   defaultLoanDurationDays: integer("default_loan_duration_days").notNull().default(90),
   cashTransactionLimit: numeric("cash_transaction_limit", { precision: 12, scale: 2 }).notNull().default("200000"), // Sec. 269ST awareness
+  // Days past the due date before penalty interest starts accruing at all — real
+  // lenders routinely wave off a handful of late days rather than pro-rating to
+  // the day. Beyond this window, interest does accrue, but the lender still has
+  // discretion to waive it via a "waiver" payment at collection/redemption time.
+  overdueGraceDays: integer("overdue_grace_days").notNull().default(3),
   receiptPrefix: text("receipt_prefix").notNull().default("GRV"),
   returnPrefix: text("return_prefix").notNull().default("RTN"),
   transferPrefix: text("transfer_prefix").notNull().default("TRF"),
@@ -108,7 +113,8 @@ export const girviLoansTable = pgTable("girvi_loans", {
   dueDate: timestamp("due_date").notNull(),
   status: text("status").notNull().default("active"),
   totalInterestCollected: numeric("total_interest_collected", { precision: 12, scale: 2 }).notNull().default("0"),
-  interestBaseline: numeric("interest_baseline", { precision: 12, scale: 2 }).notNull().default("0"), // interest collected at last clock reset
+  interestWaived: numeric("interest_waived", { precision: 12, scale: 2 }).notNull().default("0"), // cumulative interest forgiven by the lender — informational only, does not affect totalInterestCollected
+  interestBaseline: numeric("interest_baseline", { precision: 12, scale: 2 }).notNull().default("0"), // interest collected (incl. waived) at last clock reset
   principalPaid: numeric("principal_paid", { precision: 12, scale: 2 }).notNull().default("0"),       // cumulative principal repaid
   redeemedDate: timestamp("redeemed_date"),
   redeemedAmount: numeric("redeemed_amount", { precision: 12, scale: 2 }),

@@ -5,7 +5,7 @@ import { eq, and, desc, sql } from "drizzle-orm";
 import {
   safeFloat, mapLoan, mapPayment, calcAccruedInterest, preserveOutstandingBaseline,
   ensureDefaultBranch, getOrCreateGirviSettings, nextGirviNumber,
-  VALID_METAL_TYPES, VALID_STATUSES, VALID_PERIODS, VALID_PAYMENT_MODES,
+  VALID_METAL_TYPES, VALID_STATUSES, VALID_PERIODS, VALID_PAYMENT_MODES, VALID_PAYMENT_TYPES,
   MAX_NOTES_LEN, MAX_ADDRESS_LEN,
 } from "./girvi-helpers";
 
@@ -14,6 +14,8 @@ const router = Router();
 router.get("/stats/summary", async (req, res) => {
   try {
     const userId = req.user!.userId;
+    const settings = await getOrCreateGirviSettings(userId);
+    const graceDays = settings.overdueGraceDays;
     const loans = await db.select().from(girviLoansTable)
       .where(eq(girviLoansTable.userId, userId))
       .orderBy(desc(girviLoansTable.createdAt));
@@ -24,7 +26,7 @@ router.get("/stats/summary", async (req, res) => {
       const principalPaid = safeFloat((l as any).principalPaid ?? "0");
       return s + Math.max(0, safeFloat(l.loanAmount) - principalPaid);
     }, 0);
-    const totalInterest = active.reduce((s, l) => s + calcAccruedInterest(l, now).total, 0);
+    const totalInterest = active.reduce((s, l) => s + calcAccruedInterest(l, now, graceDays).total, 0);
     const totalLoss = loans.filter(l => l.status === "forfeited").reduce((s, l) => s + safeFloat(l.lossAmount), 0);
     const totalCollected = loans.reduce((s, l) => s + safeFloat(l.totalInterestCollected), 0);
     const totalProcessingFees = loans.reduce((s, l) => s + safeFloat(l.processingFee), 0);
@@ -57,6 +59,7 @@ router.get("/stats/summary", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const userId = req.user!.userId;
+    const settings = await getOrCreateGirviSettings(userId);
     const { status, due, mobile, customerId, branchId } = req.query as Record<string, string>;
     let loans = await db.select().from(girviLoansTable)
       .where(eq(girviLoansTable.userId, userId))
@@ -88,7 +91,7 @@ router.get("/", async (req, res) => {
       const in7 = new Date(now.getTime() + 7 * 86400000);
       loans = loans.filter(l => (l.status === "active" || l.status === "extended") && new Date(l.dueDate) >= now && new Date(l.dueDate) <= in7);
     }
-    res.json(loans.map(l => mapLoan(l)));
+    res.json(loans.map(l => mapLoan(l, new Date(), settings.overdueGraceDays)));
   } catch (err) {
     req.log.error({ err }, "Failed to list girvi loans");
     res.status(500).json({ error: "Internal server error" });
@@ -249,7 +252,7 @@ router.post("/", async (req, res) => {
       return newLoan;
     });
 
-    res.status(201).json(mapLoan(loan));
+    res.status(201).json(mapLoan(loan, new Date(), settings.overdueGraceDays));
   } catch (err) {
     req.log.error({ err }, "Failed to create girvi loan");
     res.status(500).json({ error: "Internal server error" });
@@ -263,10 +266,11 @@ router.get("/:id", async (req, res) => {
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
     const [loan] = await db.select().from(girviLoansTable).where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)));
     if (!loan) return res.status(404).json({ error: "Not found" });
+    const settings = await getOrCreateGirviSettings(userId);
     const payments = await db.select().from(girviPaymentsTable)
       .where(and(eq(girviPaymentsTable.loanId, id), eq(girviPaymentsTable.userId, userId)))
       .orderBy(desc(girviPaymentsTable.paymentDate));
-    res.json({ loan: mapLoan(loan), payments: payments.map(mapPayment) });
+    res.json({ loan: mapLoan(loan, new Date(), settings.overdueGraceDays), payments: payments.map(mapPayment) });
   } catch (err) {
     req.log.error({ err }, "Failed to get girvi loan");
     res.status(500).json({ error: "Internal server error" });
@@ -317,6 +321,11 @@ router.get("/:id/items", async (req, res) => {
 //       → if currentPrincipal - principalPortion ≤ 0: auto-redeem
 //
 // "interest" / "penalty" → simple accumulation, no principal change.
+// "waiver" → the lender forgives some/all of the outstanding interest (e.g. a
+// customer ran well past the grace period but the lender chooses not to
+// charge for it). No cash changes hands — recorded as its own payment type so
+// reports don't count it as real interest income, but it still clears the
+// loan's outstanding-interest ledger the same way a real payment would.
 router.post("/:id/collect-interest", async (req, res) => {
   try {
     const userId = req.user!.userId;
@@ -331,6 +340,7 @@ router.post("/:id/collect-interest", async (req, res) => {
     }
 
     const { amount, paymentType = "auto", notes, paymentMode, referenceNumber } = req.body;
+    if (!VALID_PAYMENT_TYPES.has(paymentType)) return res.status(400).json({ error: "Invalid payment type" });
     const amt = safeFloat(amount);
     if (amt <= 0 || !isFinite(amt)) return res.status(400).json({ error: "Amount must be a positive number" });
     const resolvedNotes = notes ? String(notes).slice(0, MAX_NOTES_LEN) : null;
@@ -338,12 +348,16 @@ router.post("/:id/collect-interest", async (req, res) => {
     const resolvedRef = referenceNumber ? String(referenceNumber).trim().slice(0, 100) || null : null;
     const now = new Date();
 
-    const mappedLoan = mapLoan(loan, now);
+    const settings = await getOrCreateGirviSettings(userId);
+    const mappedLoan = mapLoan(loan, now, settings.overdueGraceDays);
     const outstandingInterest = mappedLoan.outstandingInterest;
     const currentPrincipal = mappedLoan.currentPrincipal;
 
     if (paymentType === "auto" && amt > mappedLoan.totalDue + 0.01) {
       return res.status(400).json({ error: `Amount exceeds total amount due (₹${mappedLoan.totalDue.toFixed(2)})` });
+    }
+    if (paymentType === "waiver" && amt > outstandingInterest + 0.01) {
+      return res.status(400).json({ error: `Cannot waive more than the outstanding interest (₹${outstandingInterest.toFixed(2)})` });
     }
 
     let updated: typeof girviLoansTable.$inferSelect;
@@ -369,7 +383,6 @@ router.post("/:id/collect-interest", async (req, res) => {
       let returnVoucherNumber: string | null = null;
       if (remainingPrincipal <= 0) {
         // Loan fully repaid
-        const settings = await getOrCreateGirviSettings(userId);
         returnVoucherNumber = await nextGirviNumber(userId, "return", settings.returnPrefix, now);
         loanUpdates.status = "redeemed";
         loanUpdates.redeemedDate = now;
@@ -414,8 +427,11 @@ router.post("/:id/collect-interest", async (req, res) => {
       });
 
     } else {
-      // Interest-only or penalty payment — simple accumulation, no principal/clock change
-      const resolvedType = paymentType === "penalty" ? "penalty" : "interest";
+      // Interest-only, penalty, or waiver — simple accumulation, no principal/clock change.
+      // A waiver still clears the outstanding-interest ledger (totalInterestCollected) exactly
+      // like a real payment would, but is also tracked separately in interestWaived (informational
+      // only) so the loan/reports can distinguish cash actually received from interest forgiven.
+      const resolvedType = paymentType === "penalty" ? "penalty" : paymentType === "waiver" ? "waiver" : "interest";
       updated = await db.transaction(async tx => {
         await tx.insert(girviPaymentsTable).values({
           userId, loanId: id, loanNumber: loan.loanNumber,
@@ -428,14 +444,17 @@ router.post("/:id/collect-interest", async (req, res) => {
           notes: resolvedNotes,
         });
         const [u] = await tx.update(girviLoansTable)
-          .set({ totalInterestCollected: sql`COALESCE(${girviLoansTable.totalInterestCollected}, 0) + ${amt.toFixed(2)}::numeric` })
+          .set({
+            totalInterestCollected: sql`COALESCE(${girviLoansTable.totalInterestCollected}, 0) + ${amt.toFixed(2)}::numeric`,
+            ...(resolvedType === "waiver" ? { interestWaived: sql`COALESCE(${girviLoansTable.interestWaived}, 0) + ${amt.toFixed(2)}::numeric` } : {}),
+          })
           .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
           .returning();
         return u;
       });
     }
 
-    res.json(mapLoan(updated));
+    res.json(mapLoan(updated, new Date(), settings.overdueGraceDays));
   } catch (err) {
     req.log.error({ err }, "Failed to collect payment");
     res.status(500).json({ error: "Internal server error" });
@@ -470,7 +489,8 @@ router.post("/:id/renew", async (req, res) => {
       : loan.notes;
 
     const now = new Date();
-    const { total: accruedBeforeRenewal } = calcAccruedInterest(loan, now);
+    const settings = await getOrCreateGirviSettings(userId);
+    const { total: accruedBeforeRenewal } = calcAccruedInterest(loan, now, settings.overdueGraceDays);
     const interestBaselineBefore = safeFloat((loan as any).interestBaseline ?? "0");
     const collectedSinceReset = Math.max(0, safeFloat(loan.totalInterestCollected) - interestBaselineBefore);
     const outstandingBeforeRenewal = Math.max(0, accruedBeforeRenewal - collectedSinceReset);
@@ -507,7 +527,7 @@ router.post("/:id/renew", async (req, res) => {
       .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
       .returning();
 
-    res.json(mapLoan(updated));
+    res.json(mapLoan(updated, new Date(), settings.overdueGraceDays));
   } catch (err) {
     req.log.error({ err }, "Failed to renew loan");
     res.status(500).json({ error: "Internal server error" });
@@ -541,33 +561,50 @@ router.patch("/:id", async (req, res) => {
 
     const data = req.body;
     const now = new Date();
+    const settings = await getOrCreateGirviSettings(userId);
+    const graceDays = settings.overdueGraceDays;
     const updates: Partial<typeof girviLoansTable.$inferInsert> = {};
 
     if (data.status === "redeemed") {
       if (loan.status !== "active" && loan.status !== "extended") {
         return res.status(400).json({ error: "Only active/extended loans can be redeemed" });
       }
-      const { total: accruedInterest } = calcAccruedInterest(loan, now);
+      const { total: accruedInterest } = calcAccruedInterest(loan, now, graceDays);
       const interestBaseline = safeFloat((loan as any).interestBaseline ?? "0");
       const collectedSinceReset = Math.max(0, safeFloat(loan.totalInterestCollected) - interestBaseline);
       const outstanding = Math.max(0, accruedInterest - collectedSinceReset);
       const principalPaid = safeFloat((loan as any).principalPaid ?? "0");
       const currentPrincipal = Math.max(0, safeFloat(loan.loanAmount) - principalPaid);
-      const totalDue = currentPrincipal + outstanding;
       const resolvedMode = VALID_PAYMENT_MODES.has(data.paymentMode) ? data.paymentMode : "cash";
 
-      const settings = await getOrCreateGirviSettings(userId);
+      // Optional lender discretion: forgive some/all of the outstanding interest
+      // instead of collecting it (e.g. the customer is well past the grace
+      // period, but the lender chooses not to charge for it this time).
+      const waiveInterest = safeFloat(data.waiveInterest, 0);
+      if (waiveInterest < 0 || waiveInterest > outstanding + 0.01) {
+        return res.status(400).json({ error: `Waived interest must be between 0 and the outstanding interest (₹${outstanding.toFixed(2)})` });
+      }
+      const interestToCollect = Math.max(0, outstanding - waiveInterest);
+      const cashCollected = currentPrincipal + interestToCollect; // actual cash received — excludes any waived interest
+
       const returnVoucherNumber = await nextGirviNumber(userId, "return", settings.returnPrefix, now);
 
       // Record the final interest + principal settlement as payments (mirrors the
       // auto-redeem path in collect-interest) so payment history and the
       // totalInterestCollected dashboard stat aren't left understated.
       const updated = await db.transaction(async tx => {
-        if (outstanding > 0) {
+        if (interestToCollect > 0) {
           await tx.insert(girviPaymentsTable).values({
             userId, loanId: id, loanNumber: loan.loanNumber, customerName: loan.customerName,
-            amount: outstanding.toFixed(2), paymentType: "interest", paymentMode: resolvedMode, paymentDate: now,
+            amount: interestToCollect.toFixed(2), paymentType: "interest", paymentMode: resolvedMode, paymentDate: now,
             notes: "Redemption: final interest settlement",
+          });
+        }
+        if (waiveInterest > 0) {
+          await tx.insert(girviPaymentsTable).values({
+            userId, loanId: id, loanNumber: loan.loanNumber, customerName: loan.customerName,
+            amount: waiveInterest.toFixed(2), paymentType: "waiver", paymentMode: resolvedMode, paymentDate: now,
+            notes: "Redemption: interest waived by lender",
           });
         }
         if (currentPrincipal > 0) {
@@ -584,9 +621,11 @@ router.patch("/:id", async (req, res) => {
           .set({
             status: "redeemed",
             redeemedDate: now,
-            redeemedAmount: totalDue.toFixed(2),
+            redeemedAmount: cashCollected.toFixed(2),
             returnVoucherNumber,
+            // Both the collected and waived portions clear the outstanding-interest ledger.
             totalInterestCollected: (safeFloat(loan.totalInterestCollected) + outstanding).toFixed(2),
+            interestWaived: (safeFloat((loan as any).interestWaived ?? "0") + waiveInterest).toFixed(2),
             principalPaid: loan.loanAmount,
           })
           .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
@@ -594,12 +633,12 @@ router.patch("/:id", async (req, res) => {
         return u;
       });
 
-      return res.json(mapLoan(updated));
+      return res.json(mapLoan(updated, now, graceDays));
     } else if (data.status === "forfeited") {
       if (loan.status !== "active" && loan.status !== "extended") {
         return res.status(400).json({ error: "Only active/extended loans can be forfeited" });
       }
-      const { total: accruedInterest } = calcAccruedInterest(loan, now);
+      const { total: accruedInterest } = calcAccruedInterest(loan, now, graceDays);
       const interestBaseline = safeFloat((loan as any).interestBaseline ?? "0");
       const collectedSinceReset = Math.max(0, safeFloat(loan.totalInterestCollected) - interestBaseline);
       const outstanding = Math.max(0, accruedInterest - collectedSinceReset);
@@ -610,7 +649,6 @@ router.patch("/:id", async (req, res) => {
       if (goldSaleValue < 0) return res.status(400).json({ error: "Gold sale value cannot be negative" });
       const lossAmount = Math.max(0, totalDue - goldSaleValue);
 
-      const settings = await getOrCreateGirviSettings(userId);
       updates.returnVoucherNumber = await nextGirviNumber(userId, "return", settings.returnPrefix, now);
       updates.status = "forfeited";
       updates.redeemedDate = now;
@@ -632,7 +670,7 @@ router.patch("/:id", async (req, res) => {
         if (isNaN(nd.getTime())) return res.status(400).json({ error: "Invalid new due date" });
         // Pushing the due date out changes how much of the accrued interest counts as
         // "normal" vs "penalty" under the recalculation — preserve what's owed right now.
-        updates.interestBaseline = preserveOutstandingBaseline(loan, { dueDate: nd }, now);
+        updates.interestBaseline = preserveOutstandingBaseline(loan, { dueDate: nd }, now, graceDays);
         updates.dueDate = nd;
       }
     } else {
@@ -650,7 +688,7 @@ router.patch("/:id", async (req, res) => {
       if (data.penaltyRate !== undefined) {
         const pr = safeFloat(data.penaltyRate);
         if (pr < 0 || pr > 100) return res.status(400).json({ error: "Penalty rate must be 0–100" });
-        updates.interestBaseline = preserveOutstandingBaseline(loan, { penaltyRate: pr.toString() }, now);
+        updates.interestBaseline = preserveOutstandingBaseline(loan, { penaltyRate: pr.toString() }, now, graceDays);
         updates.penaltyRate = pr.toString();
       }
     }
@@ -659,7 +697,7 @@ router.patch("/:id", async (req, res) => {
     const [updated] = await db.update(girviLoansTable).set(updates)
       .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
       .returning();
-    res.json(mapLoan(updated));
+    res.json(mapLoan(updated, now, graceDays));
   } catch (err) {
     req.log.error({ err }, "Failed to update girvi loan");
     res.status(500).json({ error: "Internal server error" });

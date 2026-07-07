@@ -18,10 +18,11 @@ function parseDateRange(req: any) {
 router.get("/pledge-register", async (req, res) => {
   try {
     const userId = req.user!.userId;
+    const settings = await getOrCreateGirviSettings(userId);
     const loans = await db.select().from(girviLoansTable).where(eq(girviLoansTable.userId, userId));
     const branches = await db.select().from(girviBranchesTable).where(eq(girviBranchesTable.userId, userId));
     const branchName = new Map(branches.map(b => [b.id, b.name]));
-    const active = loans.filter(l => l.status === "active" || l.status === "extended").map(l => mapLoan(l));
+    const active = loans.filter(l => l.status === "active" || l.status === "extended").map(l => mapLoan(l, new Date(), settings.overdueGraceDays));
     const rows = active.map(l => ({
       loanNumber: l.loanNumber,
       branch: branchName.get(l.branchId as number) ?? "—",
@@ -51,9 +52,10 @@ router.get("/pledge-register", async (req, res) => {
 router.get("/maturity", async (req, res) => {
   try {
     const userId = req.user!.userId;
+    const settings = await getOrCreateGirviSettings(userId);
     const loans = await db.select().from(girviLoansTable).where(eq(girviLoansTable.userId, userId));
     const now = new Date();
-    const active = loans.filter(l => l.status === "active" || l.status === "extended").map(l => mapLoan(l, now));
+    const active = loans.filter(l => l.status === "active" || l.status === "extended").map(l => mapLoan(l, now, settings.overdueGraceDays));
     res.json({
       overdue: active.filter(l => l.isOverdue).sort((a, b) => a.daysRemaining - b.daysRemaining),
       dueThisWeek: active.filter(l => !l.isOverdue && l.daysRemaining <= 7),
@@ -128,6 +130,7 @@ router.get("/transfers", async (req, res) => {
 router.get("/financial-summary", async (req, res) => {
   try {
     const userId = req.user!.userId;
+    const settings = await getOrCreateGirviSettings(userId);
     const { fromDate, toDate } = parseDateRange(req);
     const loans = await db.select().from(girviLoansTable).where(eq(girviLoansTable.userId, userId));
     const payments = await db.select().from(girviPaymentsTable).where(eq(girviPaymentsTable.userId, userId));
@@ -139,12 +142,15 @@ router.get("/financial-summary", async (req, res) => {
     const processingFeeIncome = loansDisbursedInRange.reduce((s, l) => s + safeFloat(l.processingFee), 0);
     const principalCollected = paymentsInRange.filter(p => p.paymentType === "principal").reduce((s, p) => s + safeFloat(p.amount), 0);
     const interestIncome = paymentsInRange.filter(p => p.paymentType === "interest" || p.paymentType === "renewal" || p.paymentType === "penalty").reduce((s, p) => s + safeFloat(p.amount), 0);
+    // Interest the lender chose to forgive rather than collect — tracked separately
+    // from income since no cash was received (see VALID_PAYMENT_TYPES "waiver").
+    const interestWaived = paymentsInRange.filter(p => p.paymentType === "waiver").reduce((s, p) => s + safeFloat(p.amount), 0);
 
     const forfeitedInRange = loans.filter(l => l.status === "forfeited" && l.redeemedDate && l.redeemedDate >= fromDate && l.redeemedDate <= toDate);
     const forfeitureLoss = forfeitedInRange.reduce((s, l) => s + safeFloat(l.lossAmount), 0);
 
     const now = new Date();
-    const active = loans.filter(l => l.status === "active" || l.status === "extended").map(l => mapLoan(l, now));
+    const active = loans.filter(l => l.status === "active" || l.status === "extended").map(l => mapLoan(l, now, settings.overdueGraceDays));
     const closingOutstandingPrincipal = active.reduce((s, l) => s + l.currentPrincipal, 0);
     const closingOutstandingInterest = active.reduce((s, l) => s + l.outstandingInterest, 0);
     const goldWeight = active.filter(l => l.metalType === "gold").reduce((s, l) => s + l.grossWeight, 0);
@@ -156,6 +162,7 @@ router.get("/financial-summary", async (req, res) => {
       principalDisbursed: Math.round(principalDisbursed),
       principalCollected: Math.round(principalCollected),
       interestIncome: Math.round(interestIncome),
+      interestWaived: Math.round(interestWaived),
       processingFeeIncome: Math.round(processingFeeIncome),
       forfeitureLoss: Math.round(forfeitureLoss),
       closingOutstandingPrincipal: Math.round(closingOutstandingPrincipal),

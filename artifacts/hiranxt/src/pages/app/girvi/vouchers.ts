@@ -82,8 +82,9 @@ export function printInterestReceipt(
   settings?: GirviSettings,
 ) {
   const fmtD = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-  const typeLabel: Record<string, string> = { interest: "Interest Collection", renewal: "Loan Renewal", penalty: "Penalty Payment" };
+  const typeLabel: Record<string, string> = { interest: "Interest Collection", renewal: "Loan Renewal", penalty: "Penalty Payment", waiver: "Interest Waived (No Payment)" };
   const modeLabel: Record<string, string> = { cash: "Cash", bank: "Bank Transfer", upi: "UPI", cheque: "Cheque" };
+  const isWaiver = payment.paymentType === "waiver";
 
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
 <title>Receipt — ${payment.id}</title>
@@ -98,7 +99,7 @@ ${shopHeader(settings, shopName, shopAddress, shopMobile)}
 <div class="field"><span class="field-label">Loan No.</span><span class="field-value">${loan.loanNumber}</span></div>
 <div class="field"><span class="field-label">Customer</span><span class="field-value">${loan.customerName}</span></div>
 <div class="field"><span class="field-label">Mobile</span><span class="field-value">${loan.customerMobile}</span></div>
-<div class="field"><span class="field-label">Mode</span><span class="field-value">${modeLabel[payment.paymentMode] ?? payment.paymentMode}${payment.referenceNumber ? ` (${payment.referenceNumber})` : ""}</span></div>
+${isWaiver ? "" : `<div class="field"><span class="field-label">Mode</span><span class="field-value">${modeLabel[payment.paymentMode] ?? payment.paymentMode}${payment.referenceNumber ? ` (${payment.referenceNumber})` : ""}</span></div>`}
 <div class="field"><span class="field-label">Collateral</span><span class="field-value">${loan.metalType.toUpperCase()} ${loan.purity} · ${loan.grossWeight.toFixed(3)}g</span></div>
 <div class="amount-box">
   <div class="amount-label">${typeLabel[payment.paymentType] ?? "Amount Received"}</div>
@@ -216,15 +217,16 @@ ${items && items.length > 0 ? `
 </div>
 ${loan.notes ? `<div style="font-size:11px;color:#666;margin-bottom:12px;padding:8px;background:#f8f9fa;border-radius:4px;border-left:3px solid #1a3e6e">Notes: ${loan.notes}</div>` : ""}
 ${payments && payments.length > 0 ? (() => {
-    const typeLabel: Record<string, string> = { interest: "Byaj (Interest)", renewal: "Loan Renewal", penalty: "Penalty", principal: "Principal Repayment" };
-    const totalCollected = payments.reduce((s, p) => s + p.amount, 0);
+    const typeLabel: Record<string, string> = { interest: "Byaj (Interest)", renewal: "Loan Renewal", penalty: "Penalty", principal: "Principal Repayment", waiver: "Interest Waived" };
+    const totalCollected = payments.filter(p => p.paymentType !== "waiver").reduce((s, p) => s + p.amount, 0);
     let running = loan.loanAmount;
     const rows = payments.map(p => {
       if (p.paymentType === "principal") running -= p.amount;
+      const isWaiver = p.paymentType === "waiver";
       return `<tr style="border-bottom:1px solid #f0f0f0">
         <td style="padding:5px 8px">${fmtDate(p.paymentDate)}</td>
         <td style="padding:5px 8px">${typeLabel[p.paymentType] ?? p.paymentType}</td>
-        <td style="padding:5px 8px;text-align:right;color:#15803d;font-weight:600">${fmt(p.amount)}</td>
+        <td style="padding:5px 8px;text-align:right;color:${isWaiver ? "#2563eb" : "#15803d"};font-weight:600">${fmt(p.amount)}</td>
         <td style="padding:5px 8px;text-align:right">${fmt(running)}</td>
         <td style="padding:5px 8px;color:#666;font-style:italic;font-size:10px">${p.notes ?? ""}</td>
       </tr>`;
@@ -268,6 +270,7 @@ export function openReturnVoucher(
   const relevantPayments = (payments ?? []).filter(p => p.paymentType !== "renewal");
   const interestSettled = relevantPayments.filter(p => p.paymentType === "interest" || p.paymentType === "penalty").reduce((s, p) => s + p.amount, 0);
   const principalSettled = relevantPayments.filter(p => p.paymentType === "principal").reduce((s, p) => s + p.amount, 0);
+  const interestWaivedAtRedemption = relevantPayments.filter(p => p.paymentType === "waiver").reduce((s, p) => s + p.amount, 0);
 
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
 <title>Return Voucher — ${loan.returnVoucherNumber ?? loan.loanNumber}</title>
@@ -294,6 +297,7 @@ ${shopHeader(settings, shopName, shopAddress, shopMobile)}
   <div class="field"><span class="field-label">Original Principal</span><span class="field-value">${fmt(loan.loanAmount)}</span></div>
   <div class="field"><span class="field-label">Principal Settled</span><span class="field-value">${fmt(principalSettled || loan.loanAmount - (loan.currentPrincipal))}</span></div>
   <div class="field"><span class="field-label">Interest Settled</span><span class="field-value">${fmt(interestSettled)}</span></div>
+  ${interestWaivedAtRedemption > 0 ? `<div class="field"><span class="field-label" style="color:#2563eb">Interest Waived</span><span class="field-value" style="color:#2563eb">${fmt(interestWaivedAtRedemption)}</span></div>` : ""}
   ${isForfeit ? `
   <div class="field"><span class="field-label">Sale Value of Gold</span><span class="field-value">${fmt(loan.goldSaleValue ?? 0)}</span></div>
   <div class="field"><span class="field-label" style="color:#c0392b">Net Loss</span><span class="field-value" style="color:#c0392b">${fmt(loan.lossAmount ?? 0)}</span></div>
