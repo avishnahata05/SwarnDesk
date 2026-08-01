@@ -1,14 +1,15 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { girviLoansTable, girviPaymentsTable, girviLoanItemsTable, girviCustomersTable, girviPartialReleasesTable, girviPartialReleaseItemsTable } from "@workspace/db";
-import { eq, and, desc, sql, inArray } from "drizzle-orm";
+import { girviLoansTable, girviPaymentsTable, girviLoanItemsTable, girviCustomersTable, girviPartialReleasesTable, girviPartialReleaseItemsTable, girviTransfersTable } from "@workspace/db";
+import { eq, and, ne, desc, sql, inArray, isNull } from "drizzle-orm";
 import {
   safeFloat, mapLoan, mapPayment, calcAccruedInterest, preserveOutstandingBaseline,
   ensureDefaultBranch, getOrCreateGirviSettings, nextGirviNumber, computeLoanAggregatesFromItems,
+  isLoanEditable,
   VALID_METAL_TYPES, VALID_STATUSES, VALID_PERIODS, VALID_PAYMENT_MODES, VALID_PAYMENT_TYPES,
   MAX_NOTES_LEN, MAX_ADDRESS_LEN,
 } from "./girvi-helpers";
-import { postJournalEntry, getOrCreateDefaultAccounts, cashOrBankKey } from "./accounting-helpers";
+import { postJournalEntry, getOrCreateDefaultAccounts, cashOrBankKey, reverseVoucherTx } from "./accounting-helpers";
 
 const router = Router();
 
@@ -17,8 +18,10 @@ router.get("/stats/summary", async (req, res) => {
     const userId = req.user!.userId;
     const settings = await getOrCreateGirviSettings(userId);
     const graceDays = settings.overdueGraceDays;
+    // Voided loans never really happened (see isLoanEditable/DELETE /:id) — exclude
+    // them from every stat here, same as if they'd never been entered at all.
     const loans = await db.select().from(girviLoansTable)
-      .where(eq(girviLoansTable.userId, userId))
+      .where(and(eq(girviLoansTable.userId, userId), ne(girviLoansTable.status, "voided")))
       .orderBy(desc(girviLoansTable.createdAt));
     const now = new Date();
     const active = loans.filter(l => l.status === "active" || l.status === "extended");
@@ -62,26 +65,32 @@ router.get("/", async (req, res) => {
     const userId = req.user!.userId;
     const settings = await getOrCreateGirviSettings(userId);
     const { status, due, mobile, customerId, branchId } = req.query as Record<string, string>;
+
+    if (status && status !== "all" && !VALID_STATUSES.has(status)) {
+      return res.json([]);
+    }
+
+    // Exact-match filters go straight into the WHERE clause so they use the
+    // existing (userId, status) / customerId / branchId indexes instead of
+    // downloading this shop's entire loan history on every list/refresh.
+    const conditions = [eq(girviLoansTable.userId, userId)];
+    if (status && status !== "all") conditions.push(eq(girviLoansTable.status, status));
+    if (customerId) {
+      const cid = parseInt(customerId);
+      if (!isNaN(cid)) conditions.push(eq(girviLoansTable.customerId, cid));
+    }
+    if (branchId) {
+      const bid = parseInt(branchId);
+      if (!isNaN(bid)) conditions.push(eq(girviLoansTable.branchId, bid));
+    }
+
     let loans = await db.select().from(girviLoansTable)
-      .where(eq(girviLoansTable.userId, userId))
+      .where(and(...conditions))
       .orderBy(desc(girviLoansTable.createdAt));
     const now = new Date();
     if (mobile) {
       const digits = mobile.replace(/\D/g, "");
       if (digits) loans = loans.filter(l => l.customerMobile.replace(/\D/g, "").includes(digits));
-    }
-    if (customerId) {
-      const cid = parseInt(customerId);
-      if (!isNaN(cid)) loans = loans.filter(l => l.customerId === cid);
-    }
-    if (branchId) {
-      const bid = parseInt(branchId);
-      if (!isNaN(bid)) loans = loans.filter(l => l.branchId === bid);
-    }
-    if (status && status !== "all" && VALID_STATUSES.has(status)) {
-      loans = loans.filter(l => l.status === status);
-    } else if (status && status !== "all") {
-      loans = [];
     }
     if (due === "overdue") {
       loans = loans.filter(l => (l.status === "active" || l.status === "extended") && new Date(l.dueDate) < now);
@@ -120,6 +129,21 @@ router.post("/", async (req, res) => {
       const mobile = String(nc.mobile ?? "").trim();
       if (!name) return res.status(400).json({ error: "Customer name is required" });
       if (!mobile) return res.status(400).json({ error: "Customer mobile is required" });
+
+      // Same dedup check as POST /girvi/customers — inline "Create New Customer"
+      // inside the New Loan dialog is the other place this mistake happens.
+      const mobileDigits = mobile.replace(/\D/g, "");
+      if (mobileDigits) {
+        const existingCustomers = await db.select().from(girviCustomersTable).where(eq(girviCustomersTable.userId, userId));
+        const dupe = existingCustomers.find(c => c.mobile.replace(/\D/g, "") === mobileDigits);
+        if (dupe) {
+          return res.status(409).json({
+            error: `A customer with this mobile number already exists: ${dupe.name} (${dupe.mobile}). Search for them instead of creating a new record.`,
+            existingCustomerId: dupe.id,
+          });
+        }
+      }
+
       const [created] = await db.insert(girviCustomersTable).values({
         userId,
         name,
@@ -160,7 +184,7 @@ router.post("/", async (req, res) => {
     if (isNaN(branchId)) branchId = await ensureDefaultBranch(userId);
 
     // Parse items array
-    type ItemInput = { itemType: string; quantity: number; metalType: string; purity: string; grossWeight: number; netWeight: number; estimatedValue: number; notes?: string };
+    type ItemInput = { itemType: string; quantity: number; metalType: string; purity: string; grossWeight: number; netWeight: number; estimatedValue: number; notes?: string; itemCode?: string };
     const rawItems: ItemInput[] = Array.isArray(data.items) ? data.items : [];
     if (rawItems.length === 0) return res.status(400).json({ error: "At least one item is required" });
 
@@ -173,6 +197,7 @@ router.post("/", async (req, res) => {
       netWeight: safeFloat(it.netWeight ?? it.grossWeight, safeFloat(it.grossWeight)),
       estimatedValue: safeFloat(it.estimatedValue),
       notes: it.notes ? String(it.notes).slice(0, MAX_NOTES_LEN) : null,
+      itemCode: it.itemCode ? String(it.itemCode).trim().slice(0, 100) || null : null,
     }));
 
     const invalidItem = items.find(it => it.grossWeight <= 0);
@@ -217,27 +242,26 @@ router.post("/", async (req, res) => {
         notes,
       }).returning();
 
-      for (const it of items) {
-        await tx.insert(girviLoanItemsTable).values({
-          userId,
-          loanId: newLoan.id,
-          itemType: it.itemType,
-          quantity: it.quantity,
-          metalType: it.metalType,
-          purity: it.purity,
-          grossWeight: (it.grossWeight * it.quantity).toFixed(3),
-          netWeight: (it.netWeight * it.quantity).toFixed(3),
-          estimatedValue: (it.estimatedValue * it.quantity).toFixed(2),
-          notes: it.notes,
-          status: "pledged",
-          currentBranchId: branchId,
-        });
-      }
+      await tx.insert(girviLoanItemsTable).values(items.map(it => ({
+        userId,
+        loanId: newLoan.id,
+        itemType: it.itemType,
+        quantity: it.quantity,
+        metalType: it.metalType,
+        purity: it.purity,
+        grossWeight: (it.grossWeight * it.quantity).toFixed(3),
+        netWeight: (it.netWeight * it.quantity).toFixed(3),
+        estimatedValue: (it.estimatedValue * it.quantity).toFixed(2),
+        notes: it.notes,
+        itemCode: it.itemCode,
+        status: "pledged",
+        currentBranchId: branchId,
+      })));
 
       // Dr Girvi Loans Receivable (loanAmount) / Cr Cash (loanAmount - processingFee) +
       // Cr Processing Fee Income (processingFee) — cash disbursed net of the upfront fee.
       const disbursed = loanAmount - processingFee;
-      await postJournalEntry(tx, {
+      const voucher = await postJournalEntry(tx, {
         userId,
         voucherDate: startDate,
         voucherType: "payment",
@@ -251,7 +275,12 @@ router.post("/", async (req, res) => {
         ],
       });
 
-      return newLoan;
+      const [withVoucher] = await tx.update(girviLoansTable)
+        .set({ disbursementVoucherId: voucher.id })
+        .where(eq(girviLoansTable.id, newLoan.id))
+        .returning();
+
+      return withVoucher;
     });
 
     res.status(201).json(mapLoan(loan, new Date(), settings.overdueGraceDays));
@@ -299,12 +328,256 @@ router.get("/:id/items", async (req, res) => {
       netWeight: safeFloat(it.netWeight),
       estimatedValue: safeFloat(it.estimatedValue),
       notes: it.notes,
+      itemCode: it.itemCode,
       status: it.status,
       currentBranchId: it.currentBranchId,
       returnedAt: it.returnedAt?.toISOString() ?? null,
     })));
   } catch (err) {
     req.log.error({ err }, "Failed to get girvi items");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Search pledged items across all loans by the shop's own physical tag/serial
+// number (written on the item at pledge time — see girvi_loan_items.itemCode).
+// Lets the front desk type the number off a tag and jump straight to the loan
+// it belongs to, instead of hunting through the loan list.
+router.get("/items/search", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const code = String(req.query.code ?? "").trim();
+    if (code.length < 2) return res.json([]);
+    const settings = await getOrCreateGirviSettings(userId);
+    const rows = await db.select({ item: girviLoanItemsTable, loan: girviLoansTable })
+      .from(girviLoanItemsTable)
+      .innerJoin(girviLoansTable, eq(girviLoanItemsTable.loanId, girviLoansTable.id))
+      .where(and(
+        eq(girviLoanItemsTable.userId, userId),
+        sql`${girviLoanItemsTable.itemCode} ILIKE ${"%" + code + "%"}`,
+      ))
+      .orderBy(desc(girviLoansTable.createdAt))
+      .limit(25);
+    res.json(rows.map(({ item, loan }) => ({
+      item: {
+        id: item.id, itemType: item.itemType, quantity: item.quantity, metalType: item.metalType,
+        purity: item.purity, grossWeight: safeFloat(item.grossWeight), netWeight: safeFloat(item.netWeight),
+        estimatedValue: safeFloat(item.estimatedValue), notes: item.notes, itemCode: item.itemCode,
+        status: item.status,
+      },
+      loan: mapLoan(loan, new Date(), settings.overdueGraceDays),
+    })));
+  } catch (err) {
+    req.log.error({ err }, "Failed to search girvi items by code");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Recompute and persist a loan's aggregate collateral fields (grossWeight/
+// netWeight/estimatedValue/metalType/purity/itemDescription) from whatever is
+// currently pledged — same rollup partial-release already does, shared here
+// for the item add/edit/delete endpoints below.
+async function refreshLoanAggregates(tx: any, userId: number, loanId: number) {
+  const allItems = await tx.select().from(girviLoanItemsTable)
+    .where(and(eq(girviLoanItemsTable.loanId, loanId), eq(girviLoanItemsTable.userId, userId)));
+  const pledged = allItems.filter((it: any) => it.status === "pledged");
+  const aggregates = computeLoanAggregatesFromItems(pledged.map((it: any) => ({
+    itemType: it.itemType, quantity: it.quantity, metalType: it.metalType, purity: it.purity,
+    grossWeight: safeFloat(it.grossWeight), netWeight: safeFloat(it.netWeight), estimatedValue: safeFloat(it.estimatedValue),
+  })));
+  const [updated] = await tx.update(girviLoansTable)
+    .set({
+      grossWeight: aggregates.grossWeight.toFixed(3),
+      netWeight: aggregates.netWeight.toFixed(3),
+      estimatedValue: aggregates.estimatedValue.toFixed(2),
+      metalType: aggregates.metalType || "gold",
+      purity: aggregates.purity || "22K",
+      itemDescription: aggregates.itemDescription,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(girviLoansTable.id, loanId), eq(girviLoansTable.userId, userId)))
+    .returning();
+  return updated;
+}
+
+// Closes out every item still with the shop — "pledged" AND "transferred" —
+// when a loan reaches a terminal state (redeemed/forfeited/voided). Earlier
+// versions of these three endpoints only matched status="pledged", which
+// silently stranded any item mid-transfer at status="transferred" forever
+// (its transfer stayed "active" in the Transfers tab for a loan that no
+// longer existed). Also auto-closes any transfer still open for this loan —
+// the loan is done, so leaving it "active" would dangle in the Transfers
+// register with nothing left to resolve it. POST /transfers/:id/return is
+// still safe to call after this: it only reverts items still literally
+// status="transferred", so it just no-ops if beaten to it here.
+async function closeOutLoanItems(tx: any, userId: number, loanId: number, terminalStatus: "returned" | "forfeited" | "voided", now: Date) {
+  await tx.update(girviLoanItemsTable)
+    .set({ status: terminalStatus, returnedAt: now })
+    .where(and(eq(girviLoanItemsTable.loanId, loanId), eq(girviLoanItemsTable.userId, userId), inArray(girviLoanItemsTable.status, ["pledged", "transferred"])));
+  await tx.update(girviTransfersTable)
+    .set({ returnedAt: now, returnNotes: `Auto-closed: loan ${terminalStatus}` })
+    .where(and(eq(girviTransfersTable.loanId, loanId), eq(girviTransfersTable.userId, userId), isNull(girviTransfersTable.returnedAt)));
+}
+
+// A loan qualifies for direct term-editing / voiding (see isLoanEditable) only
+// until its first real business event — that's payments, but a $0 partial
+// release (items handed back with nothing collected, which the partial-release
+// endpoint explicitly allows) is a real event too and isn't reflected in
+// totalInterestCollected/principalPaid. Voiding after that would reverse the
+// original disbursement while some collateral is already, unrecoverably, back
+// with the customer — so check for ANY partial-release history too.
+async function loanHasPartialReleaseHistory(userId: number, loanId: number): Promise<boolean> {
+  const [row] = await db.select({ id: girviPartialReleasesTable.id }).from(girviPartialReleasesTable)
+    .where(and(eq(girviPartialReleasesTable.loanId, loanId), eq(girviPartialReleasesTable.userId, userId)))
+    .limit(1);
+  return !!row;
+}
+
+// Add a pledged item to an existing loan — e.g. the customer brought one more
+// piece, or the original entry missed an item. Does not touch loanAmount or
+// the accounting ledger: collateral value itself is never booked, only the
+// cash loanAmount is (see POST / above), so adding collateral is purely a
+// data/valuation change.
+router.post("/:id/items", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const [loan] = await db.select().from(girviLoansTable).where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)));
+    if (!loan) return res.status(404).json({ error: "Not found" });
+    if (loan.status !== "active" && loan.status !== "extended") {
+      return res.status(400).json({ error: "Can only add items to active or extended loans" });
+    }
+
+    const it = req.body ?? {};
+    const grossWeight = safeFloat(it.grossWeight);
+    if (grossWeight <= 0) return res.status(400).json({ error: "Item must have a positive gross weight" });
+    const quantity = Math.max(1, parseInt(String(it.quantity)) || 1);
+    const netWeight = safeFloat(it.netWeight ?? it.grossWeight, grossWeight);
+    const values = {
+      userId,
+      loanId: id,
+      itemType: String(it.itemType ?? "Item").trim() || "Item",
+      quantity,
+      metalType: VALID_METAL_TYPES.has(it.metalType) ? it.metalType : "gold",
+      purity: String(it.purity ?? "22K").trim() || "22K",
+      grossWeight: (grossWeight * quantity).toFixed(3),
+      netWeight: (netWeight * quantity).toFixed(3),
+      estimatedValue: (safeFloat(it.estimatedValue) * quantity).toFixed(2),
+      notes: it.notes ? String(it.notes).slice(0, MAX_NOTES_LEN) : null,
+      itemCode: it.itemCode ? String(it.itemCode).trim().slice(0, 100) || null : null,
+      status: "pledged" as const,
+      currentBranchId: loan.branchId,
+    };
+
+    const { created, updatedLoan } = await db.transaction(async tx => {
+      const [created] = await tx.insert(girviLoanItemsTable).values(values).returning();
+      const updatedLoan = await refreshLoanAggregates(tx, userId, id);
+      return { created, updatedLoan };
+    });
+
+    const settings = await getOrCreateGirviSettings(userId);
+    res.status(201).json({
+      item: { ...created, grossWeight: safeFloat(created.grossWeight), netWeight: safeFloat(created.netWeight), estimatedValue: safeFloat(created.estimatedValue) },
+      loan: mapLoan(updatedLoan, new Date(), settings.overdueGraceDays),
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to add girvi loan item");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Edit a pledged item's own details (weight/purity/type/notes/tag number) —
+// for correcting a data-entry mistake, not for recording a real-world event
+// (use partial-release/transfer/redeem/forfeit for those). Only the item
+// itself changes; loanAmount/interest terms are untouched.
+router.patch("/:id/items/:itemId", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    const itemId = parseInt(req.params.itemId);
+    if (isNaN(id) || isNaN(itemId)) return res.status(400).json({ error: "Invalid id" });
+    const [loan] = await db.select().from(girviLoansTable).where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)));
+    if (!loan) return res.status(404).json({ error: "Loan not found" });
+    const [item] = await db.select().from(girviLoanItemsTable).where(and(eq(girviLoanItemsTable.id, itemId), eq(girviLoanItemsTable.loanId, id), eq(girviLoanItemsTable.userId, userId)));
+    if (!item) return res.status(404).json({ error: "Item not found" });
+    if (item.status !== "pledged") return res.status(400).json({ error: "Only currently-pledged items can be edited" });
+
+    const data = req.body ?? {};
+    const quantity = data.quantity !== undefined ? Math.max(1, parseInt(String(data.quantity)) || 1) : item.quantity;
+    const grossPerUnit = data.grossWeight !== undefined ? safeFloat(data.grossWeight) : safeFloat(item.grossWeight) / item.quantity;
+    if (grossPerUnit <= 0) return res.status(400).json({ error: "Gross weight must be positive" });
+    const netPerUnit = data.netWeight !== undefined ? safeFloat(data.netWeight) : safeFloat(item.netWeight) / item.quantity;
+    const estPerUnit = data.estimatedValue !== undefined ? safeFloat(data.estimatedValue) : safeFloat(item.estimatedValue) / item.quantity;
+
+    const updates: Partial<typeof girviLoanItemsTable.$inferInsert> = {
+      itemType: data.itemType !== undefined ? (String(data.itemType).trim() || item.itemType) : undefined,
+      quantity,
+      metalType: data.metalType !== undefined ? (VALID_METAL_TYPES.has(data.metalType) ? data.metalType : item.metalType) : undefined,
+      purity: data.purity !== undefined ? (String(data.purity).trim() || item.purity) : undefined,
+      grossWeight: (grossPerUnit * quantity).toFixed(3),
+      netWeight: (netPerUnit * quantity).toFixed(3),
+      estimatedValue: (estPerUnit * quantity).toFixed(2),
+      notes: data.notes !== undefined ? (String(data.notes).slice(0, MAX_NOTES_LEN) || null) : undefined,
+      itemCode: data.itemCode !== undefined ? (String(data.itemCode).trim().slice(0, 100) || null) : undefined,
+    };
+    Object.keys(updates).forEach(k => (updates as any)[k] === undefined && delete (updates as any)[k]);
+
+    const { updatedItem, updatedLoan } = await db.transaction(async tx => {
+      const [updatedItem] = await tx.update(girviLoanItemsTable).set(updates)
+        .where(and(eq(girviLoanItemsTable.id, itemId), eq(girviLoanItemsTable.userId, userId)))
+        .returning();
+      const updatedLoan = await refreshLoanAggregates(tx, userId, id);
+      return { updatedItem, updatedLoan };
+    });
+
+    const settings = await getOrCreateGirviSettings(userId);
+    res.json({
+      item: { ...updatedItem, grossWeight: safeFloat(updatedItem.grossWeight), netWeight: safeFloat(updatedItem.netWeight), estimatedValue: safeFloat(updatedItem.estimatedValue) },
+      loan: mapLoan(updatedLoan, new Date(), settings.overdueGraceDays),
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to update girvi loan item");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Remove an item that was pledged by mistake (wrong loan, duplicate row, etc).
+// This is a correction, not a release — the collateral was never really taken
+// in, so it deliberately does NOT go through partial-release's payment/voucher
+// flow. Restricted to loans with zero payment history (see isLoanEditable) so
+// it can never be used to quietly erase collateral backing money already
+// collected; once a payment exists, use Partial Release instead.
+router.delete("/:id/items/:itemId", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    const itemId = parseInt(req.params.itemId);
+    if (isNaN(id) || isNaN(itemId)) return res.status(400).json({ error: "Invalid id" });
+    const [loan] = await db.select().from(girviLoansTable).where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)));
+    if (!loan) return res.status(404).json({ error: "Loan not found" });
+    if (!isLoanEditable(loan)) {
+      return res.status(400).json({ error: "This loan already has payment history — use Partial Release to return an item instead of deleting it" });
+    }
+    const [item] = await db.select().from(girviLoanItemsTable).where(and(eq(girviLoanItemsTable.id, itemId), eq(girviLoanItemsTable.loanId, id), eq(girviLoanItemsTable.userId, userId)));
+    if (!item) return res.status(404).json({ error: "Item not found" });
+    if (item.status !== "pledged") return res.status(400).json({ error: "Item is not currently pledged" });
+
+    const pledgedCount = await db.select({ id: girviLoanItemsTable.id }).from(girviLoanItemsTable)
+      .where(and(eq(girviLoanItemsTable.loanId, id), eq(girviLoanItemsTable.userId, userId), eq(girviLoanItemsTable.status, "pledged")));
+    if (pledgedCount.length <= 1) {
+      return res.status(400).json({ error: "Cannot delete the loan's last item — delete the whole loan instead" });
+    }
+
+    const updatedLoan = await db.transaction(async tx => {
+      await tx.delete(girviLoanItemsTable).where(and(eq(girviLoanItemsTable.id, itemId), eq(girviLoanItemsTable.userId, userId)));
+      return refreshLoanAggregates(tx, userId, id);
+    });
+
+    const settings = await getOrCreateGirviSettings(userId);
+    res.json({ loan: mapLoan(updatedLoan, new Date(), settings.overdueGraceDays) });
+  } catch (err) {
+    req.log.error({ err }, "Failed to delete girvi loan item");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -395,9 +668,9 @@ router.post("/:id/partial-release", async (req, res) => {
         notes: resolvedNotes,
       }).returning();
 
-      for (const it of releaseItems) {
-        await tx.insert(girviPartialReleaseItemsTable).values({ userId, releaseId: createdRelease.id, loanItemId: it.id });
-      }
+      await tx.insert(girviPartialReleaseItemsTable).values(
+        releaseItems.map(it => ({ userId, releaseId: createdRelease.id, loanItemId: it.id }))
+      );
 
       await tx.update(girviLoanItemsTable)
         .set({ status: "returned", returnedAt: now })
@@ -600,9 +873,7 @@ router.post("/:id/collect-interest", async (req, res) => {
           notes: resolvedNotes ? `${resolvedNotes} [auto: principal portion]` : "Auto: principal portion",
         });
         if (remainingPrincipal <= 0) {
-          await tx.update(girviLoanItemsTable)
-            .set({ status: "returned", returnedAt: now })
-            .where(and(eq(girviLoanItemsTable.loanId, id), eq(girviLoanItemsTable.userId, userId)));
+          await closeOutLoanItems(tx, userId, id, "returned", now);
         }
         const [u] = await tx.update(girviLoansTable)
           .set(loanUpdates as Partial<typeof girviLoansTable.$inferInsert>)
@@ -855,11 +1126,10 @@ router.patch("/:id", async (req, res) => {
             notes: "Redemption: final principal settlement",
           });
         }
-        // Only the still-pledged items — anything already released via a prior
-        // partial release keeps its own returnedAt from that transaction.
-        await tx.update(girviLoanItemsTable)
-          .set({ status: "returned", returnedAt: now })
-          .where(and(eq(girviLoanItemsTable.loanId, id), eq(girviLoanItemsTable.userId, userId), eq(girviLoanItemsTable.status, "pledged")));
+        // Anything already released via a prior partial release keeps its own
+        // returnedAt from that transaction — closeOutLoanItems only touches
+        // items still pledged/transferred.
+        await closeOutLoanItems(tx, userId, id, "returned", now);
         const [u] = await tx.update(girviLoansTable)
           .set({
             status: "redeemed",
@@ -925,11 +1195,10 @@ router.patch("/:id", async (req, res) => {
       };
 
       const updated = await db.transaction(async (tx) => {
-        // Only the still-pledged items — anything already released via a prior
-        // partial release keeps its own returnedAt from that transaction.
-        await tx.update(girviLoanItemsTable)
-          .set({ status: "forfeited", returnedAt: now })
-          .where(and(eq(girviLoanItemsTable.loanId, id), eq(girviLoanItemsTable.userId, userId), eq(girviLoanItemsTable.status, "pledged")));
+        // Anything already released via a prior partial release keeps its own
+        // returnedAt from that transaction — closeOutLoanItems only touches
+        // items still pledged/transferred.
+        await closeOutLoanItems(tx, userId, id, "forfeited", now);
         const [u] = await tx.update(girviLoansTable).set(forfeitUpdates)
           .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
           .returning();
@@ -969,22 +1238,125 @@ router.patch("/:id", async (req, res) => {
         updates.dueDate = nd;
       }
     } else {
-      // General field updates
+      // General field updates — always safe, no accounting/interest impact.
       if (data.notes !== undefined) updates.notes = String(data.notes).slice(0, MAX_NOTES_LEN) || null;
       if (data.itemDescription !== undefined) updates.itemDescription = String(data.itemDescription).slice(0, 500) || null;
       if (data.fatherName !== undefined) updates.fatherName = String(data.fatherName).trim() || null;
       if (data.address !== undefined) updates.address = String(data.address).slice(0, MAX_ADDRESS_LEN) || null;
       if (data.pan !== undefined) updates.pan = String(data.pan).trim().toUpperCase() || null;
-      if (data.processingFee !== undefined) {
-        const pf = safeFloat(data.processingFee);
-        if (pf < 0) return res.status(400).json({ error: "Processing fee cannot be negative" });
-        updates.processingFee = pf.toString();
-      }
       if (data.penaltyRate !== undefined) {
         const pr = safeFloat(data.penaltyRate);
         if (pr < 0 || pr > 100) return res.status(400).json({ error: "Penalty rate must be 0–100" });
         updates.interestBaseline = preserveOutstandingBaseline(loan, { penaltyRate: pr.toString() }, now, graceDays);
         updates.penaltyRate = pr.toString();
+      }
+
+      // Correctable-only-before-first-payment terms: loan amount, processing
+      // fee, interest rate/period, start date, due date. Once any payment has
+      // actually been collected these can no longer move without corrupting
+      // interest already accrued/booked against a specific timeline — use the
+      // normal business actions (collect/renew/redeem/forfeit/extend) instead.
+      const TERM_FIELDS = ["loanAmount", "processingFee", "interestRate", "interestPeriod", "startDate", "dueDate"] as const;
+      const wantsTermChange = TERM_FIELDS.some(k => data[k] !== undefined);
+      if (wantsTermChange) {
+        if (!isLoanEditable(loan)) {
+          return res.status(400).json({ error: "This loan already has payment history — loan amount, rate, and dates can no longer be edited directly. Use Renew/Extend/Redeem instead." });
+        }
+        if (await loanHasPartialReleaseHistory(userId, id)) {
+          return res.status(400).json({ error: "Some items on this loan have already been released to the customer — loan amount, rate, and dates can no longer be edited directly." });
+        }
+
+        let newLoanAmount = safeFloat(loan.loanAmount);
+        let newProcessingFee = safeFloat(loan.processingFee);
+        let newInterestRate = safeFloat(loan.interestRate);
+        let newInterestPeriod = loan.interestPeriod;
+        let newStartDate = new Date(loan.startDate);
+        let newDueDateVal = new Date(loan.dueDate);
+
+        if (data.loanAmount !== undefined) {
+          newLoanAmount = safeFloat(data.loanAmount);
+          if (newLoanAmount <= 0) return res.status(400).json({ error: "Loan amount must be positive" });
+        }
+        if (data.processingFee !== undefined) {
+          newProcessingFee = safeFloat(data.processingFee);
+          if (newProcessingFee < 0) return res.status(400).json({ error: "Processing fee cannot be negative" });
+        }
+        if (data.interestRate !== undefined) {
+          newInterestRate = safeFloat(data.interestRate);
+          if (newInterestRate < 0 || newInterestRate > 100) return res.status(400).json({ error: "Interest rate must be 0–100" });
+        }
+        if (data.interestPeriod !== undefined && VALID_PERIODS.has(data.interestPeriod)) {
+          newInterestPeriod = data.interestPeriod;
+        }
+        if (data.startDate !== undefined) {
+          newStartDate = new Date(data.startDate);
+          if (isNaN(newStartDate.getTime())) return res.status(400).json({ error: "Invalid start date" });
+        }
+        if (data.dueDate !== undefined) {
+          newDueDateVal = new Date(data.dueDate);
+          if (isNaN(newDueDateVal.getTime())) return res.status(400).json({ error: "Invalid due date" });
+        }
+        if (newDueDateVal <= newStartDate) return res.status(400).json({ error: "Due date must be after start date" });
+        if (newProcessingFee > newLoanAmount) return res.status(400).json({ error: "Processing fee cannot exceed loan amount" });
+
+        const amountChanged = newLoanAmount !== safeFloat(loan.loanAmount) || newProcessingFee !== safeFloat(loan.processingFee);
+        const accts = await getOrCreateDefaultAccounts(userId);
+
+        // No separate audit-log table for these corrections — instead, record a
+        // system line directly in the loan's own notes so "what did this loan
+        // originally say before it was corrected" stays answerable from the
+        // loan record itself. Only lists fields that actually changed.
+        const diffParts: string[] = [];
+        if (newLoanAmount !== safeFloat(loan.loanAmount)) diffParts.push(`amount ₹${safeFloat(loan.loanAmount)}→₹${newLoanAmount}`);
+        if (newProcessingFee !== safeFloat(loan.processingFee)) diffParts.push(`processing fee ₹${safeFloat(loan.processingFee)}→₹${newProcessingFee}`);
+        if (newInterestRate !== safeFloat(loan.interestRate)) diffParts.push(`rate ${safeFloat(loan.interestRate)}%→${newInterestRate}%`);
+        if (newInterestPeriod !== loan.interestPeriod) diffParts.push(`period ${loan.interestPeriod}→${newInterestPeriod}`);
+        if (newStartDate.getTime() !== new Date(loan.startDate).getTime()) diffParts.push(`loan date ${new Date(loan.startDate).toISOString().slice(0, 10)}→${newStartDate.toISOString().slice(0, 10)}`);
+        if (newDueDateVal.getTime() !== new Date(loan.dueDate).getTime()) diffParts.push(`due date ${new Date(loan.dueDate).toISOString().slice(0, 10)}→${newDueDateVal.toISOString().slice(0, 10)}`);
+        if (diffParts.length > 0) {
+          const auditLine = `[Corrected ${now.toISOString().slice(0, 10)}] ${diffParts.join(", ")}`;
+          // Base off `updates.notes` if the same request also set notes directly
+          // (the general-field-updates branch above runs first), so we don't
+          // clobber a notes edit made in the same PATCH call.
+          const baseNotes = updates.notes ?? loan.notes;
+          updates.notes = (baseNotes ? `${baseNotes}\n${auditLine}` : auditLine).slice(0, MAX_NOTES_LEN);
+        }
+
+        const updated = await db.transaction(async tx => {
+          if (amountChanged) {
+            if (loan.disbursementVoucherId) {
+              await reverseVoucherTx(tx, userId, loan.disbursementVoucherId, `Correction of girvi loan ${loan.loanNumber} disbursement`);
+            }
+            const disbursed = newLoanAmount - newProcessingFee;
+            const voucher = await postJournalEntry(tx, {
+              userId,
+              voucherDate: newStartDate,
+              voucherType: "payment",
+              narration: `Girvi loan ${loan.loanNumber} disbursement corrected`,
+              sourceModule: "girvi",
+              sourceId: loan.id,
+              lines: [
+                { accountId: accts.GIRVI_LOANS_RECEIVABLE, debit: newLoanAmount, partyType: "girvi_customer", partyId: loan.customerId ?? undefined, particulars: "Loan disbursed (corrected)" },
+                { accountId: accts.CASH, credit: disbursed, particulars: "Cash disbursed" },
+                { accountId: accts.PROCESSING_FEE_INCOME, credit: newProcessingFee, particulars: "Processing fee" },
+              ],
+            });
+            updates.disbursementVoucherId = voucher.id;
+          }
+          updates.loanAmount = newLoanAmount.toString();
+          updates.processingFee = newProcessingFee.toString();
+          updates.interestRate = newInterestRate.toString();
+          updates.interestPeriod = newInterestPeriod;
+          updates.startDate = newStartDate;
+          updates.dueDate = newDueDateVal;
+          updates.updatedAt = now;
+          const [u] = await tx.update(girviLoansTable).set(updates)
+            .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
+            .returning();
+          return u;
+        });
+
+        return res.json(mapLoan(updated, now, graceDays));
       }
     }
 
@@ -995,6 +1367,48 @@ router.patch("/:id", async (req, res) => {
     res.json(mapLoan(updated, now, graceDays));
   } catch (err) {
     req.log.error({ err }, "Failed to update girvi loan");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Void a loan entered by mistake — e.g. wrong customer selected, duplicate
+// entry, or a test entry. Never hard-deletes: the row and its items are kept
+// (status flips to "voided") and the original disbursement journal entry is
+// reversed via a mirror voucher, exactly like reverseVoucher does for any
+// other correction — so the books and the audit trail both stay intact.
+// Restricted to loans with zero payment history (see isLoanEditable); once
+// real money has moved, redeem/forfeit is the correct way to close it out.
+router.delete("/:id", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const [loan] = await db.select().from(girviLoansTable).where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)));
+    if (!loan) return res.status(404).json({ error: "Not found" });
+    if (!isLoanEditable(loan)) {
+      return res.status(400).json({ error: "This loan already has payment history and cannot be voided — redeem or forfeit it to close it out instead" });
+    }
+    if (await loanHasPartialReleaseHistory(userId, id)) {
+      return res.status(400).json({ error: "Some items on this loan have already been released to the customer and cannot be un-done — this loan cannot be voided" });
+    }
+
+    const now = new Date();
+    const updated = await db.transaction(async tx => {
+      if (loan.disbursementVoucherId) {
+        await reverseVoucherTx(tx, userId, loan.disbursementVoucherId, `Void of girvi loan ${loan.loanNumber}`);
+      }
+      await closeOutLoanItems(tx, userId, id, "voided", now);
+      const [u] = await tx.update(girviLoansTable)
+        .set({ status: "voided", updatedAt: now })
+        .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
+        .returning();
+      return u;
+    });
+
+    const settings = await getOrCreateGirviSettings(userId);
+    res.json(mapLoan(updated, now, settings.overdueGraceDays));
+  } catch (err) {
+    req.log.error({ err }, "Failed to void girvi loan");
     res.status(500).json({ error: "Internal server error" });
   }
 });

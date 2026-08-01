@@ -122,6 +122,11 @@ export const girviLoansTable = pgTable("girvi_loans", {
   returnVoucherNumber: text("return_voucher_number"), // set at redemption/forfeiture time
   goldSaleValue: numeric("gold_sale_value", { precision: 12, scale: 2 }),
   lossAmount: numeric("loss_amount", { precision: 12, scale: 2 }),
+  // The journal voucher that booked the original disbursement (Dr Girvi Loans
+  // Receivable / Cr Cash+ProcessingFeeIncome). Kept so a pre-payment correction
+  // (PATCH loanAmount/processingFee) or void (DELETE) can reverse the exact
+  // entry instead of guessing which of the loan's several vouchers it was.
+  disbursementVoucherId: integer("disbursement_voucher_id"),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -150,12 +155,17 @@ export const girviLoanItemsTable = pgTable("girvi_loan_items", {
   netWeight: numeric("net_weight", { precision: 10, scale: 3 }).notNull(),
   estimatedValue: numeric("estimated_value", { precision: 12, scale: 2 }).notNull().default("0"),
   notes: text("notes"), // free-form identification notes (no photo capture in this pass)
-  status: text("status").notNull().default("pledged"), // pledged | returned | transferred | forfeited
+  // Shop's own physical tag/serial number written on the item at pledge time
+  // (not globally unique — two shops, or even two loans years apart, can reuse
+  // a tag). Optional; searchable via GET /items/search.
+  itemCode: text("item_code"),
+  status: text("status").notNull().default("pledged"), // pledged | returned | transferred | forfeited | voided
   currentBranchId: integer("current_branch_id"), // defaults to the loan's branchId; moved by transfers
   returnedAt: timestamp("returned_at"), // set when status flips to returned/forfeited (partial release, redemption, or forfeiture)
 }, (t) => [
   index("girvi_item_loan_idx").on(t.loanId),
   index("girvi_item_user_idx").on(t.userId),
+  index("girvi_item_code_idx").on(t.userId, t.itemCode),
 ]);
 
 // Records each interest / penalty / principal payment against a loan

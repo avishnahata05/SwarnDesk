@@ -76,7 +76,15 @@ export default function ReportsTab() {
     else if (active === "maturity") rows = [...arr(d?.overdue), ...arr(d?.dueThisWeek), ...arr(d?.upcoming)];
     else if (active === "returns") rows = arr(d);
     else if (active === "transfers") rows = arr(d);
-    else if (active === "financial") rows = d ? [d] : [];
+    else if (active === "financial") {
+      // `period` is a nested { from, to } object — CSV cells are just
+      // String(value), which for an object produces the literal text
+      // "[object Object]". Flatten it into its own from/to columns instead.
+      if (d) {
+        const { period, ...rest } = d;
+        rows = [{ periodFrom: period?.from ?? "", periodTo: period?.to ?? "", ...rest }];
+      }
+    }
     else if (active === "cash") rows = arr(d?.flagged);
     const ok = exportToCsv(`girvi-${active}-${new Date().toISOString().slice(0, 10)}.csv`, rows);
     if (!ok) toast({ title: "No data to export", variant: "destructive" });

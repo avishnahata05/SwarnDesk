@@ -11,6 +11,18 @@ import SettingsTab from "./SettingsTab";
 
 export default function Girvi() {
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [tab, setTab] = useState("loans");
+  const [settingsDirty, setSettingsDirty] = useState(false);
+
+  // SettingsTab reports unsaved changes here so we can confirm before letting
+  // a tab switch discard them — Radix Tabs unmounts inactive content by
+  // default, so without this an edit + accidental tab click just vanishes.
+  const handleTabChange = (next: string) => {
+    if (tab === "settings" && settingsDirty && next !== "settings") {
+      if (!confirm("You have unsaved changes in Girvi Settings. Switch tabs anyway and discard them?")) return;
+    }
+    setTab(next);
+  };
 
   // Supports a Dashboard quick action linking straight to "/app/girvi?new=1"
   // that auto-opens the New Loan dialog on the (default) Loans tab.
@@ -32,7 +44,7 @@ export default function Girvi() {
 
   return (
     <div className="max-w-7xl">
-      <Tabs defaultValue="loans">
+      <Tabs value={tab} onValueChange={handleTabChange}>
         <TabsList>
           <TabsTrigger value="loans">Loans</TabsTrigger>
           <TabsTrigger value="customers">Customers</TabsTrigger>
@@ -53,7 +65,7 @@ export default function Girvi() {
           <ReportsTab />
         </TabsContent>
         <TabsContent value="settings">
-          <SettingsTab branches={branches} onBranchesChanged={loadBranches} />
+          <SettingsTab branches={branches} onBranchesChanged={loadBranches} onDirtyChange={setSettingsDirty} />
         </TabsContent>
       </Tabs>
     </div>

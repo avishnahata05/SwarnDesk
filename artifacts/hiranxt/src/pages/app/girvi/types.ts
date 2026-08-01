@@ -7,6 +7,7 @@ export type Branch = {
   phone: string | null;
   isDefault: boolean;
   isActive: boolean;
+  activeLoanCount: number;
   createdAt: string;
 };
 
@@ -106,6 +107,11 @@ export type Loan = {
   lossAmount: number | null;
   notes: string | null;
   createdAt: string;
+  // True until the first payment/waiver/renewal is recorded against this loan —
+  // while true, core terms (amount/rate/dates) and pledged items can still be
+  // corrected via PATCH/DELETE instead of only through the normal business
+  // actions (collect/renew/redeem/forfeit/partial-release).
+  isEditable: boolean;
 };
 
 export type LoanItem = {
@@ -118,6 +124,7 @@ export type LoanItem = {
   netWeight: number;
   estimatedValue: number;
   notes: string | null;
+  itemCode: string | null;
   status: string;
   currentBranchId: number | null;
   returnedAt: string | null;

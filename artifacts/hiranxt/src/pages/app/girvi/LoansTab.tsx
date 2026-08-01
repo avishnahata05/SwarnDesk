@@ -15,13 +15,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Banknote, AlertTriangle, CheckCircle2, TrendingDown, TrendingUp,
   Plus, RefreshCw, XCircle, ChevronDown, ChevronUp, Calendar,
-  MessageCircle, Search, Clock, Coins, Scale,
+  MessageCircle, Search, Clock, Coins, Scale, Pencil, Tag,
   RotateCcw, Flame, ArrowLeftRight, PackageCheck,
 } from "lucide-react";
 import { API, authHeader, getAuthHeaders } from "./api";
 import type { Loan, LoanItem, Payment, Rates, Branch, Summary, PartialRelease } from "./types";
 import { printInterestReceipt, openGirviVoucher, openReturnVoucher, openPartialReleaseVoucher, computeLiveEstValue } from "./vouchers";
 import NewLoanDialog from "./NewLoanDialog";
+import EditLoanDialog from "./EditLoanDialog";
 import DueDatePresets from "./DueDatePresets";
 
 function toVikramSamvat(date: Date): string {
@@ -56,6 +57,10 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
   const [loanReleases, setLoanReleases] = useState<Record<number, PartialRelease[]>>({});
 
   const [showNewLoan, setShowNewLoan] = useState(false);
+  const [editLoan, setEditLoan] = useState<Loan | null>(null);
+  const [serialQuery, setSerialQuery] = useState("");
+  const [serialResults, setSerialResults] = useState<{ item: Pick<LoanItem, "id" | "itemType" | "quantity" | "metalType" | "purity" | "grossWeight" | "netWeight" | "estimatedValue" | "notes" | "itemCode" | "status">; loan: Loan }[]>([]);
+  const [serialSearching, setSerialSearching] = useState(false);
   const [actionLoan, setActionLoan] = useState<Loan | null>(null);
   const [actionType, setActionType] = useState<"redeem" | "forfeit" | "extend" | "collect" | "renew" | "transfer" | "partialRelease" | null>(null);
   const [goldSaleValue, setGoldSaleValue] = useState("");
@@ -156,6 +161,32 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
   const handleExpand = (id: number) => {
     setExpandedId(expandedId === id ? null : id);
     if (expandedId !== id) { loadPayments(id); loadItems(id); loadReleases(id); }
+  };
+
+  // Look up a pledged item by the shop's own tag/serial number (written on the
+  // item at pledge time) and jump straight to the loan it belongs to — for
+  // when a customer walks in with just the tag, not their loan number.
+  useEffect(() => {
+    if (!serialQuery.trim() || serialQuery.trim().length < 2) { setSerialResults([]); return; }
+    let cancelled = false;
+    setSerialSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`${API}/items/search?code=${encodeURIComponent(serialQuery.trim())}`, { headers: authHeader() });
+        if (r.ok && !cancelled) setSerialResults(await r.json());
+      } catch { /* ignore */ } finally { if (!cancelled) setSerialSearching(false); }
+    }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [serialQuery]);
+
+  const jumpToLoan = (loan: Loan) => {
+    setStatusFilter("all");
+    setDueFilter("all");
+    setSearch(loan.loanNumber);
+    setSerialQuery("");
+    setSerialResults([]);
+    setExpandedId(loan.id);
+    loadPayments(loan.id); loadItems(loan.id); loadReleases(loan.id);
   };
 
   const filteredLoans = useMemo(() => {
@@ -363,6 +394,7 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
     { key: "extended|all", label: "Extended", count: undefined },
     { key: "redeemed|all", label: "Redeemed", count: undefined },
     { key: "forfeited|all", label: "Forfeited", count: undefined },
+    { key: "voided|all", label: "Voided", count: undefined },
     { key: "all|all", label: "All", count: summary?.totalLoans },
   ];
 
@@ -490,15 +522,50 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
                 </button>
               ))}
             </div>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                ref={searchInputRef}
-                placeholder="Search by customer, loan number, mobile, or item..."
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                className="pl-9 h-8 text-sm"
-              />
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  ref={searchInputRef}
+                  placeholder="Search by customer, loan number, mobile, or item..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="pl-9 h-8 text-sm"
+                />
+              </div>
+              <div className="relative flex-1 sm:max-w-xs">
+                <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  placeholder="Find by item serial / tag no..."
+                  value={serialQuery}
+                  onChange={e => setSerialQuery(e.target.value)}
+                  className="pl-9 h-8 text-sm"
+                />
+                {serialQuery.trim().length >= 2 && (
+                  <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto rounded-lg border border-border bg-popover shadow-md">
+                    {serialSearching ? (
+                      <div className="px-3 py-2 text-xs text-muted-foreground">Searching...</div>
+                    ) : serialResults.length === 0 ? (
+                      <div className="px-3 py-2 text-xs text-muted-foreground">No items found for "{serialQuery}"</div>
+                    ) : (
+                      serialResults.map(({ item, loan }) => (
+                        <button
+                          type="button"
+                          key={item.id}
+                          onClick={() => jumpToLoan(loan)}
+                          className="w-full flex items-center justify-between px-3 py-2 text-xs hover:bg-muted/50 text-left border-b border-border last:border-0"
+                        >
+                          <span>
+                            <span className="font-mono font-semibold">{item.itemCode}</span>
+                            <span className="text-muted-foreground"> · {item.itemType} · {loan.customerName}</span>
+                          </span>
+                          <span className="font-mono text-muted-foreground">{loan.loanNumber}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           {search && (
@@ -567,6 +634,7 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
                     }
                   }}
                   onWaReminder={sendWaReminder}
+                  onEdit={() => setEditLoan(loan)}
                 />
               ))}
             </div>
@@ -593,6 +661,22 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
         onCreated={() => { setShowNewLoan(false); loadAll(); }}
         rates={rates}
         branches={branches}
+      />
+
+      <EditLoanDialog
+        open={!!editLoan}
+        loan={editLoan}
+        onClose={() => setEditLoan(null)}
+        onUpdated={(updated) => {
+          setLoans(prev => prev.map(l => l.id === updated.id ? updated : l));
+          setEditLoan(updated);
+          setLoanItems(prev => { const n = { ...prev }; delete n[updated.id]; return n; });
+        }}
+        onDeleted={(loanId) => {
+          setEditLoan(null);
+          setLoans(prev => prev.filter(l => l.id !== loanId));
+          loadAll();
+        }}
       />
 
       <Dialog open={!!actionLoan} onOpenChange={v => { if (!v) { setActionLoan(null); setActionType(null); setRedeemConfirmed(false); } }}>
@@ -1007,7 +1091,7 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
 function LoanRow({
   loan, expanded, payments, items, releases, rates, branchName, calendarMode, formatDateDisplay,
   shopName, shopAddress, shopMobile,
-  onExpand, onAction, onWaReminder,
+  onExpand, onAction, onWaReminder, onEdit,
 }: {
   loan: Loan;
   expanded: boolean;
@@ -1024,6 +1108,7 @@ function LoanRow({
   onExpand: () => void;
   onAction: (type: "redeem" | "forfeit" | "extend" | "collect" | "renew" | "transfer" | "partialRelease") => void;
   onWaReminder: (loan: Loan, type: "due" | "overdue") => void;
+  onEdit: () => void;
 }) {
   const isActive = loan.status === "active" || loan.status === "extended";
   const liveEstValue = computeLiveEstValue(loan, items, rates);
@@ -1110,6 +1195,7 @@ function LoanRow({
                       <div key={it.id} className="text-[10px] text-muted-foreground">
                         {it.quantity}× {it.itemType} ({it.metalType === "silver" ? "Ag" : "Au"} {it.purity}) · {it.grossWeight.toFixed(3)}g
                         {itLive !== null ? ` · Live: ${formatCurrency(itLive)}` : ` · ${formatCurrency(it.estimatedValue)}`}
+                        {it.itemCode && <span className="ml-1 font-mono text-foreground/70">#{it.itemCode}</span>}
                         {it.status !== "pledged" && <span className="ml-1 italic">[{it.status}]</span>}
                         {it.notes && <span className="block">{it.notes}</span>}
                       </div>
@@ -1177,6 +1263,11 @@ function LoanRow({
 
           {isActive && (
             <div className="flex gap-2 flex-wrap">
+              {loan.isEditable && (
+                <Button size="sm" variant="outline" className="gap-1.5 border-blue-400/50 text-blue-700 hover:bg-blue-50" onClick={onEdit}>
+                  <Pencil className="w-3.5 h-3.5" />Edit
+                </Button>
+              )}
               <Button size="sm" className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => onAction("collect")}>
                 <Coins className="w-3.5 h-3.5" />Collect Interest
               </Button>

@@ -178,43 +178,49 @@ export async function postJournalEntry(tx: Tx, input: PostJournalEntryInput) {
 
 // Voids a voucher without deleting it — inserts a mirror-image reversing
 // voucher (debits <-> credits swapped) and links the two for a full audit trail.
+// Core implementation takes the transaction explicitly so callers that need the
+// reversal to commit/rollback atomically with their own writes (e.g. a girvi
+// loan correction that reverses the original disbursement and posts a
+// corrected one in the same breath) can pass their own `tx` in.
+export async function reverseVoucherTx(tx: Tx, userId: number, voucherId: number, narration?: string) {
+  const [voucher] = await tx.select().from(journalVouchersTable)
+    .where(and(eq(journalVouchersTable.id, voucherId), eq(journalVouchersTable.userId, userId)));
+  if (!voucher) throw Object.assign(new Error("Voucher not found"), { statusCode: 404 });
+  if (voucher.reversedByVoucherId) throw Object.assign(new Error("Voucher already voided"), { statusCode: 400 });
+
+  const lines = await tx.select().from(journalLinesTable)
+    .where(and(eq(journalLinesTable.voucherId, voucherId), eq(journalLinesTable.userId, userId)));
+
+  const settings = await getOrCreateAccountingSettings(userId);
+  const voucherNumber = await nextVoucherNumber(userId, "journal", settings.journalPrefix, new Date());
+  const [reversal] = await tx.insert(journalVouchersTable).values({
+    userId,
+    voucherNumber,
+    voucherType: "journal",
+    voucherDate: new Date(),
+    narration: narration ?? `Reversal of ${voucher.voucherNumber}`,
+    sourceModule: voucher.sourceModule,
+    sourceId: voucher.sourceId,
+    reversesVoucherId: voucher.id,
+  }).returning();
+
+  await tx.insert(journalLinesTable).values(lines.map(l => ({
+    userId,
+    voucherId: reversal.id,
+    accountId: l.accountId,
+    debit: l.credit,
+    credit: l.debit,
+    partyType: l.partyType,
+    partyId: l.partyId,
+    particulars: l.particulars,
+  })));
+
+  await tx.update(journalVouchersTable).set({ reversedByVoucherId: reversal.id })
+    .where(eq(journalVouchersTable.id, voucher.id));
+
+  return reversal;
+}
+
 export async function reverseVoucher(userId: number, voucherId: number, narration?: string) {
-  return db.transaction(async (tx) => {
-    const [voucher] = await tx.select().from(journalVouchersTable)
-      .where(and(eq(journalVouchersTable.id, voucherId), eq(journalVouchersTable.userId, userId)));
-    if (!voucher) throw Object.assign(new Error("Voucher not found"), { statusCode: 404 });
-    if (voucher.reversedByVoucherId) throw Object.assign(new Error("Voucher already voided"), { statusCode: 400 });
-
-    const lines = await tx.select().from(journalLinesTable)
-      .where(and(eq(journalLinesTable.voucherId, voucherId), eq(journalLinesTable.userId, userId)));
-
-    const settings = await getOrCreateAccountingSettings(userId);
-    const voucherNumber = await nextVoucherNumber(userId, "journal", settings.journalPrefix, new Date());
-    const [reversal] = await tx.insert(journalVouchersTable).values({
-      userId,
-      voucherNumber,
-      voucherType: "journal",
-      voucherDate: new Date(),
-      narration: narration ?? `Reversal of ${voucher.voucherNumber}`,
-      sourceModule: voucher.sourceModule,
-      sourceId: voucher.sourceId,
-      reversesVoucherId: voucher.id,
-    }).returning();
-
-    await tx.insert(journalLinesTable).values(lines.map(l => ({
-      userId,
-      voucherId: reversal.id,
-      accountId: l.accountId,
-      debit: l.credit,
-      credit: l.debit,
-      partyType: l.partyType,
-      partyId: l.partyId,
-      particulars: l.particulars,
-    })));
-
-    await tx.update(journalVouchersTable).set({ reversedByVoucherId: reversal.id })
-      .where(eq(journalVouchersTable.id, voucher.id));
-
-    return reversal;
-  });
+  return db.transaction(tx => reverseVoucherTx(tx, userId, voucherId, narration));
 }

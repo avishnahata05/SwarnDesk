@@ -18,7 +18,12 @@ type CustomerForm = {
   idProofType: string; idProofNumber: string; pan: string; notes: string;
 };
 
-const emptyForm: CustomerForm = { name: "", mobile: "", fatherName: "", address: "", altMobile: "", email: "", idProofType: "aadhaar", idProofNumber: "", pan: "", notes: "" };
+// "none" is a sentinel for "no ID proof type on file" — Radix Select rejects an
+// empty-string value, and defaulting this to "aadhaar" (as an earlier version
+// did) meant saving any unrelated field on a customer with no ID proof on file
+// would silently persist "aadhaar" as their document type, even though the
+// shop never actually collected one.
+const emptyForm: CustomerForm = { name: "", mobile: "", fatherName: "", address: "", altMobile: "", email: "", idProofType: "none", idProofNumber: "", pan: "", notes: "" };
 
 export default function CustomersTab() {
   const { toast } = useToast();
@@ -32,6 +37,8 @@ export default function CustomersTab() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<CustomerForm>(emptyForm);
   const [submitting, setSubmitting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const closeForm = useCallback(() => setShowForm(false), []);
   useBackClose(showForm, closeForm);
@@ -72,7 +79,7 @@ export default function CustomersTab() {
     setEditingId(c.id);
     setForm({
       name: c.name, mobile: c.mobile, fatherName: c.fatherName ?? "", address: c.address ?? "",
-      altMobile: c.altMobile ?? "", email: c.email ?? "", idProofType: c.idProofType ?? "aadhaar",
+      altMobile: c.altMobile ?? "", email: c.email ?? "", idProofType: c.idProofType ?? "none",
       idProofNumber: c.idProofNumber ?? "", pan: c.pan ?? "", notes: c.notes ?? "",
     });
     setShowForm(true);
@@ -80,15 +87,19 @@ export default function CustomersTab() {
 
   const setF = (k: keyof CustomerForm, v: string) => setForm(f => ({ ...f, [k]: v }));
 
-  const handleDelete = async (id: number) => {
-    if (!confirm("Delete this customer? This cannot be undone.")) return;
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      const r = await fetch(`${API}/customers/${id}`, { method: "DELETE", headers: getAuthHeaders() });
+      const r = await fetch(`${API}/customers/${deleteTarget.id}`, { method: "DELETE", headers: getAuthHeaders() });
       if (!r.ok) throw new Error((await r.json().catch(() => ({ error: "Failed" }))).error ?? "Failed");
       toast({ title: "Customer deleted" });
+      setDeleteTarget(null);
       load();
     } catch (err) {
       toast({ title: (err as Error).message || "Failed to delete", variant: "destructive" });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -100,7 +111,8 @@ export default function CustomersTab() {
       const body = {
         name: form.name, mobile: form.mobile, fatherName: form.fatherName.trim() || null,
         address: form.address.trim() || null, altMobile: form.altMobile.trim() || null, email: form.email.trim() || null,
-        idProofType: form.idProofType || null, idProofNumber: form.idProofNumber.trim() || null,
+        idProofType: form.idProofType && form.idProofType !== "none" ? form.idProofType : null,
+        idProofNumber: form.idProofNumber.trim() || null,
         pan: form.pan.trim() || null, notes: form.notes.trim() || null,
       };
       const r = editingId
@@ -175,7 +187,7 @@ export default function CustomersTab() {
                       <Button size="sm" variant="ghost" className="h-7 w-7 p-0 flex-shrink-0" onClick={e => { e.stopPropagation(); openEdit(c); }}>
                         <Pencil className="w-3.5 h-3.5" />
                       </Button>
-                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 flex-shrink-0 text-red-600" onClick={e => { e.stopPropagation(); handleDelete(c.id); }}>
+                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 flex-shrink-0 text-red-600" onClick={e => { e.stopPropagation(); setDeleteTarget(c); }}>
                         <Trash2 className="w-3.5 h-3.5" />
                       </Button>
                       <div className="text-muted-foreground flex-shrink-0">{expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</div>
@@ -257,6 +269,7 @@ export default function CustomersTab() {
                 <Select value={form.idProofType} onValueChange={v => setF("idProofType", v)}>
                   <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="none">Not on file</SelectItem>
                     <SelectItem value="aadhaar">Aadhaar Card</SelectItem>
                     <SelectItem value="pan">PAN Card</SelectItem>
                     <SelectItem value="voter_id">Voter ID</SelectItem>
@@ -281,6 +294,24 @@ export default function CustomersTab() {
               <Button size="sm" onClick={handleSubmit} disabled={submitting}>{submitting ? "Saving..." : editingId ? "Save Changes" : "Create Customer"}</Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle className="flex items-center gap-2 text-destructive"><Trash2 className="w-4 h-4" />Delete Customer</DialogTitle></DialogHeader>
+          {deleteTarget && (
+            <div className="space-y-3">
+              <p className="text-sm">
+                Delete <strong>{deleteTarget.name}</strong> ({deleteTarget.mobile})? This cannot be undone — their KYC details and notes will be permanently removed.
+              </p>
+              <p className="text-xs text-muted-foreground">Customers with any loan history on file cannot be deleted.</p>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" size="sm" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+                <Button variant="destructive" size="sm" onClick={confirmDelete} disabled={deleting}>{deleting ? "Deleting..." : "Delete Customer"}</Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

@@ -64,18 +64,34 @@ router.patch("/", async (req, res) => {
       if (isNaN(m) || m < 1 || m > 12) return res.status(400).json({ error: "financialYearStartMonth must be 1–12" });
       updates.financialYearStartMonth = m;
     }
-    if (data.defaultInterestRate !== undefined) updates.defaultInterestRate = safeFloat(data.defaultInterestRate, 2).toString();
+    // Bounds matching what a per-loan creation is held to (girvi.ts POST /) —
+    // these values pre-fill every subsequent New Loan form, so an unbounded
+    // typo here (e.g. "250" instead of "2.5") would silently become the
+    // default rate offered on every loan going forward.
+    if (data.defaultInterestRate !== undefined) {
+      const r = safeFloat(data.defaultInterestRate, 2);
+      if (r < 0 || r > 100) return res.status(400).json({ error: "Default interest rate must be 0–100" });
+      updates.defaultInterestRate = r.toString();
+    }
     if (data.defaultInterestPeriod !== undefined) {
       if (!VALID_PERIODS.has(data.defaultInterestPeriod)) return res.status(400).json({ error: "Invalid interest period" });
       updates.defaultInterestPeriod = data.defaultInterestPeriod;
     }
-    if (data.defaultPenaltyRate !== undefined) updates.defaultPenaltyRate = safeFloat(data.defaultPenaltyRate, 1).toString();
+    if (data.defaultPenaltyRate !== undefined) {
+      const pr = safeFloat(data.defaultPenaltyRate, 1);
+      if (pr < 0 || pr > 100) return res.status(400).json({ error: "Default penalty rate must be 0–100" });
+      updates.defaultPenaltyRate = pr.toString();
+    }
     if (data.defaultLoanDurationDays !== undefined) {
       const d = parseInt(data.defaultLoanDurationDays);
       if (isNaN(d) || d <= 0) return res.status(400).json({ error: "defaultLoanDurationDays must be positive" });
       updates.defaultLoanDurationDays = d;
     }
-    if (data.cashTransactionLimit !== undefined) updates.cashTransactionLimit = safeFloat(data.cashTransactionLimit, 200000).toString();
+    if (data.cashTransactionLimit !== undefined) {
+      const cl = safeFloat(data.cashTransactionLimit, 200000);
+      if (cl <= 0) return res.status(400).json({ error: "Cash transaction limit must be positive" });
+      updates.cashTransactionLimit = cl.toString();
+    }
     if (data.overdueGraceDays !== undefined) {
       const g = parseInt(data.overdueGraceDays);
       if (isNaN(g) || g < 0) return res.status(400).json({ error: "overdueGraceDays must be 0 or more" });

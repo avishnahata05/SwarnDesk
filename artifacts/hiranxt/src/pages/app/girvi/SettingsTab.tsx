@@ -1,33 +1,52 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Settings as SettingsIcon, Building2, Plus, Ban } from "lucide-react";
+import { Settings as SettingsIcon, Building2, Plus, Ban, Star, AlertTriangle } from "lucide-react";
 import { API, getAuthHeaders, authHeader } from "./api";
 import type { GirviSettings, Branch } from "./types";
 
-export default function SettingsTab({ branches, onBranchesChanged }: { branches: Branch[]; onBranchesChanged: () => void }) {
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+export default function SettingsTab({ branches, onBranchesChanged, onDirtyChange }: { branches: Branch[]; onBranchesChanged: () => void; onDirtyChange?: (dirty: boolean) => void }) {
   const { toast } = useToast();
   const [settings, setSettings] = useState<GirviSettings | null>(null);
+  const savedRef = useRef<GirviSettings | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
   const [addingBranch, setAddingBranch] = useState(false);
+  const [deactivateTarget, setDeactivateTarget] = useState<Branch | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const r = await fetch(`${API}/settings`, { headers: authHeader() });
-      if (r.ok) setSettings(await r.json());
+      if (r.ok) { const data = await r.json(); setSettings(data); savedRef.current = data; }
     } catch {
       toast({ title: "Network error — please check your connection", variant: "destructive" });
     } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Radix Tabs unmounts inactive tab content, so edits made here and never
+  // saved were previously lost with zero warning the moment the shop owner
+  // clicked another tab. Report dirty state up so the parent can confirm
+  // before switching away, and guard the hard-refresh/close-tab case directly.
+  const dirty = !!settings && !!savedRef.current && JSON.stringify(settings) !== JSON.stringify(savedRef.current);
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  useEffect(() => {
+    if (!dirty) return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [dirty]);
+  useEffect(() => () => { onDirtyChange?.(false); }, [onDirtyChange]);
 
   const set = <K extends keyof GirviSettings>(k: K, v: GirviSettings[K]) => setSettings(s => s ? { ...s, [k]: v } : s);
 
@@ -38,7 +57,9 @@ export default function SettingsTab({ branches, onBranchesChanged }: { branches:
       const r = await fetch(`${API}/settings`, { method: "PATCH", headers: getAuthHeaders(), body: JSON.stringify(settings) });
       if (!r.ok) throw new Error((await r.json()).error ?? "Failed");
       toast({ title: "Girvi settings saved" });
-      setSettings(await r.json());
+      const saved = await r.json();
+      setSettings(saved);
+      savedRef.current = saved;
     } catch (err) {
       toast({ title: (err as Error).message || "Failed to save", variant: "destructive" });
     } finally { setSaving(false); }
@@ -62,6 +83,24 @@ export default function SettingsTab({ branches, onBranchesChanged }: { branches:
     try {
       const r = await fetch(`${API}/branches/${b.id}`, { method: "PATCH", headers: getAuthHeaders(), body: JSON.stringify({ isActive: !b.isActive }) });
       if (!r.ok) throw new Error((await r.json()).error ?? "Failed");
+      onBranchesChanged();
+    } catch (err) {
+      toast({ title: (err as Error).message || "Failed", variant: "destructive" });
+    } finally {
+      setDeactivateTarget(null);
+    }
+  };
+
+  const requestDeactivate = (b: Branch) => {
+    if (b.activeLoanCount > 0) { setDeactivateTarget(b); return; }
+    toggleBranch(b);
+  };
+
+  const setDefaultBranch = async (b: Branch) => {
+    try {
+      const r = await fetch(`${API}/branches/${b.id}/set-default`, { method: "POST", headers: getAuthHeaders() });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Failed");
+      toast({ title: `${b.name} is now the default branch` });
       onBranchesChanged();
     } catch (err) {
       toast({ title: (err as Error).message || "Failed", variant: "destructive" });
@@ -125,7 +164,15 @@ export default function SettingsTab({ branches, onBranchesChanged }: { branches:
           <div><label className={lbl}>Default Penalty Rate (%)</label><input className={inp} type="number" step="0.1" value={settings.defaultPenaltyRate} onChange={e => set("defaultPenaltyRate", parseFloat(e.target.value) || 0)} /></div>
           <div><label className={lbl}>Default Loan Duration (days)</label><input className={inp} type="number" value={settings.defaultLoanDurationDays} onChange={e => set("defaultLoanDurationDays", parseInt(e.target.value) || 90)} /></div>
           <div><label className={lbl}>Cash Transaction Limit (₹) <span className="text-muted-foreground/60">Sec. 269ST awareness</span></label><input className={inp} type="number" value={settings.cashTransactionLimit} onChange={e => set("cashTransactionLimit", parseFloat(e.target.value) || 200000)} /></div>
-          <div><label className={lbl}>Financial Year Start Month</label><input className={inp} type="number" min="1" max="12" value={settings.financialYearStartMonth} onChange={e => set("financialYearStartMonth", parseInt(e.target.value) || 4)} /></div>
+          <div>
+            <label className={lbl}>Financial Year Start Month</label>
+            <Select value={String(settings.financialYearStartMonth)} onValueChange={v => set("financialYearStartMonth", parseInt(v))}>
+              <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {MONTH_NAMES.map((name, i) => <SelectItem key={name} value={String(i + 1)}>{name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="sm:col-span-2">
             <label className={lbl}>Overdue Grace Period (days)</label>
             <input className={inp} type="number" min="0" value={settings.overdueGraceDays} onChange={e => set("overdueGraceDays", Math.max(0, parseInt(e.target.value) || 0))} />
@@ -164,12 +211,22 @@ export default function SettingsTab({ branches, onBranchesChanged }: { branches:
                   <span className="font-medium">{b.name}</span>
                   {b.isDefault && <Badge variant="outline" className="text-[10px]">Default</Badge>}
                   {!b.isActive && <Badge variant="secondary" className="text-[10px]">Inactive</Badge>}
+                  {b.activeLoanCount > 0 && (
+                    <span className="text-[10px] text-muted-foreground">{b.activeLoanCount} active loan{b.activeLoanCount !== 1 ? "s" : ""}</span>
+                  )}
                 </div>
-                {!b.isDefault && (
-                  <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => toggleBranch(b)}>
-                    <Ban className="w-3 h-3" />{b.isActive ? "Deactivate" : "Reactivate"}
-                  </Button>
-                )}
+                <div className="flex items-center gap-1">
+                  {!b.isDefault && b.isActive && (
+                    <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => setDefaultBranch(b)}>
+                      <Star className="w-3 h-3" />Set as Default
+                    </Button>
+                  )}
+                  {!b.isDefault && (
+                    <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => requestDeactivate(b)}>
+                      <Ban className="w-3 h-3" />{b.isActive ? "Deactivate" : "Reactivate"}
+                    </Button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -181,6 +238,23 @@ export default function SettingsTab({ branches, onBranchesChanged }: { branches:
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={!!deactivateTarget} onOpenChange={v => { if (!v) setDeactivateTarget(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle className="flex items-center gap-2 text-amber-700"><AlertTriangle className="w-4 h-4" />Deactivate Branch</DialogTitle></DialogHeader>
+          {deactivateTarget && (
+            <div className="space-y-3">
+              <p className="text-sm">
+                <strong>{deactivateTarget.name}</strong> currently has <strong>{deactivateTarget.activeLoanCount}</strong> active loan{deactivateTarget.activeLoanCount !== 1 ? "s" : ""} pledged at it. Deactivating hides it from the branch picker on new loans, but existing loans stay assigned to it.
+              </p>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" size="sm" onClick={() => setDeactivateTarget(null)}>Cancel</Button>
+                <Button variant="destructive" size="sm" onClick={() => toggleBranch(deactivateTarget)}>Deactivate Anyway</Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

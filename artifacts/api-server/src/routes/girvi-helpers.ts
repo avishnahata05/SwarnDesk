@@ -3,7 +3,7 @@ import { girviLoansTable, girviCountersTable, girviBranchesTable, girviSettingsT
 import { eq, and, sql } from "drizzle-orm";
 
 export const VALID_METAL_TYPES = new Set(["gold", "silver"]);
-export const VALID_STATUSES = new Set(["active", "redeemed", "forfeited", "extended"]);
+export const VALID_STATUSES = new Set(["active", "redeemed", "forfeited", "extended", "voided"]);
 export const VALID_PERIODS = new Set(["daily", "weekly", "monthly", "yearly"]);
 export const VALID_PAYMENT_MODES = new Set(["cash", "bank", "upi", "cheque"]);
 // "waiver" records the lender choosing to forgive some/all accrued interest —
@@ -125,6 +125,20 @@ export function preserveOutstandingBaseline(
   return (baselineBefore + (after - before)).toFixed(2);
 }
 
+// A loan is a pure "data-entry correction" candidate only until the first real
+// money movement (any interest/penalty/principal payment, waiver, or renewal)
+// has been recorded against it. Before that point, nothing has been booked
+// against the customer's outstanding balance other than the original
+// disbursement, so core terms (amount, rate, dates) and pledged items can
+// still be safely edited or the whole loan voided. After that point, use the
+// normal business actions (collect/renew/redeem/forfeit/partial-release) —
+// letting terms change underneath a payment history would silently corrupt
+// past interest calculations.
+export function isLoanEditable(loan: typeof girviLoansTable.$inferSelect): boolean {
+  const noPayments = safeFloat(loan.totalInterestCollected) === 0 && safeFloat((loan as any).principalPaid ?? "0") === 0;
+  return noPayments && (loan.status === "active" || loan.status === "extended");
+}
+
 export function mapLoan(l: typeof girviLoansTable.$inferSelect, asOf = new Date(), graceDays = 0) {
   const loanAmount = safeFloat(l.loanAmount);
   const principalPaid = safeFloat((l as any).principalPaid ?? "0");
@@ -199,6 +213,7 @@ export function mapLoan(l: typeof girviLoansTable.$inferSelect, asOf = new Date(
     lossAmount: l.lossAmount ? safeFloat(l.lossAmount) : null,
     notes: l.notes,
     createdAt: l.createdAt.toISOString(),
+    isEditable: isLoanEditable(l),
   };
 }
 

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { girviLoansTable, girviPaymentsTable, girviTransfersTable, girviBranchesTable, girviPartialReleasesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { mapLoan, safeFloat, getOrCreateGirviSettings } from "./girvi-helpers";
+import { mapLoan, calcAccruedInterest, safeFloat, getOrCreateGirviSettings } from "./girvi-helpers";
 
 const router = Router();
 
@@ -158,7 +158,14 @@ router.get("/financial-summary", async (req, res) => {
     const loans = await db.select().from(girviLoansTable).where(eq(girviLoansTable.userId, userId));
     const payments = await db.select().from(girviPaymentsTable).where(eq(girviPaymentsTable.userId, userId));
 
-    const loansDisbursedInRange = loans.filter(l => l.createdAt >= fromDate && l.createdAt <= toDate);
+    // Voided loans were reversed in the books and never really happened — same
+    // "excluded from every stat" rule as girvi.ts's own GET /stats/summary.
+    const realLoans = loans.filter(l => l.status !== "voided");
+
+    // "Disbursed in range" keys off the loan's actual (possibly backdated)
+    // startDate, not createdAt — a shop batching data entry days/weeks after
+    // the fact would otherwise have that loan counted in the wrong period.
+    const loansDisbursedInRange = realLoans.filter(l => l.startDate >= fromDate && l.startDate <= toDate);
     const paymentsInRange = payments.filter(p => p.paymentDate >= fromDate && p.paymentDate <= toDate);
 
     const principalDisbursed = loansDisbursedInRange.reduce((s, l) => s + safeFloat(l.loanAmount), 0);
@@ -169,16 +176,52 @@ router.get("/financial-summary", async (req, res) => {
     // from income since no cash was received (see VALID_PAYMENT_TYPES "waiver").
     const interestWaived = paymentsInRange.filter(p => p.paymentType === "waiver").reduce((s, p) => s + safeFloat(p.amount), 0);
 
-    const forfeitedInRange = loans.filter(l => l.status === "forfeited" && l.redeemedDate && l.redeemedDate >= fromDate && l.redeemedDate <= toDate);
+    const forfeitedInRange = realLoans.filter(l => l.status === "forfeited" && l.redeemedDate && l.redeemedDate >= fromDate && l.redeemedDate <= toDate);
     const forfeitureLoss = forfeitedInRange.reduce((s, l) => s + safeFloat(l.lossAmount), 0);
 
-    const now = new Date();
-    const active = loans.filter(l => l.status === "active" || l.status === "extended").map(l => mapLoan(l, now, settings.overdueGraceDays));
-    const closingOutstandingPrincipal = active.reduce((s, l) => s + l.currentPrincipal, 0);
-    const closingOutstandingInterest = active.reduce((s, l) => s + l.outstandingInterest, 0);
-    const goldWeight = active.filter(l => l.metalType === "gold").reduce((s, l) => s + l.grossWeight, 0);
-    const silverWeight = active.filter(l => l.metalType === "silver").reduce((s, l) => s + l.grossWeight, 0);
-    const stockValueAtCost = active.reduce((s, l) => s + l.estimatedValue, 0);
+    // "Closing" balances must be as of toDate, not "now" — a report run today
+    // for a January period has to show January's balances, not today's. A loan
+    // counts as still-open-as-of-toDate if it had already started by then and
+    // hadn't yet closed out (no redeemedDate, or redeemedDate is after toDate).
+    const openAsOfToDate = realLoans.filter(l => l.startDate <= toDate && (!l.redeemedDate || l.redeemedDate > toDate));
+
+    // Principal outstanding as of toDate is exactly reconstructable: original
+    // amount minus whatever principal payments had actually posted by then.
+    const principalPaidByDate = new Map<number, number>();
+    for (const p of payments) {
+      if (p.paymentType !== "principal" || p.paymentDate > toDate) continue;
+      principalPaidByDate.set(p.loanId, (principalPaidByDate.get(p.loanId) ?? 0) + safeFloat(p.amount));
+    }
+    const closingOutstandingPrincipal = openAsOfToDate.reduce((s, l) => {
+      const paid = principalPaidByDate.get(l.id) ?? 0;
+      return s + Math.max(0, safeFloat(l.loanAmount) - paid);
+    }, 0);
+
+    // Interest outstanding as of toDate re-runs the accrual formula against
+    // toDate using the loan's CURRENT rate/clock — exact unless the rate or
+    // interest clock was reset by a renewal/paydown between toDate and now,
+    // since there's no day-by-day accrual ledger to reconstruct that from.
+    // Good enough for a management report; a loan renewed since toDate is the
+    // one case worth double-checking against payment history directly.
+    const interestCollectedByDate = new Map<number, number>();
+    for (const p of payments) {
+      if (p.paymentDate > toDate) continue;
+      if (p.paymentType !== "interest" && p.paymentType !== "penalty" && p.paymentType !== "renewal" && p.paymentType !== "waiver") continue;
+      interestCollectedByDate.set(p.loanId, (interestCollectedByDate.get(p.loanId) ?? 0) + safeFloat(p.amount));
+    }
+    const closingOutstandingInterest = openAsOfToDate.reduce((s, l) => {
+      const accrued = calcAccruedInterest(l, toDate, settings.overdueGraceDays).total;
+      const collected = interestCollectedByDate.get(l.id) ?? 0;
+      return s + Math.max(0, accrued - collected);
+    }, 0);
+
+    // Collateral weight/value in custody as of toDate uses each loan's CURRENT
+    // item records — there's no historical snapshot of collateral composition,
+    // so a loan whose items were edited/partially released after toDate will
+    // reflect today's composition rather than toDate's.
+    const goldWeight = openAsOfToDate.filter(l => l.metalType === "gold").reduce((s, l) => s + safeFloat(l.grossWeight), 0);
+    const silverWeight = openAsOfToDate.filter(l => l.metalType === "silver").reduce((s, l) => s + safeFloat(l.grossWeight), 0);
+    const stockValueAtCost = openAsOfToDate.reduce((s, l) => s + safeFloat(l.estimatedValue), 0);
 
     res.json({
       period: { from: fromDate.toISOString(), to: toDate.toISOString() },

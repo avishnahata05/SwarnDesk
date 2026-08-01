@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { customersTable, salesTable, repairJobsTable, girviLoansTable } from "@workspace/db";
-import { eq, ilike, and, or, desc, inArray } from "drizzle-orm";
+import { eq, ilike, and, or, desc, inArray, sql } from "drizzle-orm";
 import { mapLoan as mapGirviLoan } from "./girvi-helpers";
 
 const router = Router();
@@ -117,12 +117,13 @@ router.get("/", async (req, res) => {
   try {
     const userId = req.user!.userId;
     const { search } = req.query as Record<string, string>;
+    const limitNum = Math.min(1000, Math.max(1, parseInt(req.query.limit as string) || 500));
     const baseCondition = eq(customersTable.userId, userId);
     const escaped = search ? search.replace(/[%_\\]/g, "\\$&") : "";
     const where = search
       ? and(baseCondition, or(ilike(customersTable.name, `%${escaped}%`), ilike(customersTable.mobile, `%${escaped}%`)))
       : baseCondition;
-    const customers = await db.select().from(customersTable).where(where).orderBy(customersTable.name);
+    const customers = await db.select().from(customersTable).where(where).orderBy(customersTable.name).limit(limitNum);
     res.json(customers.map(mapCustomer));
   } catch (err) {
     req.log.error({ err }, "Failed to list customers");
@@ -175,12 +176,14 @@ router.get("/history", async (req, res) => {
     const digits = (mobile ?? "").replace(/\D/g, "");
     if (digits.length < 4) return res.status(400).json({ error: "Enter at least 4 digits of the mobile number" });
 
-    const [allCustomers, allGirviLoans] = await Promise.all([
-      db.select().from(customersTable).where(eq(customersTable.userId, userId)),
-      db.select().from(girviLoansTable).where(eq(girviLoansTable.userId, userId)),
-    ]);
+    // Digit-normalized substring match, pushed into SQL so a lookup only pulls the
+    // handful of matching rows instead of every customer/loan this shop has ever had.
+    const digitsMatch = (col: any) => sql`regexp_replace(${col}, '\D', '', 'g') LIKE ${`%${digits}%`}`;
 
-    const customer = allCustomers.find(c => c.mobile.replace(/\D/g, "").includes(digits)) ?? null;
+    const [customer] = await db.select().from(customersTable)
+      .where(and(eq(customersTable.userId, userId), digitsMatch(customersTable.mobile)))
+      .orderBy(customersTable.id)
+      .limit(1);
 
     const sales = customer
       ? await db.select().from(salesTable)
@@ -188,9 +191,9 @@ router.get("/history", async (req, res) => {
           .orderBy(desc(salesTable.saleDate))
       : [];
 
-    const girviLoans = allGirviLoans
-      .filter(l => l.customerMobile.replace(/\D/g, "").includes(digits))
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const girviLoans = await db.select().from(girviLoansTable)
+      .where(and(eq(girviLoansTable.userId, userId), digitsMatch(girviLoansTable.customerMobile)))
+      .orderBy(desc(girviLoansTable.createdAt));
 
     res.json({
       customer: customer ? mapCustomer(customer) : null,

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation, Redirect } from "wouter";
+import { Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +16,8 @@ export default function RegisterPage() {
     mobile: "",
   });
   const [error, setError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const { register, isLoading, user } = useAuth();
   const [, navigate] = useLocation();
 
@@ -124,14 +127,26 @@ export default function RegisterPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium text-foreground">Password <span className="text-destructive">*</span></label>
-                  <Input
-                    type="password"
-                    placeholder="Min. 6 characters"
-                    value={form.password}
-                    onChange={handleChange("password")}
-                    required
-                    autoComplete="new-password"
-                  />
+                  <div className="relative">
+                    <Input
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Min. 6 characters"
+                      value={form.password}
+                      onChange={handleChange("password")}
+                      required
+                      autoComplete="new-password"
+                      className="pr-9"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(v => !v)}
+                      className="absolute inset-y-0 right-0 flex items-center px-2.5 text-muted-foreground hover:text-foreground"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      tabIndex={-1}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                   {form.password.length > 0 && (
                     <p className={`text-xs ${form.password.length >= 6 ? "text-green-600" : "text-destructive"}`}>
                       {form.password.length >= 6 ? "Password length OK" : `At least ${6 - form.password.length} more character${6 - form.password.length !== 1 ? "s" : ""} needed`}
@@ -140,14 +155,26 @@ export default function RegisterPage() {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium text-foreground">Confirm Password <span className="text-destructive">*</span></label>
-                  <Input
-                    type="password"
-                    placeholder="Re-enter password"
-                    value={form.confirmPassword}
-                    onChange={handleChange("confirmPassword")}
-                    required
-                    autoComplete="new-password"
-                  />
+                  <div className="relative">
+                    <Input
+                      type={showConfirmPassword ? "text" : "password"}
+                      placeholder="Re-enter password"
+                      value={form.confirmPassword}
+                      onChange={handleChange("confirmPassword")}
+                      required
+                      autoComplete="new-password"
+                      className="pr-9"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(v => !v)}
+                      className="absolute inset-y-0 right-0 flex items-center px-2.5 text-muted-foreground hover:text-foreground"
+                      aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                      tabIndex={-1}
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                   {form.confirmPassword.length > 0 && (
                     <p className={`text-xs ${form.confirmPassword === form.password ? "text-green-600" : "text-destructive"}`}>
                       {form.confirmPassword === form.password ? "Passwords match" : "Passwords do not match"}

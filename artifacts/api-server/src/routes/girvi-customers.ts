@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { girviCustomersTable, girviLoansTable, girviPaymentsTable } from "@workspace/db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, ne, desc } from "drizzle-orm";
 import { mapLoan, mapPayment, getOrCreateGirviSettings, MAX_NOTES_LEN, MAX_ADDRESS_LEN } from "./girvi-helpers";
 
 const router = Router();
@@ -57,6 +57,21 @@ router.post("/", async (req, res) => {
     const mobile = String(data.mobile ?? "").trim();
     if (!name) return res.status(400).json({ error: "Name is required" });
     if (!mobile) return res.status(400).json({ error: "Mobile is required" });
+
+    // Catch the common front-desk mistake of re-entering a returning customer
+    // instead of searching for them — that would otherwise silently split
+    // their loan history across two "customers" with no way to merge later.
+    const mobileDigits = mobile.replace(/\D/g, "");
+    if (mobileDigits) {
+      const existingCustomers = await db.select().from(girviCustomersTable).where(eq(girviCustomersTable.userId, userId));
+      const dupe = existingCustomers.find(c => c.mobile.replace(/\D/g, "") === mobileDigits);
+      if (dupe) {
+        return res.status(409).json({
+          error: `A customer with this mobile number already exists: ${dupe.name} (${dupe.mobile}). Search for them instead of creating a new record.`,
+          existingCustomerId: dupe.id,
+        });
+      }
+    }
 
     const [created] = await db.insert(girviCustomersTable).values({
       userId,
@@ -158,11 +173,17 @@ router.get("/:id/statement", async (req, res) => {
           .sort((a, b) => b.paymentDate.getTime() - a.paymentDate.getTime())
       : [];
 
-    const activeLoans = mappedLoans.filter(l => l.status === "active" || l.status === "extended");
+    // Voided loans were reversed in the books and never really happened — same
+    // "excluded from every aggregate" rule as girvi.ts's GET /stats/summary and
+    // the Financial Summary report. They're still returned in `loans` below
+    // (marked status "voided") so the statement stays a complete record, just
+    // not counted in any of these totals.
+    const realLoans = mappedLoans.filter(l => l.status !== "voided");
+    const activeLoans = realLoans.filter(l => l.status === "active" || l.status === "extended");
     const outstandingPrincipal = activeLoans.reduce((s, l) => s + l.currentPrincipal, 0);
     const outstandingInterest = activeLoans.reduce((s, l) => s + l.outstandingInterest, 0);
-    const totalBorrowedAllTime = mappedLoans.reduce((s, l) => s + l.loanAmount, 0);
-    const totalInterestPaidAllTime = mappedLoans.reduce((s, l) => s + l.totalInterestCollected, 0);
+    const totalBorrowedAllTime = realLoans.reduce((s, l) => s + l.loanAmount, 0);
+    const totalInterestPaidAllTime = realLoans.reduce((s, l) => s + l.totalInterestCollected, 0);
 
     res.json({
       customer: {
@@ -180,7 +201,7 @@ router.get("/:id/statement", async (req, res) => {
         notes: customer.notes,
       },
       summary: {
-        totalLoans: mappedLoans.length,
+        totalLoans: realLoans.length,
         activeLoans: activeLoans.length,
         outstandingPrincipal: Math.round(outstandingPrincipal),
         outstandingInterest: Math.round(outstandingInterest),
@@ -202,6 +223,17 @@ router.delete("/:id", async (req, res) => {
     const userId = req.user!.userId;
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    // A customer with real (non-voided) loan history can't be deleted outright —
+    // their KYC documents and notes are part of that history's audit trail, and
+    // loans keep working off a denormalized name/mobile snapshot either way, so
+    // there'd be no way to look the customer back up once deleted.
+    const realLoans = await db.select({ id: girviLoansTable.id }).from(girviLoansTable)
+      .where(and(eq(girviLoansTable.customerId, id), eq(girviLoansTable.userId, userId), ne(girviLoansTable.status, "voided")));
+    if (realLoans.length > 0) {
+      return res.status(400).json({ error: `This customer has ${realLoans.length} loan record${realLoans.length !== 1 ? "s" : ""} on file and cannot be deleted — required for KYC/audit history.` });
+    }
+
     const result = await db.delete(girviCustomersTable).where(and(eq(girviCustomersTable.id, id), eq(girviCustomersTable.userId, userId))).returning({ id: girviCustomersTable.id });
     if (result.length === 0) return res.status(404).json({ error: "Not found" });
     res.status(204).send();

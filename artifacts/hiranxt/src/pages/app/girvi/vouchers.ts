@@ -23,8 +23,19 @@ export function computeLiveEstValue(
 const fmt = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 
+// Escape user-entered text (customer/item/shop names, notes, addresses, etc.)
+// before it lands in the print window's HTML — otherwise a crafted name/note
+// could inject markup/script into the print popup. Same pattern already used
+// by billing.tsx and inventory.tsx's own print vouchers.
+function esc(s: string | null | undefined): string {
+  if (!s) return "";
+  return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+}
+
 function openWindow(html: string, width = 800, height = 700) {
-  const w = window.open("", "_blank", `width=${width},height=${height}`);
+  // noopener: the injected-script risk above aside, a print popup should never
+  // retain a `window.opener` handle back into the authenticated app tab.
+  const w = window.open("", "_blank", `width=${width},height=${height},noopener`);
   if (w) { w.document.write(html); w.document.close(); }
 }
 
@@ -61,11 +72,11 @@ body{font-family:'Segoe UI',Arial,sans-serif;color:#111;font-size:12px;backgroun
 `;
 
 function shopHeader(settings: GirviSettings | undefined, shopName: string, shopAddress: string, shopMobile: string) {
-  const name = settings?.shopName || shopName;
-  const address = settings?.address || shopAddress;
-  const mobile = settings?.mobile || shopMobile;
-  const licenseLine = settings?.licenseNumber ? ` · License #${settings.licenseNumber}` : "";
-  const gstinLine = settings?.gstin ? ` · GSTIN: ${settings.gstin}` : "";
+  const name = esc(settings?.shopName || shopName);
+  const address = esc(settings?.address || shopAddress);
+  const mobile = esc(settings?.mobile || shopMobile);
+  const licenseLine = settings?.licenseNumber ? ` · License #${esc(settings.licenseNumber)}` : "";
+  const gstinLine = settings?.gstin ? ` · GSTIN: ${esc(settings.gstin)}` : "";
   return `<div class="shop-header">
     <div class="shop-name">${name}</div>
     <div class="shop-sub">${address}${mobile ? ` · ${mobile}` : ""}${licenseLine}${gstinLine}</div>
@@ -96,21 +107,21 @@ ${shopHeader(settings, shopName, shopAddress, shopMobile)}
 <div class="doc-title">${typeLabel[payment.paymentType] ?? "Payment Receipt"}</div>
 <div class="field"><span class="field-label">Receipt #</span><span class="field-value">RCT-${payment.id}</span></div>
 <div class="field"><span class="field-label">Date</span><span class="field-value">${fmtD(payment.paymentDate)}</span></div>
-<div class="field"><span class="field-label">Loan No.</span><span class="field-value">${loan.loanNumber}</span></div>
-<div class="field"><span class="field-label">Customer</span><span class="field-value">${loan.customerName}</span></div>
-<div class="field"><span class="field-label">Mobile</span><span class="field-value">${loan.customerMobile}</span></div>
-${isWaiver ? "" : `<div class="field"><span class="field-label">Mode</span><span class="field-value">${modeLabel[payment.paymentMode] ?? payment.paymentMode}${payment.referenceNumber ? ` (${payment.referenceNumber})` : ""}</span></div>`}
-<div class="field"><span class="field-label">Collateral</span><span class="field-value">${loan.metalType.toUpperCase()} ${loan.purity} · ${loan.grossWeight.toFixed(3)}g</span></div>
+<div class="field"><span class="field-label">Loan No.</span><span class="field-value">${esc(loan.loanNumber)}</span></div>
+<div class="field"><span class="field-label">Customer</span><span class="field-value">${esc(loan.customerName)}</span></div>
+<div class="field"><span class="field-label">Mobile</span><span class="field-value">${esc(loan.customerMobile)}</span></div>
+${isWaiver ? "" : `<div class="field"><span class="field-label">Mode</span><span class="field-value">${modeLabel[payment.paymentMode] ?? esc(payment.paymentMode)}${payment.referenceNumber ? ` (${esc(payment.referenceNumber)})` : ""}</span></div>`}
+<div class="field"><span class="field-label">Collateral</span><span class="field-value">${loan.metalType.toUpperCase()} ${esc(loan.purity)} · ${loan.grossWeight.toFixed(3)}g</span></div>
 <div class="amount-box">
   <div class="amount-label">${typeLabel[payment.paymentType] ?? "Amount Received"}</div>
   <div class="amount-value">${fmt(payment.amount)}</div>
 </div>
 <div class="field"><span class="field-label">Principal (Remaining)</span><span class="field-value">${fmt(loan.currentPrincipal)}</span></div>
 <div class="field"><span class="field-label">Total Collected So Far</span><span class="field-value">${fmt(loan.totalInterestCollected)}</span></div>
-${payment.notes ? `<div style="margin-top:8px;padding:6px;background:#f8f9fa;border-radius:4px;font-size:11px;color:#555">Note: ${payment.notes}</div>` : ""}
+${payment.notes ? `<div style="margin-top:8px;padding:6px;background:#f8f9fa;border-radius:4px;font-size:11px;color:#555">Note: ${esc(payment.notes)}</div>` : ""}
 <div class="sig-row">
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Customer Signature</div></div>
-  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised by ${settings?.shopName || shopName}</div></div>
+  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised by ${esc(settings?.shopName || shopName)}</div></div>
 </div>
 <div class="footer">This is a computer-generated receipt. Powered by SwarnDesk Girvi.</div>
 </div></body></html>`;
@@ -124,8 +135,14 @@ export function openGirviVoucher(
   items?: LoanItem[], rates?: Rates, payments?: Payment[], settings?: GirviSettings, branchName?: string,
 ) {
   const periodDays = loan.interestPeriod === "daily" ? 1 : loan.interestPeriod === "weekly" ? 7 : loan.interestPeriod === "yearly" ? 365 : 30;
-  const interest3m = Math.round(loan.loanAmount * (loan.interestRate / 100) * (90 / periodDays));
-  const interest6m = Math.round(loan.loanAmount * (loan.interestRate / 100) * (180 / periodDays));
+  // Projection table rows reflect this loan's ACTUAL due date, not a hardcoded
+  // 1/3/6-month schedule — a 90-day loan and a 365-day loan need different rows,
+  // and the "(Due Date)" row must always correspond to the real due date printed
+  // in the meta row above, not silently say "6 Months" when it isn't.
+  const durationDays = Math.max(1, Math.ceil((new Date(loan.dueDate).getTime() - new Date(loan.startDate).getTime()) / 86400000));
+  const durationLabel = durationDays % 30 === 0 ? `${durationDays / 30} Month${durationDays / 30 !== 1 ? "s" : ""}` : `${durationDays} Day${durationDays !== 1 ? "s" : ""}`;
+  const interestAtDue = Math.round(loan.loanAmount * (loan.interestRate / 100) * (durationDays / periodDays));
+  const interest1m = Math.round(loan.loanAmount * (loan.interestRate / 100) * (30 / periodDays));
   const terms = settings?.termsAndConditions?.split("\n").filter(Boolean) ?? [
     `The pledged ${loan.metalType} ornament(s) will be safely kept by the shop until redemption.`,
     "The customer must present this original voucher at the time of redemption.",
@@ -145,8 +162,8 @@ export function openGirviVoucher(
 ${shopHeader(settings, shopName, shopAddress, shopMobile)}
 <div class="doc-title">Girvi Voucher (Pawn Receipt)</div>
 <div class="meta-row">
-  <div class="meta-item"><div class="meta-label">Loan Number</div><div class="meta-value">${loan.loanNumber}</div></div>
-  ${branchName ? `<div class="meta-item"><div class="meta-label">Branch</div><div class="meta-value">${branchName}</div></div>` : ""}
+  <div class="meta-item"><div class="meta-label">Loan Number</div><div class="meta-value">${esc(loan.loanNumber)}</div></div>
+  ${branchName ? `<div class="meta-item"><div class="meta-label">Branch</div><div class="meta-value">${esc(branchName)}</div></div>` : ""}
   <div class="meta-item"><div class="meta-label">Start Date</div><div class="meta-value">${fmtDate(loan.startDate)}</div></div>
   <div class="meta-item"><div class="meta-label">Due Date</div><div class="meta-value">${fmtDate(loan.dueDate)}</div></div>
   <div class="meta-item"><div class="meta-label">Status</div><div class="meta-value">${loan.status.toUpperCase()}</div></div>
@@ -154,12 +171,12 @@ ${shopHeader(settings, shopName, shopAddress, shopMobile)}
 <div class="grid-2">
   <div class="section">
     <div class="section-title">Customer Details</div>
-    <div class="field"><span class="field-label">Name</span><span class="field-value">${loan.customerName}</span></div>
-    ${loan.fatherName ? `<div class="field"><span class="field-label">Father's Name</span><span class="field-value">${loan.fatherName}</span></div>` : ""}
-    <div class="field"><span class="field-label">Mobile</span><span class="field-value">${loan.customerMobile}</span></div>
-    ${loan.address ? `<div class="field"><span class="field-label">Address</span><span class="field-value" style="white-space:pre-line">${loan.address}</span></div>` : ""}
-    ${loan.kycDocType ? `<div class="field"><span class="field-label">${loan.kycDocType.replace(/_/g, " ").toUpperCase()}</span><span class="field-value">${loan.kycDocNumber ?? "—"}</span></div>` : ""}
-    ${loan.pan ? `<div class="field"><span class="field-label">PAN</span><span class="field-value">${loan.pan}</span></div>` : ""}
+    <div class="field"><span class="field-label">Name</span><span class="field-value">${esc(loan.customerName)}</span></div>
+    ${loan.fatherName ? `<div class="field"><span class="field-label">Father's Name</span><span class="field-value">${esc(loan.fatherName)}</span></div>` : ""}
+    <div class="field"><span class="field-label">Mobile</span><span class="field-value">${esc(loan.customerMobile)}</span></div>
+    ${loan.address ? `<div class="field"><span class="field-label">Address</span><span class="field-value" style="white-space:pre-line">${esc(loan.address)}</span></div>` : ""}
+    ${loan.kycDocType ? `<div class="field"><span class="field-label">${esc(loan.kycDocType.replace(/_/g, " ").toUpperCase())}</span><span class="field-value">${esc(loan.kycDocNumber) || "—"}</span></div>` : ""}
+    ${loan.pan ? `<div class="field"><span class="field-label">PAN</span><span class="field-value">${esc(loan.pan)}</span></div>` : ""}
   </div>
   <div class="section">
     <div class="section-title">Collateral Details</div>
@@ -167,7 +184,7 @@ ${shopHeader(settings, shopName, shopAddress, shopMobile)}
     <div class="field"><span class="field-label">Total Net Wt</span><span class="field-value">${loan.netWeight.toFixed(3)} g</span></div>
     <div class="field"><span class="field-label">Est. Value (at pledge)</span><span class="field-value">${fmt(loan.estimatedValue)}</span></div>
     ${rates ? `<div class="field"><span class="field-label">Live Market Value</span><span class="field-value" style="color:#15803d">${fmt(computeLiveEstValue(loan, items, rates) ?? loan.estimatedValue)}</span></div>` : ""}
-    ${loan.itemDescription ? `<div class="field" style="margin-top:4px"><span class="field-label">Items</span><span class="field-value" style="max-width:65%;text-align:right;word-break:break-word;font-size:11px">${loan.itemDescription}</span></div>` : ""}
+    ${loan.itemDescription ? `<div class="field" style="margin-top:4px"><span class="field-label">Items</span><span class="field-value" style="max-width:65%;text-align:right;word-break:break-word;font-size:11px">${esc(loan.itemDescription)}</span></div>` : ""}
   </div>
 </div>
 ${items && items.length > 0 ? `
@@ -184,9 +201,9 @@ ${items && items.length > 0 ? `
     </tr></thead>
     <tbody>
       ${items.map(it => `<tr style="border-bottom:1px solid #f0f0f0">
-        <td style="padding:4px 6px;font-weight:600">${it.itemType}${it.notes ? ` <span style="font-weight:400;color:#888">(${it.notes})</span>` : ""}</td>
+        <td style="padding:4px 6px;font-weight:600">${esc(it.itemType)}${it.itemCode ? ` <span style="font-weight:400;color:#888">#${esc(it.itemCode)}</span>` : ""}${it.notes ? ` <span style="font-weight:400;color:#888">(${esc(it.notes)})</span>` : ""}</td>
         <td style="padding:4px 6px;text-align:center">${it.quantity}</td>
-        <td style="padding:4px 6px">${it.metalType === "silver" ? "Silver" : "Gold"} ${it.purity}</td>
+        <td style="padding:4px 6px">${it.metalType === "silver" ? "Silver" : "Gold"} ${esc(it.purity)}</td>
         <td style="padding:4px 6px;text-align:right">${it.grossWeight.toFixed(3)} g</td>
         <td style="padding:4px 6px;text-align:right">${it.netWeight.toFixed(3)} g</td>
         <td style="padding:4px 6px;text-align:right">${fmt(it.estimatedValue)}</td>
@@ -199,23 +216,22 @@ ${items && items.length > 0 ? `
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
     <div class="field" style="flex-direction:column;gap:2px"><span class="field-label">Principal Amount</span><span style="font-size:16px;font-weight:800;color:#1a3e6e">${fmt(loan.loanAmount)}</span></div>
     <div class="field" style="flex-direction:column;gap:2px"><span class="field-label">Interest Rate</span><span style="font-weight:700">${loan.interestRate}% per ${loan.interestPeriod}${loan.penaltyRate > 0 ? ` (+${loan.penaltyRate}% penalty if overdue)` : ""}</span></div>
-    <div class="field" style="flex-direction:column;gap:2px"><span class="field-label">Duration</span><span style="font-weight:700">${Math.ceil((new Date(loan.dueDate).getTime() - new Date(loan.startDate).getTime()) / 86400000)} days</span></div>
+    <div class="field" style="flex-direction:column;gap:2px"><span class="field-label">Duration</span><span style="font-weight:700">${durationDays} days</span></div>
   </div>
   ${loan.processingFee > 0 ? `<div class="field" style="margin-top:6px"><span class="field-label">Processing Fee</span><span class="field-value">${fmt(loan.processingFee)}</span></div>` : ""}
 </div>
 <table class="interest-table" style="width:100%;border-collapse:collapse;margin-bottom:12px;font-size:11px">
   <thead><tr><th style="background:#1a3e6e;color:#fff;padding:6px 10px;text-align:left">Period</th><th style="background:#1a3e6e;color:#fff;padding:6px 10px;text-align:left">Interest Accrued</th><th style="background:#1a3e6e;color:#fff;padding:6px 10px;text-align:left">Total Due</th></tr></thead>
   <tbody>
-    <tr><td style="padding:5px 10px;border-bottom:1px solid #e9ecef">1 Month</td><td style="padding:5px 10px;border-bottom:1px solid #e9ecef">${fmt(Math.round(loan.loanAmount * (loan.interestRate / 100) * (30 / periodDays)))}</td><td style="padding:5px 10px;border-bottom:1px solid #e9ecef">${fmt(loan.loanAmount + Math.round(loan.loanAmount * (loan.interestRate / 100) * (30 / periodDays)))}</td></tr>
-    <tr><td style="padding:5px 10px;border-bottom:1px solid #e9ecef">3 Months</td><td style="padding:5px 10px;border-bottom:1px solid #e9ecef">${fmt(interest3m)}</td><td style="padding:5px 10px;border-bottom:1px solid #e9ecef">${fmt(loan.loanAmount + interest3m)}</td></tr>
-    <tr style="font-weight:700;background:#fff3cd"><td style="padding:5px 10px">6 Months (Due Date)</td><td style="padding:5px 10px">${fmt(interest6m)}</td><td style="padding:5px 10px">${fmt(loan.loanAmount + interest6m)}</td></tr>
+    ${durationDays > 31 ? `<tr><td style="padding:5px 10px;border-bottom:1px solid #e9ecef">1 Month</td><td style="padding:5px 10px;border-bottom:1px solid #e9ecef">${fmt(interest1m)}</td><td style="padding:5px 10px;border-bottom:1px solid #e9ecef">${fmt(loan.loanAmount + interest1m)}</td></tr>` : ""}
+    <tr style="font-weight:700;background:#fff3cd"><td style="padding:5px 10px">${durationLabel} (Due Date)</td><td style="padding:5px 10px">${fmt(interestAtDue)}</td><td style="padding:5px 10px">${fmt(loan.loanAmount + interestAtDue)}</td></tr>
   </tbody>
 </table>
 <div class="terms">
   <div class="section-title">Terms &amp; Conditions</div>
-  <ol>${terms.map(t => `<li>${t}</li>`).join("")}</ol>
+  <ol>${terms.map(t => `<li>${esc(t)}</li>`).join("")}</ol>
 </div>
-${loan.notes ? `<div style="font-size:11px;color:#666;margin-bottom:12px;padding:8px;background:#f8f9fa;border-radius:4px;border-left:3px solid #1a3e6e">Notes: ${loan.notes}</div>` : ""}
+${loan.notes ? `<div style="font-size:11px;color:#666;margin-bottom:12px;padding:8px;background:#f8f9fa;border-radius:4px;border-left:3px solid #1a3e6e">Notes: ${esc(loan.notes)}</div>` : ""}
 ${payments && payments.length > 0 ? (() => {
     const typeLabel: Record<string, string> = { interest: "Byaj (Interest)", renewal: "Loan Renewal", penalty: "Penalty", principal: "Principal Repayment", waiver: "Interest Waived" };
     const totalCollected = payments.filter(p => p.paymentType !== "waiver").reduce((s, p) => s + p.amount, 0);
@@ -225,10 +241,10 @@ ${payments && payments.length > 0 ? (() => {
       const isWaiver = p.paymentType === "waiver";
       return `<tr style="border-bottom:1px solid #f0f0f0">
         <td style="padding:5px 8px">${fmtDate(p.paymentDate)}</td>
-        <td style="padding:5px 8px">${typeLabel[p.paymentType] ?? p.paymentType}</td>
+        <td style="padding:5px 8px">${typeLabel[p.paymentType] ?? esc(p.paymentType)}</td>
         <td style="padding:5px 8px;text-align:right;color:${isWaiver ? "#2563eb" : "#15803d"};font-weight:600">${fmt(p.amount)}</td>
         <td style="padding:5px 8px;text-align:right">${fmt(running)}</td>
-        <td style="padding:5px 8px;color:#666;font-style:italic;font-size:10px">${p.notes ?? ""}</td>
+        <td style="padding:5px 8px;color:#666;font-style:italic;font-size:10px">${esc(p.notes)}</td>
       </tr>`;
     });
     return `<div class="section" style="margin-bottom:12px">
@@ -252,8 +268,8 @@ ${payments && payments.length > 0 ? (() => {
 </div>`;
   })() : ""}
 <div class="sig-row">
-  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Customer Signature</div><div style="font-size:10px;color:#999;margin-top:2px">${loan.customerName}</div></div>
-  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised Signatory</div><div style="font-size:10px;color:#999;margin-top:2px">${settings?.shopName || shopName}</div></div>
+  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Customer Signature</div><div style="font-size:10px;color:#999;margin-top:2px">${esc(loan.customerName)}</div></div>
+  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised Signatory</div><div style="font-size:10px;color:#999;margin-top:2px">${esc(settings?.shopName || shopName)}</div></div>
 </div>
 <div class="footer">This is a computer-generated Girvi voucher. Powered by SwarnDesk Girvi.</div>
 </div></body></html>`;
@@ -281,16 +297,16 @@ export function openReturnVoucher(
 ${shopHeader(settings, shopName, shopAddress, shopMobile)}
 <div class="doc-title">${isForfeit ? "Forfeiture Voucher" : "Girvi Return Voucher"}</div>
 <div class="meta-row">
-  <div class="meta-item"><div class="meta-label">Return Voucher #</div><div class="meta-value">${loan.returnVoucherNumber ?? "—"}</div></div>
-  <div class="meta-item"><div class="meta-label">Original Loan #</div><div class="meta-value">${loan.loanNumber}</div></div>
+  <div class="meta-item"><div class="meta-label">Return Voucher #</div><div class="meta-value">${esc(loan.returnVoucherNumber) || "—"}</div></div>
+  <div class="meta-item"><div class="meta-label">Original Loan #</div><div class="meta-value">${esc(loan.loanNumber)}</div></div>
   <div class="meta-item"><div class="meta-label">${isForfeit ? "Forfeited On" : "Redeemed On"}</div><div class="meta-value">${loan.redeemedDate ? fmtDate(loan.redeemedDate) : "—"}</div></div>
 </div>
 <div class="section" style="margin-bottom:12px">
   <div class="section-title">Customer</div>
-  <div class="field"><span class="field-label">Name</span><span class="field-value">${loan.customerName}</span></div>
-  <div class="field"><span class="field-label">Mobile</span><span class="field-value">${loan.customerMobile}</span></div>
-  <div class="field"><span class="field-label">Collateral</span><span class="field-value">${loan.metalType.toUpperCase()} ${loan.purity} · ${loan.grossWeight.toFixed(3)}g</span></div>
-  ${loan.itemDescription ? `<div class="field"><span class="field-label">Items</span><span class="field-value" style="max-width:60%">${loan.itemDescription}</span></div>` : ""}
+  <div class="field"><span class="field-label">Name</span><span class="field-value">${esc(loan.customerName)}</span></div>
+  <div class="field"><span class="field-label">Mobile</span><span class="field-value">${esc(loan.customerMobile)}</span></div>
+  <div class="field"><span class="field-label">Collateral</span><span class="field-value">${loan.metalType.toUpperCase()} ${esc(loan.purity)} · ${loan.grossWeight.toFixed(3)}g</span></div>
+  ${loan.itemDescription ? `<div class="field"><span class="field-label">Items</span><span class="field-value" style="max-width:60%">${esc(loan.itemDescription)}</span></div>` : ""}
 </div>
 <div class="section" style="margin-bottom:12px">
   <div class="section-title">Settlement Breakdown</div>
@@ -314,7 +330,7 @@ ${!isForfeit ? `<div class="terms"><div class="section-title">Confirmation</div>
 </div>`}
 <div class="sig-row">
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Customer Signature</div></div>
-  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised by ${settings?.shopName || shopName}</div></div>
+  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised by ${esc(settings?.shopName || shopName)}</div></div>
 </div>
 <div class="footer">This is a computer-generated return voucher. Powered by SwarnDesk Girvi.</div>
 </div></body></html>`;
@@ -338,14 +354,14 @@ export function openPartialReleaseVoucher(
 ${shopHeader(settings, shopName, shopAddress, shopMobile)}
 <div class="doc-title">Girvi Partial Release Voucher</div>
 <div class="meta-row">
-  <div class="meta-item"><div class="meta-label">Release Voucher #</div><div class="meta-value">${release.releaseNumber}</div></div>
-  <div class="meta-item"><div class="meta-label">Original Loan #</div><div class="meta-value">${loan.loanNumber}</div></div>
+  <div class="meta-item"><div class="meta-label">Release Voucher #</div><div class="meta-value">${esc(release.releaseNumber)}</div></div>
+  <div class="meta-item"><div class="meta-label">Original Loan #</div><div class="meta-value">${esc(loan.loanNumber)}</div></div>
   <div class="meta-item"><div class="meta-label">Released On</div><div class="meta-value">${fmtDate(release.releaseDate)}</div></div>
 </div>
 <div class="section" style="margin-bottom:12px">
   <div class="section-title">Customer</div>
-  <div class="field"><span class="field-label">Name</span><span class="field-value">${loan.customerName}</span></div>
-  <div class="field"><span class="field-label">Mobile</span><span class="field-value">${loan.customerMobile}</span></div>
+  <div class="field"><span class="field-label">Name</span><span class="field-value">${esc(loan.customerName)}</span></div>
+  <div class="field"><span class="field-label">Mobile</span><span class="field-value">${esc(loan.customerMobile)}</span></div>
 </div>
 <div class="section" style="margin-bottom:12px">
   <div class="section-title">Items Released Today</div>
@@ -359,9 +375,9 @@ ${shopHeader(settings, shopName, shopAddress, shopMobile)}
     </tr></thead>
     <tbody>
       ${releasedItems.map(it => `<tr style="border-bottom:1px solid #f0f0f0">
-        <td style="padding:4px 6px;font-weight:600">${it.itemType}</td>
+        <td style="padding:4px 6px;font-weight:600">${esc(it.itemType)}</td>
         <td style="padding:4px 6px;text-align:center">${it.quantity}</td>
-        <td style="padding:4px 6px">${it.metalType === "silver" ? "Silver" : "Gold"} ${it.purity}</td>
+        <td style="padding:4px 6px">${it.metalType === "silver" ? "Silver" : "Gold"} ${esc(it.purity)}</td>
         <td style="padding:4px 6px;text-align:right">${it.grossWeight.toFixed(3)} g</td>
         <td style="padding:4px 6px;text-align:right">${fmt(it.estimatedValue)}</td>
       </tr>`).join("")}
@@ -372,7 +388,7 @@ ${shopHeader(settings, shopName, shopAddress, shopMobile)}
   <div class="section-title">Settlement Collected Today</div>
   <div class="field"><span class="field-label">Principal Settled</span><span class="field-value">${fmt(release.principalSettled)}</span></div>
   <div class="field"><span class="field-label">Interest Settled</span><span class="field-value">${fmt(release.interestSettled)}</span></div>
-  ${release.notes ? `<div class="field"><span class="field-label">Notes</span><span class="field-value" style="max-width:60%">${release.notes}</span></div>` : ""}
+  ${release.notes ? `<div class="field"><span class="field-label">Notes</span><span class="field-value" style="max-width:60%">${esc(release.notes)}</span></div>` : ""}
 </div>
 <div class="amount-box">
   <div class="amount-label">Total Settled Today</div>
@@ -380,7 +396,7 @@ ${shopHeader(settings, shopName, shopAddress, shopMobile)}
 </div>
 <div class="section" style="margin-bottom:12px">
   <div class="section-title">Remaining Pledge (Still Held By Us)</div>
-  <div class="field"><span class="field-label">Items Still Pledged</span><span class="field-value" style="max-width:60%">${loan.itemDescription ?? "—"}</span></div>
+  <div class="field"><span class="field-label">Items Still Pledged</span><span class="field-value" style="max-width:60%">${esc(loan.itemDescription) || "—"}</span></div>
   <div class="field"><span class="field-label">Est. Value of Remaining Items</span><span class="field-value">${fmt(remainingValue)}</span></div>
   <div class="field"><span class="field-label">Current Principal</span><span class="field-value">${fmt(loan.currentPrincipal)}</span></div>
   <div class="field"><span class="field-label">Outstanding Interest</span><span class="field-value">${fmt(loan.outstandingInterest)}</span></div>
@@ -391,7 +407,7 @@ ${shopHeader(settings, shopName, shopAddress, shopMobile)}
 </div>
 <div class="sig-row">
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Customer Signature</div></div>
-  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised by ${settings?.shopName || shopName}</div></div>
+  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised by ${esc(settings?.shopName || shopName)}</div></div>
 </div>
 <div class="footer">This is a computer-generated partial release voucher. Powered by SwarnDesk Girvi.</div>
 </div></body></html>`;
@@ -414,18 +430,18 @@ export function openTransferVoucher(
 ${shopHeader(settings, shopName, shopAddress, shopMobile)}
 <div class="doc-title">Girvi Transfer Voucher</div>
 <div class="meta-row">
-  <div class="meta-item"><div class="meta-label">Transfer #</div><div class="meta-value">${transfer.transferNumber}</div></div>
-  <div class="meta-item"><div class="meta-label">Loan #</div><div class="meta-value">${loan.loanNumber}</div></div>
+  <div class="meta-item"><div class="meta-label">Transfer #</div><div class="meta-value">${esc(transfer.transferNumber)}</div></div>
+  <div class="meta-item"><div class="meta-label">Loan #</div><div class="meta-value">${esc(loan.loanNumber)}</div></div>
   <div class="meta-item"><div class="meta-label">Date</div><div class="meta-value">${fmtDate(transfer.transferDate)}</div></div>
 </div>
 <div class="grid-2">
-  <div class="section"><div class="section-title">From</div><div class="field"><span class="field-label">Branch</span><span class="field-value">${branchName(transfer.fromBranchId)}</span></div></div>
-  <div class="section"><div class="section-title">To</div><div class="field"><span class="field-label">Branch</span><span class="field-value">${transfer.toBranchId ? branchName(transfer.toBranchId) : "—"}</span></div></div>
+  <div class="section"><div class="section-title">From</div><div class="field"><span class="field-label">Branch</span><span class="field-value">${esc(branchName(transfer.fromBranchId))}</span></div></div>
+  <div class="section"><div class="section-title">To</div><div class="field"><span class="field-label">Branch</span><span class="field-value">${transfer.toBranchId ? esc(branchName(transfer.toBranchId)) : "—"}</span></div></div>
 </div>
 <div class="section" style="margin-bottom:12px">
   <div class="section-title">Customer</div>
-  <div class="field"><span class="field-label">Name</span><span class="field-value">${loan.customerName}</span></div>
-  <div class="field"><span class="field-label">Mobile</span><span class="field-value">${loan.customerMobile}</span></div>
+  <div class="field"><span class="field-label">Name</span><span class="field-value">${esc(loan.customerName)}</span></div>
+  <div class="field"><span class="field-label">Mobile</span><span class="field-value">${esc(loan.customerMobile)}</span></div>
 </div>
 <div class="section" style="margin-bottom:12px">
   <div class="section-title">Items Transferred</div>
@@ -437,17 +453,17 @@ ${shopHeader(settings, shopName, shopAddress, shopMobile)}
       <th style="text-align:right;padding:4px 6px;border-bottom:1px solid #dee2e6">Gross Wt</th>
     </tr></thead>
     <tbody>${items.map(it => `<tr style="border-bottom:1px solid #f0f0f0">
-      <td style="padding:4px 6px;font-weight:600">${it.itemType}</td>
+      <td style="padding:4px 6px;font-weight:600">${esc(it.itemType)}${it.itemCode ? ` <span style="font-weight:400;color:#888">#${esc(it.itemCode)}</span>` : ""}</td>
       <td style="padding:4px 6px;text-align:center">${it.quantity}</td>
-      <td style="padding:4px 6px">${it.metalType === "silver" ? "Silver" : "Gold"} ${it.purity}</td>
+      <td style="padding:4px 6px">${it.metalType === "silver" ? "Silver" : "Gold"} ${esc(it.purity)}</td>
       <td style="padding:4px 6px;text-align:right">${it.grossWeight.toFixed(3)} g</td>
     </tr>`).join("")}</tbody>
   </table>
 </div>
-${transfer.reason ? `<div style="font-size:11px;color:#666;margin-bottom:12px;padding:8px;background:#f8f9fa;border-radius:4px;border-left:3px solid #1a3e6e">Reason: ${transfer.reason}</div>` : ""}
+${transfer.reason ? `<div style="font-size:11px;color:#666;margin-bottom:12px;padding:8px;background:#f8f9fa;border-radius:4px;border-left:3px solid #1a3e6e">Reason: ${esc(transfer.reason)}</div>` : ""}
 <div class="sig-row">
-  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Dispatched By (${branchName(transfer.fromBranchId)})</div></div>
-  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Received By (${transfer.toBranchId ? branchName(transfer.toBranchId) : "—"})</div></div>
+  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Dispatched By (${esc(branchName(transfer.fromBranchId))})</div></div>
+  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Received By (${transfer.toBranchId ? esc(branchName(transfer.toBranchId)) : "—"})</div></div>
 </div>
 <div class="footer">This is a computer-generated transfer voucher. Powered by SwarnDesk Girvi.</div>
 </div></body></html>`;

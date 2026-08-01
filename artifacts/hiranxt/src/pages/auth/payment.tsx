@@ -1,15 +1,22 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, MessageCircle } from "lucide-react";
+import { LogOut, MessageCircle, XCircle, Clock } from "lucide-react";
 
 const UPI_VPA = "akshatnahata05@ibl";
 const AMOUNT = 2999;
 const WHATSAPP_SUPPORT_URL = "https://wa.me/919424575918?text=Hello+SwarnDesk+Support";
+
+interface MyPaymentRequest {
+  id: number;
+  status: string;
+  notes: string | null;
+  createdAt: string;
+}
 
 export default function PaymentPage() {
   const { user, logout } = useAuth();
@@ -18,6 +25,16 @@ export default function PaymentPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
+  const [latestRequest, setLatestRequest] = useState<MyPaymentRequest | null>(null);
+
+  useEffect(() => {
+    const token = localStorage.getItem("swarndesk_token");
+    if (!token) return;
+    fetch("/api/auth/payment-requests/mine", { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => (res.ok ? res.json() : []))
+      .then((rows: MyPaymentRequest[]) => { if (Array.isArray(rows) && rows.length > 0) setLatestRequest(rows[0]); })
+      .catch(() => {});
+  }, []);
 
   const handleBack = () => {
     logout();
@@ -37,10 +54,11 @@ export default function PaymentPage() {
     setError("");
     setSubmitting(true);
     try {
+      const token = localStorage.getItem("swarndesk_token");
       const res = await fetch("/api/auth/payment-request", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: user.id, utrNumber: utrNumber.trim() }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ utrNumber: utrNumber.trim() }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to submit");
@@ -106,6 +124,25 @@ export default function PaymentPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
+            {/* Latest payment request status */}
+            {latestRequest?.status === "rejected" && (
+              <div className="rounded-lg bg-destructive/10 border border-destructive/30 px-3 py-2.5 space-y-1">
+                <div className="flex items-center gap-1.5 text-sm font-medium text-destructive">
+                  <XCircle className="w-4 h-4" />
+                  Your last payment request was rejected
+                </div>
+                <p className="text-xs text-destructive/90">
+                  {latestRequest.notes || "No reason was provided."} Please double-check your UTR number and submit again, or contact support below.
+                </p>
+              </div>
+            )}
+            {latestRequest?.status === "pending" && (
+              <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 flex items-center gap-1.5 text-sm text-amber-800">
+                <Clock className="w-4 h-4" />
+                You already have a payment reference under review — verification usually completes within 24 hours.
+              </div>
+            )}
+
             {/* Price options */}
             <div className="space-y-2">
               {[

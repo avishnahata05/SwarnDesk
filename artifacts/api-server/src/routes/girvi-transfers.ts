@@ -91,6 +91,14 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: "Provide a destination branch and/or destination customer" });
     }
 
+    // All selected items must currently sit at the same branch — a loan whose
+    // items were split across branches by an earlier partial transfer could
+    // otherwise have a transfer recorded (and its voucher/register printed)
+    // under the wrong origin branch for every item but the first selected.
+    const distinctBranches = new Set(items.map(it => it.currentBranchId ?? loan.branchId));
+    if (distinctBranches.size > 1) {
+      return res.status(400).json({ error: "Selected items are currently at different branches — transfer them separately, one branch at a time" });
+    }
     const fromBranchId = items[0]?.currentBranchId ?? loan.branchId;
     const fromCustomerId = loan.customerId;
     const reason = data.reason ? String(data.reason).trim() || null : null;
@@ -175,8 +183,10 @@ router.get("/:id/items", async (req, res) => {
       netWeight: safeFloat(it.netWeight),
       estimatedValue: safeFloat(it.estimatedValue),
       notes: it.notes,
+      itemCode: it.itemCode,
       status: it.status,
       currentBranchId: it.currentBranchId,
+      returnedAt: it.returnedAt?.toISOString() ?? null,
     })));
   } catch (err) {
     req.log.error({ err }, "Failed to get transfer items");

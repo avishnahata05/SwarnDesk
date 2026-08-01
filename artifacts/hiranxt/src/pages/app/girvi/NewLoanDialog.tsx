@@ -13,6 +13,7 @@ import DueDatePresets from "./DueDatePresets";
 type ItemRow = {
   key: string;
   itemType: string;
+  customItemType: string;
   quantity: number;
   metalType: string;
   purity: string;
@@ -20,6 +21,7 @@ type ItemRow = {
   netWeight: string;
   estimatedValue: string;
   notes: string;
+  itemCode: string;
 };
 
 const ITEM_TYPES = ["Necklace", "Bangle", "Ring", "Chain", "Earring", "Pendant", "Bracelet", "Mangalsutra", "Payal", "Tikka", "Nose Ring", "Other"];
@@ -27,7 +29,7 @@ const GOLD_PURITIES = ["24K", "22K", "18K", "14K"];
 const SILVER_PURITIES = ["925"];
 
 function makeItem(): ItemRow {
-  return { key: Math.random().toString(36).slice(2), itemType: "Necklace", quantity: 1, metalType: "gold", purity: "22K", grossWeight: "", netWeight: "", estimatedValue: "", notes: "" };
+  return { key: Math.random().toString(36).slice(2), itemType: "Necklace", customItemType: "", quantity: 1, metalType: "gold", purity: "22K", grossWeight: "", netWeight: "", estimatedValue: "", notes: "", itemCode: "" };
 }
 
 function getItemRate(metalType: string, purity: string, rates?: Rates) {
@@ -65,6 +67,7 @@ export default function NewLoanDialog({ open, onClose, onCreated, rates, branche
   const [branchId, setBranchId] = useState("");
   const [form, setForm] = useState({
     loanAmount: "", interestRate: "2", penaltyRate: "1", interestPeriod: "monthly", processingFee: "0",
+    startDate: new Date().toISOString().split("T")[0],
     dueDate: new Date(Date.now() + 90 * 86400000).toISOString().split("T")[0],
     notes: "",
   });
@@ -160,7 +163,12 @@ export default function NewLoanDialog({ open, onClose, onCreated, rates, branche
 
   const resetAll = () => {
     resetCustomerStep();
-    setForm({ loanAmount: "", interestRate: "2", penaltyRate: "1", interestPeriod: "monthly", processingFee: "0", dueDate: new Date(Date.now() + 90 * 86400000).toISOString().split("T")[0], notes: "" });
+    setForm({
+      loanAmount: "", interestRate: "2", penaltyRate: "1", interestPeriod: "monthly", processingFee: "0",
+      startDate: new Date().toISOString().split("T")[0],
+      dueDate: new Date(Date.now() + 90 * 86400000).toISOString().split("T")[0],
+      notes: "",
+    });
     setItems([makeItem()]);
   };
 
@@ -171,16 +179,22 @@ export default function NewLoanDialog({ open, onClose, onCreated, rates, branche
       if (!newCustomer.mobile.trim()) { toast({ title: "Customer mobile is required", variant: "destructive" }); return; }
     }
     for (const it of items) {
+      if (it.itemType === "Other" && !it.customItemType.trim()) { toast({ title: "Enter a name for the custom item type", variant: "destructive" }); return; }
       const gw = parseFloat(it.grossWeight);
-      if (!isFinite(gw) || gw <= 0) { toast({ title: `Enter gross weight for ${it.itemType}`, variant: "destructive" }); return; }
+      if (!isFinite(gw) || gw <= 0) { toast({ title: `Enter gross weight for ${it.itemType === "Other" ? it.customItemType.trim() : it.itemType}`, variant: "destructive" }); return; }
     }
     const la = parseFloat(form.loanAmount);
     if (!isFinite(la) || la <= 0) { toast({ title: "Loan amount must be a positive number", variant: "destructive" }); return; }
     const ir = parseFloat(form.interestRate);
     if (!isFinite(ir) || ir < 0 || ir > 100) { toast({ title: "Interest rate must be between 0 and 100", variant: "destructive" }); return; }
+    if (!form.startDate) { toast({ title: "Loan date is required", variant: "destructive" }); return; }
+    const startD = new Date(form.startDate);
+    if (isNaN(startD.getTime())) { toast({ title: "Invalid loan date", variant: "destructive" }); return; }
+    if (startD.getTime() > Date.now() + 86400000) { toast({ title: "Loan date cannot be in the future", variant: "destructive" }); return; }
     if (!form.dueDate) { toast({ title: "Due date is required", variant: "destructive" }); return; }
     const dueD = new Date(form.dueDate);
     if (isNaN(dueD.getTime())) { toast({ title: "Invalid due date", variant: "destructive" }); return; }
+    if (dueD <= startD) { toast({ title: "Due date must be after the loan date", variant: "destructive" }); return; }
 
     setSubmitting(true);
     try {
@@ -201,10 +215,11 @@ export default function NewLoanDialog({ open, onClose, onCreated, rates, branche
           penaltyRate: parseFloat(form.penaltyRate) || 0,
           processingFee: parseFloat(form.processingFee) || 0,
           interestPeriod: form.interestPeriod,
+          startDate: startD.toISOString(),
           dueDate: dueD.toISOString(),
           notes: form.notes.trim() || null,
           items: items.map(it => ({
-            itemType: it.itemType,
+            itemType: it.itemType === "Other" ? it.customItemType.trim() : it.itemType,
             quantity: it.quantity,
             metalType: it.metalType,
             purity: it.purity,
@@ -212,6 +227,7 @@ export default function NewLoanDialog({ open, onClose, onCreated, rates, branche
             netWeight: parseFloat(it.netWeight || it.grossWeight) || parseFloat(it.grossWeight),
             estimatedValue: parseFloat(it.estimatedValue) || 0,
             notes: it.notes.trim() || null,
+            itemCode: it.itemCode.trim() || null,
           })),
         }),
       });
@@ -359,6 +375,15 @@ export default function NewLoanDialog({ open, onClose, onCreated, rates, branche
                       <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                       <SelectContent>{ITEM_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
                     </Select>
+                    {it.itemType === "Other" && (
+                      <input
+                        className={`${inp} mt-1`}
+                        value={it.customItemType}
+                        onChange={e => updateItem(it.key, "customItemType", e.target.value)}
+                        placeholder="Enter item name"
+                        autoFocus
+                      />
+                    )}
                   </div>
                   <div>
                     <label className={lbl}>Qty</label>
@@ -405,7 +430,11 @@ export default function NewLoanDialog({ open, onClose, onCreated, rates, branche
                     <input className={inp} type="number" value={it.estimatedValue}
                       onChange={e => updateItem(it.key, "estimatedValue", e.target.value)} placeholder="0" />
                   </div>
-                  <div className="sm:col-span-4">
+                  <div className="sm:col-span-2">
+                    <label className={lbl}>Serial / Tag No. <span className="text-muted-foreground/60">written on the item's tag</span></label>
+                    <input className={inp} value={it.itemCode} onChange={e => updateItem(it.key, "itemCode", e.target.value)} placeholder="Optional — e.g. shop tag number" />
+                  </div>
+                  <div className="sm:col-span-2">
                     <label className={lbl}>Item Notes <span className="text-muted-foreground/60">e.g. identifying marks, scratches</span></label>
                     <input className={inp} value={it.notes} onChange={e => updateItem(it.key, "notes", e.target.value)} placeholder="Optional" />
                   </div>
@@ -453,9 +482,13 @@ export default function NewLoanDialog({ open, onClose, onCreated, rates, branche
               </div>
               <div><label className={lbl}>Processing Fee (₹) <span className="text-muted-foreground/60">one-time, taxable</span></label><input className={inp} type="number" value={form.processingFee} onChange={e => set("processingFee", e.target.value)} /></div>
               <div>
+                <label className={lbl}>Loan Date * <span className="text-muted-foreground/60">defaults to today — back-date for entries done later</span></label>
+                <input className={inp} type="date" value={form.startDate} max={new Date().toISOString().split("T")[0]} onChange={e => set("startDate", e.target.value)} />
+              </div>
+              <div>
                 <label className={lbl}>Due Date *</label>
-                <input className={inp} type="date" value={form.dueDate} min={new Date().toISOString().split("T")[0]} onChange={e => set("dueDate", e.target.value)} />
-                <DueDatePresets from={new Date()} onPick={v => set("dueDate", v)} />
+                <input className={inp} type="date" value={form.dueDate} min={form.startDate || new Date().toISOString().split("T")[0]} onChange={e => set("dueDate", e.target.value)} />
+                <DueDatePresets from={form.startDate ? new Date(form.startDate) : new Date()} onPick={v => set("dueDate", v)} />
               </div>
               <div className="sm:col-span-2">
                 <label className={lbl}>Notes</label>
