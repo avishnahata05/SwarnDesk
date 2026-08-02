@@ -36,7 +36,19 @@ function openWindow(html: string, width = 800, height = 700) {
   // noopener: the injected-script risk above aside, a print popup should never
   // retain a `window.opener` handle back into the authenticated app tab.
   const w = window.open("", "_blank", `width=${width},height=${height},noopener`);
-  if (w) { w.document.write(html); w.document.close(); }
+  // window.open silently returns null when the browser's popup blocker kicks in —
+  // every voucher/receipt/notice in this module funnels through here, and without
+  // this check "Print Voucher" just does nothing with zero feedback, which reads
+  // as the feature being broken rather than a blocked popup the user can allow.
+  if (!w) {
+    alert("Your browser blocked the print window. Please allow pop-ups for this site, then try printing again.");
+    return;
+  }
+  // Some browsers only reliably apply document.write() after an explicit open() —
+  // opening a window with an empty URL doesn't always leave the document ready.
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
 }
 
 const printCss = `
