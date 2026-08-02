@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Search, ChevronDown, ChevronUp, CheckCircle2, Clock, IndianRupee, History, Undo2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
 
 function getAuthHeaders(): HeadersInit {
   const token = localStorage.getItem("swarndesk_token");
@@ -108,6 +109,7 @@ export default function PendingPayments() {
   const [payNotes, setPayNotes] = useState("");
   const [returnSale, setReturnSale] = useState<PendingSale | null>(null);
   const [returnNotes, setReturnNotes] = useState("");
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
 
   const { data: pendingSales = [], isLoading: pendingLoading } = usePendingSales(search);
   const { data: allSales = [], isLoading: allLoading } = useAllSales(search, view === "all");
@@ -171,6 +173,7 @@ export default function PendingPayments() {
       <div className="mb-5">
         <h1 className="text-2xl font-bold">Pending Payments</h1>
         <p className="text-muted-foreground text-sm mt-0.5">Track and collect outstanding balances from customers</p>
+        <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
       </div>
 
       {/* Stats */}
@@ -445,6 +448,31 @@ export default function PendingPayments() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Pending Payments"
+        description="Every sale that hasn't been fully paid for — customers who took goods on partial payment or credit. Chase these down here."
+        sections={[
+          {
+            heading: "What you can do here",
+            items: [
+              "Collect Payment — record a payment against a specific bill's remaining balance",
+              "Return — undo a sale entirely: restocks inventory and reverses the accounting, including any payments already collected",
+              "History — see every payment collected against a bill so far",
+              "Pending Only / All Recent Sales — switch between just-unpaid bills and your full recent sales list",
+            ],
+          },
+          {
+            heading: "Terms you'll see",
+            items: [
+              "pending — no payment collected yet",
+              "partial — some but not all of the bill has been paid",
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }

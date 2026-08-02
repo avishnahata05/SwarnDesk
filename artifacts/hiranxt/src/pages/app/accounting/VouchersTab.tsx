@@ -11,6 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ReceiptText, Plus, Zap, Trash2, Undo2 } from "lucide-react";
 import { apiGet, apiSend } from "./api";
 import type { Account, Voucher } from "./types";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
+import { InfoTooltip } from "@/components/InfoTooltip";
 
 const QUICK_EXPENSE_CODES = ["5101", "5102", "5103", "5199"];
 
@@ -34,6 +36,7 @@ export default function VouchersTab() {
   const [quickAmount, setQuickAmount] = useState("");
   const [quickMode, setQuickMode] = useState<"CASH" | "BANK">("CASH");
   const [quickNarration, setQuickNarration] = useState("");
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -138,6 +141,7 @@ export default function VouchersTab() {
             Journal Vouchers
           </h1>
           <p className="text-muted-foreground text-sm mt-0.5">Auto-posted from sales, purchases, girvi, repairs, custom orders, and karigar payments — plus manual entries below</p>
+          <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
         </div>
         <div className="flex gap-2">
           <Dialog open={quickOpen} onOpenChange={setQuickOpen}>
@@ -206,10 +210,13 @@ export default function VouchersTab() {
                   ))}
                   <Button size="sm" variant="outline" onClick={addLine} className="gap-1.5"><Plus className="w-3.5 h-3.5" />Add Line</Button>
                 </div>
-                <div className={`text-xs flex justify-between px-1 ${balanced ? "text-emerald-600" : "text-red-600"}`}>
+                <div className={`text-xs flex justify-between items-center px-1 ${balanced ? "text-emerald-600" : "text-red-600"}`}>
                   <span>Debit: {formatCurrency(totalDebit)}</span>
                   <span>Credit: {formatCurrency(totalCredit)}</span>
-                  <span>{balanced ? "Balanced" : "Not balanced"}</span>
+                  <span className="flex items-center gap-1">
+                    {balanced ? "Balanced" : "Not balanced"}
+                    <InfoTooltip text="Every voucher's debit lines must add up to exactly the same total as its credit lines — that's what keeps the books consistent. You can't post until they match." />
+                  </span>
                 </div>
               </div>
               <DialogFooter>
@@ -275,6 +282,32 @@ export default function VouchersTab() {
           )}
         </CardContent>
       </Card>
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Journal Vouchers"
+        description="Every accounting entry your shop makes, in one place. Most of these post themselves automatically from sales, purchases, girvi loans, repairs, and karigar payments — you only need to add one manually for things like rent or salary."
+        sections={[
+          {
+            heading: "What you can do here",
+            items: [
+              "Quick Expense — the fastest way to record a simple cash/bank expense (rent, salary, electricity, etc.)",
+              "New Journal Voucher — a full manual entry with any number of debit/credit lines, for anything Quick Expense doesn't cover",
+              "Click a voucher — expand it to see its individual debit/credit lines",
+              "Void — reverses a voucher with a mirror-image entry; nothing is ever deleted, so the audit trail stays intact",
+            ],
+          },
+          {
+            heading: "Terms you'll see",
+            items: [
+              "Debit / Credit — the two sides of every entry; they must always add up to the same total",
+              "Narration — a free-text note describing what the entry was for",
+              "Reversal — an automatically-generated voucher that undoes an earlier one when it's voided",
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }

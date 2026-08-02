@@ -14,6 +14,8 @@ import {
 } from "recharts";
 import { TrendingUp, Package, ShoppingCart, DollarSign, Download, FileSpreadsheet } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
+import { InfoTooltip } from "@/components/InfoTooltip";
 
 const COLORS = ["#16a34a", "#d97706", "#2563eb", "#7c3aed", "#dc2626"];
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -139,6 +141,7 @@ export default function Reports() {
   const [gstrMonth, setGstrMonth] = useState(String(now.getMonth() + 1));
   const [gstrYear, setGstrYear] = useState(String(now.getFullYear()));
   const [exporting, setExporting] = useState(false);
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
 
   // Fall back to the standard 3% jewellery GST rate only until settings have loaded
   const gstRatePct = settings?.gstRate ?? 3;
@@ -161,6 +164,7 @@ export default function Reports() {
       <div>
         <h1 className="text-2xl font-bold">Reports & Analytics</h1>
         <p className="text-muted-foreground text-sm">Business performance insights</p>
+        <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
       </div>
 
       {/* KPI row */}
@@ -318,6 +322,7 @@ export default function Reports() {
             <FileSpreadsheet className="w-5 h-5 text-primary" />
             GSTR-1 Export
             <span className="text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded-full">CSV Export</span>
+            <InfoTooltip text="GSTR-1 is the monthly GST return listing every sale invoice — this generates a ready-to-file CSV split into B2B (customer has a GSTIN) and B2C sales, for your accountant or the GST portal." />
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -371,6 +376,33 @@ export default function Reports() {
           </div>
         </CardContent>
       </Card>
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Reports & Analytics"
+        description="A visual overview of how the shop is performing — sales trends, category breakdowns, GST estimates — plus a ready-to-file GST export."
+        sections={[
+          {
+            heading: "What's on this page",
+            items: [
+              "Daily Sales — revenue and profit trend over the last 30 days",
+              "Revenue by Category — which product categories are selling",
+              "Inventory Stock Valuation — how much of your stock value sits in each category",
+              "GST Summary — today's estimated taxable value, CGST, and SGST",
+              "GSTR-1 Export — download a CSV of a month's invoices, split B2B/B2C, for GST filing",
+            ],
+          },
+          {
+            heading: "Terms you'll see",
+            items: [
+              "HSN Code — the tax classification code for jewellery (7113), included on every GSTR-1 row",
+              "CGST / SGST / IGST — GST split between center and state (same-state sale) or the interstate tax (different-state sale)",
+              "B2B / B2C — B2B rows are sales to a customer with a GSTIN on file; everything else is B2C",
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }

@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
+import { InfoTooltip } from "@/components/InfoTooltip";
 
 function friendlySendError(message: string): string {
   const lower = message.toLowerCase();
@@ -102,6 +104,7 @@ export default function Marketing() {
   const [shopName, setShopName] = useState("Our Jewellery Store");
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState<SendResult[] | null>(null);
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
 
   // Derive WhatsApp API status from cached settings (null = still loading)
   const waEnabled: boolean | null = settingsData === undefined
@@ -223,6 +226,7 @@ export default function Marketing() {
           <p className="text-muted-foreground text-sm mt-1">
             Send personalised WhatsApp messages to your customers — promotions, festivals, birthday wishes, and more.
           </p>
+          <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
         </div>
         {waEnabled === false && (
           <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
@@ -462,6 +466,30 @@ export default function Marketing() {
           </div>
         </CardContent>
       </Card>
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="WhatsApp Marketing"
+        description="Send bulk or targeted WhatsApp messages to your customers — promotions, festival greetings, birthday/anniversary wishes — using ready-made templates or your own text."
+        sections={[
+          {
+            heading: "What you can do here",
+            items: [
+              "Pick a Template — a starting message for a sale, festival, birthday, new arrival, anniversary, or 're-engage' nudge",
+              "{name} and {shopName} — placeholders in the message text that get swapped for each customer's actual name and your shop name when sent",
+              "Select All / individual checkboxes — choose who receives the message; search narrows the customer list first",
+            ],
+          },
+          {
+            heading: "Terms you'll see",
+            items: [
+              "WhatsApp API Active — messages send automatically in bulk from inside the app",
+              "Not set up — the app opens a WhatsApp chat per customer instead, which you send manually one by one (set up the API in Settings to automate this)",
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }

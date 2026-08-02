@@ -16,6 +16,7 @@ import {
   AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Hammer,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
 
 const STATUSES = ["received", "in_progress", "ready", "delivered"] as const;
 type Status = typeof STATUSES[number];
@@ -177,6 +178,7 @@ export default function Repairs() {
 
   // ── Collapse columns ──
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: getListRepairsQueryKey() });
 
@@ -338,6 +340,7 @@ export default function Repairs() {
         <div>
           <h1 className="text-2xl font-bold">Repairs</h1>
           <p className="text-muted-foreground text-sm">Track repair jobs through the pipeline</p>
+          <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
         </div>
         <Button onClick={() => setAddOpen(true)} className="gap-2">
           <Plus className="w-4 h-4" />Log Repair
@@ -672,6 +675,33 @@ export default function Repairs() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Repairs"
+        description="Track jewellery brought in for repair, from intake through to delivery back to the customer."
+        sections={[
+          {
+            heading: "What you can do here",
+            items: [
+              "Log Repair — record a new repair job with the issue, estimated cost, and promised date",
+              "Move a job forward through its status as work progresses",
+              "Print — generate a job card for the customer/workshop",
+              "Assign a karigar to a job if one of your artisans is doing the work",
+            ],
+          },
+          {
+            heading: "Status stages",
+            items: [
+              "Received — item taken in, work not started",
+              "In Progress — actively being repaired",
+              "Ready — repair complete, waiting for customer pickup",
+              "Delivered — returned to the customer, job closed",
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }

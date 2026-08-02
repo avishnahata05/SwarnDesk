@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { formatCurrency } from "@/lib/utils";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
+import { InfoTooltip } from "@/components/InfoTooltip";
 import {
   useListInventoryItems, useCreateInventoryItem,
   useGetCurrentRates, useGetInventoryStatsByCategory, useGetSettings,
@@ -234,7 +236,10 @@ function ItemFormDialog({
               </Select>
             </div>
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Purity</label>
+              <label className="text-xs text-muted-foreground flex items-center gap-1 mb-1">
+                Purity
+                <InfoTooltip text="The karat for gold (24K = purest/99.9%, 22K = standard jewellery gold/91.6%, 18K and 14K are lower-purity harder alloys) or fineness for silver (925 = sterling/92.5%, 999 = pure silver)." />
+              </label>
               <Select defaultValue={defaultValues.purity ?? "22K"} onValueChange={v => setValue("purity", v)}>
                 <SelectTrigger data-testid={`${testIdPrefix}-purity`}><SelectValue /></SelectTrigger>
                 <SelectContent>{PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
@@ -425,6 +430,7 @@ export default function Inventory() {
   }>(null);
   const [deleteItem, setDeleteItem] = useState<{ id: number; name: string } | null>(null);
   const [deletePending, setDeletePending] = useState(false);
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
   const scanRef = useRef<HTMLInputElement>(null);
 
   const queryClient = useQueryClient();
@@ -571,6 +577,7 @@ export default function Inventory() {
         <div>
           <h1 className="text-2xl font-bold">Inventory</h1>
           <p className="text-muted-foreground text-sm">Manage your jewellery stock</p>
+          <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setGuideOpen(true)}>
@@ -860,6 +867,32 @@ export default function Inventory() {
 
       {/* Hardware guide dialog */}
       <HardwareGuideDialog open={guideOpen} onClose={() => setGuideOpen(false)} />
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Inventory"
+        description="Your jewellery stock list — every piece's weight, purity, making charges, and live value, with barcode labels for physical tagging."
+        sections={[
+          {
+            heading: "What you can do here",
+            items: [
+              "Add Item — enter a new piece of stock with its weight/purity/charges",
+              "Scan Mode — use a barcode scanner to instantly search for an item by its tag",
+              "Label size — choose the printer/label format before printing barcode labels",
+              "Scanner & Printer Setup — hardware setup instructions for barcode scanners/printers",
+            ],
+          },
+          {
+            heading: "Terms you'll see",
+            items: [
+              "HUID — BIS Hallmark Unique ID, required for hallmarked gold sales",
+              "Gross / Net Weight — gross includes stones and other attachments; net is just the metal weight used for valuation",
+              "Making Charges — the labour/craftsmanship fee, usually a % of the metal value",
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }

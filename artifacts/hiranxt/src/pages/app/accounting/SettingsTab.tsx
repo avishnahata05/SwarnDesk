@@ -5,12 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Settings as SettingsIcon } from "lucide-react";
 import { apiGet, apiSend } from "./api";
 import type { AccountingSettings } from "./types";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
 
 export default function SettingsTab() {
   const { toast } = useToast();
   const [settings, setSettings] = useState<AccountingSettings | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -50,6 +52,7 @@ export default function SettingsTab() {
           Accounting Settings
         </h1>
         <p className="text-muted-foreground text-sm mt-0.5">Financial year, voucher numbering, and books lock date</p>
+        <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
       </div>
 
       <Card className="border-border">
@@ -80,6 +83,26 @@ export default function SettingsTab() {
       <div className="flex justify-end">
         <Button onClick={handleSave} disabled={saving}>{saving ? "Saving..." : "Save Settings"}</Button>
       </div>
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Accounting Settings"
+        description="Configuration for the accounting module specifically — separate from your main shop settings."
+        sections={[
+          {
+            heading: "Financial Year",
+            items: [
+              "Financial Year Start Month — which month your accounting year begins (April = 4, the standard Indian FY)",
+              "Books Locked Before — prevents edits to entries dated before this date, once a period is finalized/reconciled",
+            ],
+          },
+          {
+            heading: "Voucher Numbering Prefixes",
+            items: ["Each voucher type gets its own sequential number per financial year, e.g. JV/2026-27/0001 — never reused"],
+          },
+        ]}
+      />
     </div>
   );
 }

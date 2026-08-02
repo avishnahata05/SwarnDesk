@@ -11,6 +11,7 @@ import { ArrowLeftRight, RotateCcw, Search, Printer } from "lucide-react";
 import { API, getAuthHeaders, authHeader } from "./api";
 import type { Transfer, Branch, Loan, LoanItem, GirviSettings } from "./types";
 import { openTransferVoucher } from "./vouchers";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
 
 export default function TransfersTab({ branches }: { branches: Branch[] }) {
   const { toast } = useToast();
@@ -24,6 +25,7 @@ export default function TransfersTab({ branches }: { branches: Branch[] }) {
   const [returnTarget, setReturnTarget] = useState<Transfer | null>(null);
   const [returnNotes, setReturnNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
 
   const shopName = appSettings?.businessName ?? "SwarnDesk Jewellers";
   const shopAddress = appSettings?.address ?? "";
@@ -98,6 +100,7 @@ export default function TransfersTab({ branches }: { branches: Branch[] }) {
           Branch Transfers
         </h1>
         <p className="text-muted-foreground text-sm mt-0.5">Move pledged items between branches or reassign a pledge to another customer, with a full audit trail</p>
+        <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
       </div>
 
       <Card className="border-border">
@@ -177,6 +180,30 @@ export default function TransfersTab({ branches }: { branches: Branch[] }) {
           )}
         </DialogContent>
       </Dialog>
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Branch Transfers"
+        description="A record of every time pledged collateral moved between your branches, or a loan's customer was reassigned. Transfers aren't started here — you kick one off from the Loans tab's 'Transfer Items' action; this page is the register + return workflow."
+        sections={[
+          {
+            heading: "What you can do here",
+            items: [
+              "Search transfers by transfer #, loan #, or customer",
+              "Voucher — reprint the transfer document",
+              "Return Transfer — mark items as physically received back, or undo a customer reassignment",
+            ],
+          },
+          {
+            heading: "Statuses",
+            items: [
+              "IN TRANSIT / ACTIVE — the transfer hasn't been marked returned yet",
+              "RETURNED — items are confirmed back, or a reassignment was reversed",
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }

@@ -9,6 +9,7 @@ import { FileBarChart, Download, RefreshCw } from "lucide-react";
 import { apiGet } from "./api";
 import { exportToCsv } from "@/lib/csv";
 import type { BalanceSheet, Outstanding, ProfitLoss, TrialBalance } from "./types";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
 
 type ReportKey = "trial-balance" | "profit-loss" | "balance-sheet" | "outstanding"
   | "gstr3b" | "hsn-summary" | "purchase-register" | "sales-register" | "cash-compliance";
@@ -44,6 +45,7 @@ export default function ReportsTab() {
   const [asOf, setAsOf] = useState(() => new Date().toISOString().split("T")[0]);
   const [loading, setLoading] = useState(false);
   const [cache, setCache] = useState<Partial<Record<ReportKey, unknown>>>({});
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
   const requestIdRef = useRef(0);
 
   const load = useCallback(async () => {
@@ -89,6 +91,7 @@ export default function ReportsTab() {
           Financial Reports
         </h1>
         <p className="text-muted-foreground text-sm mt-0.5">Trial Balance, Profit &amp; Loss, Balance Sheet, and Outstanding — computed live from the journal</p>
+        <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
       </div>
 
       <div className="flex flex-wrap gap-1.5">
@@ -146,6 +149,35 @@ export default function ReportsTab() {
           )}
         </CardContent>
       </Card>
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Financial Reports"
+        description="The standard set of accounting statements, computed live from your journal vouchers — useful for your own decision-making and for handing to your accountant/CA."
+        sections={[
+          {
+            heading: "The reports",
+            items: [
+              "Trial Balance — every account's debit/credit balance as of a date, confirming the books balance",
+              "Profit & Loss — total income vs. total expense over a period, and the resulting net profit",
+              "Balance Sheet — everything you own (Assets) vs. what you owe (Liabilities) and owner's stake (Equity), as of a date",
+              "Outstanding — who owes you money (Debtors) and who you owe (Creditors), right now",
+              "GSTR-3B Summary — a rollup of output tax, input tax credit, and net tax payable for GST filing",
+              "HSN Summary — sales grouped by HSN tax code",
+              "Purchase Register / Sales Register — a full transaction-level list for a period",
+              "Cash Compliance — flags large same-day cash receipts from one customer (Section 269ST awareness)",
+            ],
+          },
+          {
+            heading: "Terms you'll see",
+            items: [
+              "As Of — some reports are a snapshot at one date (Trial Balance, Balance Sheet); others cover a date range",
+              "Balanced — confirms total debits equal total credits; \"Not balanced\" would mean a real bug to investigate",
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }

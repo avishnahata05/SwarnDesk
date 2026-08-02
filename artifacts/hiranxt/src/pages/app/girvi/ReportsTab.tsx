@@ -7,19 +7,21 @@ import { Input } from "@/components/ui/input";
 import { FileBarChart, Download, RefreshCw } from "lucide-react";
 import { API, authHeader } from "./api";
 import { exportToCsv } from "@/lib/csv";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
 
-type ReportKey = "pledge" | "maturity" | "returns" | "transfers" | "financial" | "cash";
+type ReportKey = "pledge" | "maturity" | "aging" | "returns" | "transfers" | "financial" | "cash";
 
 const REPORTS: { key: ReportKey; label: string }[] = [
   { key: "pledge", label: "Pledge Register" },
   { key: "maturity", label: "Interest Due / Maturity" },
+  { key: "aging", label: "Aging Analysis" },
   { key: "returns", label: "Returns Register" },
   { key: "transfers", label: "Transfers Register" },
   { key: "financial", label: "Financial Summary" },
   { key: "cash", label: "Cash Compliance" },
 ];
 
-const needsDateRange: Record<ReportKey, boolean> = { pledge: false, maturity: false, returns: true, transfers: true, financial: true, cash: true };
+const needsDateRange: Record<ReportKey, boolean> = { pledge: false, maturity: false, aging: false, returns: true, transfers: true, financial: true, cash: true };
 
 // Each report's response has a different shape (some are arrays, some are
 // objects like { overdue, dueThisWeek, upcoming }). Sharing one "data" slot
@@ -37,6 +39,7 @@ export default function ReportsTab() {
   const [to, setTo] = useState(() => new Date().toISOString().split("T")[0]);
   const [loading, setLoading] = useState(false);
   const [cache, setCache] = useState<ReportCache>({});
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
   const requestIdRef = useRef(0);
 
   const load = useCallback(async () => {
@@ -47,6 +50,7 @@ export default function ReportsTab() {
       const endpoint: Record<ReportKey, string> = {
         pledge: "/reports/pledge-register",
         maturity: "/reports/maturity",
+        aging: "/reports/aging",
         returns: `/reports/returns?from=${from}&to=${to}`,
         transfers: `/reports/transfers?from=${from}&to=${to}`,
         financial: `/reports/financial-summary?from=${from}&to=${to}`,
@@ -74,6 +78,7 @@ export default function ReportsTab() {
     const d = data as any;
     if (active === "pledge") rows = arr(d);
     else if (active === "maturity") rows = [...arr(d?.overdue), ...arr(d?.dueThisWeek), ...arr(d?.upcoming)];
+    else if (active === "aging") rows = arr(d?.buckets).flatMap((b: any) => arr(b.loans).map((l: any) => ({ bucket: b.label, ...l })));
     else if (active === "returns") rows = arr(d);
     else if (active === "transfers") rows = arr(d);
     else if (active === "financial") {
@@ -98,6 +103,7 @@ export default function ReportsTab() {
           Girvi Reports
         </h1>
         <p className="text-muted-foreground text-sm mt-0.5">Statutory registers, maturity tracking, and a CA-facing financial overview</p>
+        <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
       </div>
 
       <div className="flex flex-wrap gap-1.5">
@@ -137,6 +143,8 @@ export default function ReportsTab() {
             <PledgeRegisterTable rows={arr(data)} />
           ) : active === "maturity" ? (
             <MaturityView data={data as any} />
+          ) : active === "aging" ? (
+            <AgingView data={data as any} />
           ) : active === "returns" ? (
             <ReturnsTable rows={arr(data)} />
           ) : active === "transfers" ? (
@@ -148,6 +156,31 @@ export default function ReportsTab() {
           )}
         </CardContent>
       </Card>
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Girvi Reports"
+        description="Seven views into the same loan book, each built for a different purpose — from statutory record-keeping to a plain financial summary. Switch tabs to change report; some need a date range, some (like Aging) are always 'as of right now'."
+        sections={[
+          {
+            heading: "The reports",
+            items: [
+              "Pledge Register — every active loan right now (statutory register format)",
+              "Interest Due / Maturity — overdue / due this week / due in 8–30 days",
+              "Aging Analysis — active overdue loans bucketed 1–30 / 31–60 / 61–90 / 90+ days, for portfolio risk",
+              "Returns Register — every redemption, forfeiture, and partial release in the date range",
+              "Transfers Register — branch/customer transfers in the date range",
+              "Financial Summary — principal disbursed/collected, interest income, fees, and losses for a CA/accountant",
+              "Cash Compliance — flags same-day cash receipts per customer above your configured limit (Sec. 269ST awareness)",
+            ],
+          },
+          {
+            heading: "Every report",
+            items: ["Export CSV — download the currently-open report as a spreadsheet"],
+          },
+        ]}
+      />
     </div>
   );
 }
@@ -201,6 +234,42 @@ function MaturityView({ data }: { data: any }) {
   );
   const safeArr = (v: unknown): any[] => Array.isArray(v) ? v : [];
   return <>{section("Overdue", safeArr(data.overdue), "text-red-600")}{section("Due This Week", safeArr(data.dueThisWeek), "text-amber-600")}{section("Upcoming (8–30 days)", safeArr(data.upcoming), "text-muted-foreground")}</>;
+}
+
+function AgingView({ data }: { data: any }) {
+  if (!data) return null;
+  const buckets: any[] = Array.isArray(data.buckets) ? data.buckets : [];
+  const colorFor = (key: string) => key === "current" ? "text-muted-foreground" : key === "1-30" ? "text-amber-600" : key === "31-60" ? "text-orange-600" : key === "61-90" ? "text-red-600" : "text-red-800";
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        {buckets.map(b => (
+          <div key={b.key} className="p-3 rounded-lg border border-border bg-muted/10">
+            <div className={`text-xs font-semibold ${colorFor(b.key)}`}>{b.label}</div>
+            <div className="text-lg font-bold">{b.count}</div>
+            <div className="text-[11px] text-muted-foreground">loan{b.count !== 1 ? "s" : ""}</div>
+            <div className="text-xs mt-1">Due: <strong>{formatCurrency(b.totalDue)}</strong></div>
+          </div>
+        ))}
+      </div>
+      {buckets.filter(b => b.key !== "current" && b.count > 0).map(b => (
+        <div key={b.key} className="rounded-lg border border-border overflow-hidden">
+          <div className={`px-3 py-1.5 text-xs font-semibold ${colorFor(b.key)} border-b border-border bg-muted/10`}>{b.label} ({b.count})</div>
+          <div className="divide-y divide-border/50">
+            {b.loans.map((l: any) => (
+              <div key={l.loanNumber} className="flex items-center justify-between px-3 py-1.5 text-xs">
+                <span>{l.loanNumber} · {l.customerName} · {l.customerMobile}</span>
+                <span className="font-semibold">{formatCurrency(l.totalDue)} · {l.overdueDaysRaw}d overdue</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      {buckets.every(b => b.key === "current" || b.count === 0) && (
+        <p className="text-sm text-emerald-600 py-4 text-center">No overdue loans — the whole active book is current.</p>
+      )}
+    </div>
+  );
 }
 
 const RETURN_TYPE_LABEL: Record<string, string> = { redeemed: "Redeemed", forfeited: "Forfeited", partial_release: "Partial Release" };

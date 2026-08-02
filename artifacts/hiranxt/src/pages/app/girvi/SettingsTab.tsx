@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Settings as SettingsIcon, Building2, Plus, Ban, Star, AlertTriangle } from "lucide-react";
 import { API, getAuthHeaders, authHeader } from "./api";
 import type { GirviSettings, Branch } from "./types";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -21,6 +22,7 @@ export default function SettingsTab({ branches, onBranchesChanged, onDirtyChange
   const [newBranchName, setNewBranchName] = useState("");
   const [addingBranch, setAddingBranch] = useState(false);
   const [deactivateTarget, setDeactivateTarget] = useState<Branch | null>(null);
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -120,6 +122,7 @@ export default function SettingsTab({ branches, onBranchesChanged, onDirtyChange
           Girvi Settings
         </h1>
         <p className="text-muted-foreground text-sm mt-0.5">Standalone settings for the Girvi module — shop identity, defaults, and voucher numbering</p>
+        <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
       </div>
 
       <Card className="border-border">
@@ -183,6 +186,14 @@ export default function SettingsTab({ branches, onBranchesChanged, onDirtyChange
               late — your call whether to charge for it).
             </p>
           </div>
+          <div className="sm:col-span-2">
+            <label className={lbl}>Forfeiture Notice Period (days)</label>
+            <input className={inp} type="number" min="0" value={settings.forfeitureNoticeDays} onChange={e => set("forfeitureNoticeDays", Math.max(0, parseInt(e.target.value) || 0))} />
+            <p className="text-xs text-muted-foreground mt-1">
+              Before an overdue loan can be forfeited, a notice must be sent to the customer and this many days must pass. Adjust
+              to match your state's Pawnbrokers Act or your own policy — this app doesn't enforce a specific statutory figure.
+            </p>
+          </div>
         </CardContent>
       </Card>
 
@@ -193,6 +204,7 @@ export default function SettingsTab({ branches, onBranchesChanged, onDirtyChange
           <div><label className={lbl}>Return Voucher Prefix</label><input className={inp} value={settings.returnPrefix} onChange={e => set("returnPrefix", e.target.value.toUpperCase())} /></div>
           <div><label className={lbl}>Transfer Voucher Prefix</label><input className={inp} value={settings.transferPrefix} onChange={e => set("transferPrefix", e.target.value.toUpperCase())} /></div>
           <div><label className={lbl}>Partial Release Prefix</label><input className={inp} value={settings.partialReleasePrefix} onChange={e => set("partialReleasePrefix", e.target.value.toUpperCase())} /></div>
+          <div><label className={lbl}>Forfeiture Notice Prefix</label><input className={inp} value={settings.noticePrefix} onChange={e => set("noticePrefix", e.target.value.toUpperCase())} /></div>
           <p className="sm:col-span-4 text-xs text-muted-foreground">Numbers are sequential per financial year, e.g. {settings.receiptPrefix}/2026-27/0001, and never reused.</p>
         </CardContent>
       </Card>
@@ -255,6 +267,35 @@ export default function SettingsTab({ branches, onBranchesChanged, onDirtyChange
           )}
         </DialogContent>
       </Dialog>
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Girvi Settings"
+        description="Configuration for the whole Girvi module — separate from your main shop settings. Shop identity here is printed on Girvi vouchers/notices; loan defaults pre-fill every new loan; branches control where loans can be pledged."
+        sections={[
+          {
+            heading: "Shop Identity",
+            items: ["Shown on every printed voucher — pledge receipts, return vouchers, forfeiture notices, transfer vouchers"],
+          },
+          {
+            heading: "Loan Defaults",
+            items: [
+              "Pre-fill values offered on every New Girvi Loan form — changing them here doesn't touch existing loans",
+              "Grace Period — days after due date before penalty interest starts accruing",
+              "Forfeiture Notice Period — days a customer must be given after a notice before you can forfeit their pledge",
+            ],
+          },
+          {
+            heading: "Voucher Numbering Prefixes",
+            items: ["Each document type gets its own sequential number per financial year, e.g. GRV/2026-27/0001 — never reused, even if a loan is later voided"],
+          },
+          {
+            heading: "Branches",
+            items: ["Add branches, set which one is the default for new loans, and deactivate ones no longer in use"],
+          },
+        ]}
+      />
     </div>
   );
 }

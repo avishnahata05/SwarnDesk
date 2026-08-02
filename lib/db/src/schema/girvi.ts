@@ -29,10 +29,16 @@ export const girviSettingsTable = pgTable("girvi_settings", {
   // the day. Beyond this window, interest does accrue, but the lender still has
   // discretion to waive it via a "waiver" payment at collection/redemption time.
   overdueGraceDays: integer("overdue_grace_days").notNull().default(3),
+  // Days an overdue customer must be given after a forfeiture notice is sent
+  // before the shop may actually forfeit the pledge — see POST /:id/send-notice
+  // and the forfeit gate in PATCH /:id. State Pawnbrokers Acts vary on the exact
+  // number; this is a shop-configurable default, not a hardcoded statutory figure.
+  forfeitureNoticeDays: integer("forfeiture_notice_days").notNull().default(15),
   receiptPrefix: text("receipt_prefix").notNull().default("GRV"),
   returnPrefix: text("return_prefix").notNull().default("RTN"),
   transferPrefix: text("transfer_prefix").notNull().default("TRF"),
   partialReleasePrefix: text("partial_release_prefix").notNull().default("PRL"),
+  noticePrefix: text("notice_prefix").notNull().default("NTC"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
@@ -127,6 +133,12 @@ export const girviLoansTable = pgTable("girvi_loans", {
   // (PATCH loanAmount/processingFee) or void (DELETE) can reverse the exact
   // entry instead of guessing which of the loan's several vouchers it was.
   disbursementVoucherId: integer("disbursement_voucher_id"),
+  // Set when a forfeiture notice is issued to the customer (POST /:id/send-notice).
+  // Forfeiture is blocked until forfeitureNoticeDays have elapsed since this date —
+  // resending a notice bumps both fields forward. Nullable: most loans never reach
+  // this state, and cleared/irrelevant once the loan closes out.
+  noticeSentAt: timestamp("notice_sent_at"),
+  noticeNumber: text("notice_number"),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

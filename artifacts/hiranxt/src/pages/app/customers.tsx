@@ -19,6 +19,8 @@ import {
   Eye, ShoppingBag, Wrench, X, Banknote, History,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
+import { InfoTooltip } from "@/components/InfoTooltip";
 
 interface CustomerForm {
   name: string; mobile: string; email: string; address: string;
@@ -441,6 +443,7 @@ export default function Customers() {
   const [bulkTemplate, setBulkTemplate] = useState(DEFAULT_TEMPLATE);
   const [bulkSending, setBulkSending] = useState(false);
   const [waApiEnabled, setWaApiEnabled] = useState<boolean | null>(null);
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
 
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -571,6 +574,7 @@ export default function Customers() {
         <div>
           <h1 className="text-2xl font-bold">Customers</h1>
           <p className="text-muted-foreground text-sm">Manage your customer relationships</p>
+          <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
         </div>
         <div className="flex gap-2">
           {selectedIds.size > 0 && (
@@ -871,6 +875,30 @@ export default function Customers() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Customers"
+        description="Your main shop customer directory — contact details, GST info for B2B billing, birthdays/anniversaries for occasion reminders, and quick WhatsApp outreach."
+        sections={[
+          {
+            heading: "What you can do here",
+            items: [
+              "Add Customer — create a new customer record",
+              "Customer history lookup — search by phone number to pull up someone's full purchase/repair/order history",
+              "Select customers (checkboxes) then WhatsApp — send a bulk message to everyone selected",
+              "Upcoming Occasions — customers with a birthday/anniversary coming up, with a one-click WhatsApp button",
+            ],
+          },
+          {
+            heading: "Terms you'll see",
+            items: [
+              "GSTIN / GST State Code — only needed for B2B invoices; decides whether CGST+SGST or IGST applies",
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }

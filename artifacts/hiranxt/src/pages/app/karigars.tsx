@@ -14,6 +14,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { useForm } from "react-hook-form";
 import { Plus, Hammer, TrendingDown, TrendingUp, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
+import { InfoTooltip } from "@/components/InfoTooltip";
 
 interface KarigarForm { name: string; mobile: string; specialization: string; address: string; }
 interface MetalIssueForm { metalType: string; weight: number; purity: string; notes: string; }
@@ -27,6 +29,7 @@ export default function Karigars() {
   const [addOpen, setAddOpen] = useState(false);
   const [issueOpen, setIssueOpen] = useState<number | null>(null);
   const [returnOpen, setReturnOpen] = useState<number | null>(null);
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -115,6 +118,7 @@ export default function Karigars() {
         <div>
           <h1 className="text-2xl font-bold">Karigars</h1>
           <p className="text-muted-foreground text-sm">Manage artisan assignments and metal tracking</p>
+          <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
         </div>
         <Button onClick={() => setAddOpen(true)} className="gap-2" data-testid="button-add-karigar">
           <Plus className="w-4 h-4" />Add Karigar
@@ -310,7 +314,10 @@ export default function Karigars() {
               <Input type="number" step="0.001" {...returnForm.register("returnedWeight", { required: true })} data-testid="input-returned-weight" />
             </div>
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Wastage % *</label>
+              <label className="text-xs text-muted-foreground flex items-center gap-1 mb-1">
+                Wastage % *
+                <InfoTooltip text="The % of metal lost during crafting (filing, polishing, melting loss). It's expected — the karigar's wage/fee typically factors this in." />
+              </label>
               <Input type="number" step="0.01" {...returnForm.register("wastagePercent", { required: true })} data-testid="input-wastage" />
               <p className="text-[11px] text-muted-foreground mt-1">
                 Wastage % = weight lost while making the piece.{" "}
@@ -345,6 +352,31 @@ export default function Karigars() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Karigars"
+        description="Manage your karigars — the artisans/goldsmiths who craft and repair jewellery for you — and track exactly how much gold/silver is currently out with each one."
+        sections={[
+          {
+            heading: "What you can do here",
+            items: [
+              "Add Karigar — register a new artisan with their specialization and contact details",
+              "Issue Metal — record handing raw gold/silver to a karigar for a job",
+              "Return — record metal coming back after the work is done, including any wastage during crafting",
+            ],
+          },
+          {
+            heading: "Terms you'll see",
+            items: [
+              "Pending Gold/Silver — metal currently issued to this karigar that hasn't been returned yet",
+              "Wastage % — metal lost during crafting (filing, polishing, melting loss) — expected, not a mistake",
+              "Total Wages Paid — cumulative amount paid to this karigar for their work",
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }

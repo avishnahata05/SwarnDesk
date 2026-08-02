@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { BookOpen } from "lucide-react";
 import { apiGet, apiGetOther } from "./api";
 import type { Account, DayBookEntry, Ledger } from "./types";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
 
 type ViewKey = "account" | "party" | "day" | "cash" | "bank";
 const VIEWS: { key: ViewKey; label: string }[] = [
@@ -33,6 +34,7 @@ export default function LedgersTab() {
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [dayBook, setDayBook] = useState<DayBookEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
   const requestIdRef = useRef(0);
 
   useEffect(() => {
@@ -84,6 +86,7 @@ export default function LedgersTab() {
           Ledgers &amp; Books
         </h1>
         <p className="text-muted-foreground text-sm mt-0.5">Running-balance ledgers for any account or party, plus the Day Book, Cash Book, and Bank Book</p>
+        <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
       </div>
 
       <div className="flex flex-wrap gap-1.5">
@@ -145,6 +148,31 @@ export default function LedgersTab() {
           )}
         </CardContent>
       </Card>
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Ledgers & Books"
+        description="Different ways to look at the same transaction history — by account, by a specific customer/supplier/karigar, or by date."
+        sections={[
+          {
+            heading: "The views",
+            items: [
+              "Account Ledger — every entry posted against one specific account (e.g. Rent Expense), with a running balance",
+              "Party Ledger — every entry involving one specific customer, supplier, or karigar",
+              "Day Book — every voucher posted on one specific date, in full",
+              "Cash Book / Bank Book — every cash or bank transaction over a date range",
+            ],
+          },
+          {
+            heading: "Terms you'll see",
+            items: [
+              "Opening / Closing Balance — the balance at the start and end of the selected period",
+              "Particulars — a short description of what that specific line was for",
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }

@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link } from "wouter";
 import { useMetalRateForm } from "@/hooks/use-metal-rate-form";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
 
 function getAuthHeaders(): Record<string, string> {
   const token = localStorage.getItem("swarndesk_token");
@@ -53,6 +54,7 @@ export default function Settings() {
 
   const [loyaltyConfig, setLoyaltyConfig] = useState<LoyaltyConfig>({ enabled: true, rate: "1000" });
   const [loyaltySaving, setLoyaltySaving] = useState(false);
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
 
   useEffect(() => {
     if (settings) {
@@ -265,6 +267,7 @@ export default function Settings() {
       <div>
         <h1 className="text-2xl font-bold">Settings</h1>
         <p className="text-muted-foreground text-sm">Configure your business profile</p>
+        <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
       </div>
 
       {/* Subscription Status Card */}
@@ -682,6 +685,24 @@ export default function Settings() {
           <p className="text-xs text-muted-foreground">Files are named with today's date, e.g. <span className="font-mono">swarndesk-inventory-2026-05-23.csv</span></p>
         </CardContent>
       </Card>
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Settings"
+        description="Shop-wide configuration — your business identity, tax rules, metal rates, branches, and integrations. Changes here affect the whole app, not just one page."
+        sections={[
+          { heading: "Subscription Status", items: ["Your current plan and billing status"] },
+          { heading: "Business Profile", items: ["Shop name, address, contact details, and GSTIN — printed on invoices and used across the app"] },
+          { heading: "Today's Metal Rates", items: ["Set today's gold/silver rate per gram — used to price new inventory and live valuations everywhere"] },
+          { heading: "Tax Settings", items: ["GST rate, your state code (for CGST/SGST vs IGST), and whether GST applies to old-gold exchange value"] },
+          { heading: "Branch Settings", items: ["Manage which branch is the default for new entries if you operate more than one location"] },
+          { heading: "User Roles", items: ["Control what staff logins can see and do"] },
+          { heading: "WhatsApp Business API", items: ["Connect a WhatsApp Business account to send messages automatically instead of opening chat links manually"] },
+          { heading: "Loyalty Points Program", items: ["Turn on customer loyalty points and set how much spend earns 1 point"] },
+          { heading: "Export Data to Excel / CSV", items: ["Download a full backup/export of any module's data as a spreadsheet"] },
+        ]}
+      />
     </div>
   );
 }

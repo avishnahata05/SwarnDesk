@@ -4,6 +4,8 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { ShortcutsHelpDialog, ShortcutsHelpButton } from "@/components/ShortcutsHelp";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
+import { InfoTooltip } from "@/components/InfoTooltip";
 import { useGetSettings, useGetCurrentRates } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -16,13 +18,14 @@ import {
   Banknote, AlertTriangle, CheckCircle2, TrendingDown, TrendingUp,
   Plus, RefreshCw, XCircle, ChevronDown, ChevronUp, Calendar,
   MessageCircle, Search, Clock, Coins, Scale, Pencil, Tag,
-  RotateCcw, Flame, ArrowLeftRight, PackageCheck,
+  RotateCcw, Flame, ArrowLeftRight, PackageCheck, Send, PlusCircle, Bell,
 } from "lucide-react";
 import { API, authHeader, getAuthHeaders } from "./api";
-import type { Loan, LoanItem, Payment, Rates, Branch, Summary, PartialRelease } from "./types";
-import { printInterestReceipt, openGirviVoucher, openReturnVoucher, openPartialReleaseVoucher, computeLiveEstValue } from "./vouchers";
+import type { Loan, LoanItem, Payment, Rates, Branch, Summary, PartialRelease, GirviSettings } from "./types";
+import { printInterestReceipt, openGirviVoucher, openReturnVoucher, openPartialReleaseVoucher, printForfeitureNotice, computeLiveEstValue } from "./vouchers";
 import NewLoanDialog from "./NewLoanDialog";
 import EditLoanDialog from "./EditLoanDialog";
+import TopUpDialog from "./TopUpDialog";
 import DueDatePresets from "./DueDatePresets";
 
 function toVikramSamvat(date: Date): string {
@@ -58,6 +61,10 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
 
   const [showNewLoan, setShowNewLoan] = useState(false);
   const [editLoan, setEditLoan] = useState<Loan | null>(null);
+  const [topUpLoan, setTopUpLoan] = useState<Loan | null>(null);
+  const [girviSettings, setGirviSettings] = useState<GirviSettings | null>(null);
+  const [followUps, setFollowUps] = useState<Loan[]>([]);
+  const [followUpsCollapsed, setFollowUpsCollapsed] = useState(false);
   const [serialQuery, setSerialQuery] = useState("");
   const [serialResults, setSerialResults] = useState<{ item: Pick<LoanItem, "id" | "itemType" | "quantity" | "metalType" | "purity" | "grossWeight" | "netWeight" | "estimatedValue" | "notes" | "itemCode" | "status">; loan: Loan }[]>([]);
   const [serialSearching, setSerialSearching] = useState(false);
@@ -85,6 +92,7 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
   const [lastPayment, setLastPayment] = useState<Payment | null>(null);
   const [lastRelease, setLastRelease] = useState<{ release: PartialRelease; loan: Loan; releasedItems: LoanItem[]; remainingItems: LoanItem[] } | null>(null);
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -133,6 +141,25 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
   }, [statusFilter, dueFilter]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  // "Today's Follow-Ups" — independent of whatever filter tab is selected, so
+  // it always reflects overdue/due-soon loans across the whole book.
+  const loadFollowUps = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/follow-ups`, { headers: authHeader() });
+      if (r.ok) setFollowUps(await r.json());
+    } catch { /* silent — non-critical panel */ }
+  }, []);
+
+  useEffect(() => {
+    loadFollowUps();
+    (async () => {
+      try {
+        const r = await fetch(`${API}/settings`, { headers: authHeader() });
+        if (r.ok) setGirviSettings(await r.json());
+      } catch { /* silent */ }
+    })();
+  }, [loadFollowUps]);
 
   const loadPayments = async (loanId: number) => {
     if (loanPayments[loanId]) return;
@@ -340,6 +367,7 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
         } else {
           toast({ title: "Loan renewed — interest clock reset!" });
         }
+        loadFollowUps();
       } else {
         const msgs: Record<string, string> = {
           redeem: "Loan redeemed successfully! Return voucher generated.",
@@ -348,6 +376,7 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
         };
         toast({ title: msgs[actionType] });
         loadAll();
+        loadFollowUps();
       }
 
       setActionLoan(null); setActionType(null);
@@ -358,6 +387,29 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
     } catch (err) {
       toast({ title: (err as Error).message || "Failed", variant: "destructive" });
     } finally { setSubmitting(false); }
+  };
+
+  const handleSendNotice = async (loan: Loan) => {
+    const noticeDays = girviSettings?.forfeitureNoticeDays ?? 15;
+    if (!window.confirm(`Send a forfeiture notice for loan ${loan.loanNumber}? This starts the ${noticeDays}-day notice period required before this loan can be forfeited.`)) return;
+    try {
+      const r = await fetch(`${API}/${loan.id}/send-notice`, { method: "POST", headers: getAuthHeaders() });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Failed");
+      const updated: Loan = await r.json();
+      setLoans(prev => prev.map(l => l.id === updated.id ? updated : l));
+      toast({ title: "Forfeiture notice sent — printing now" });
+      printForfeitureNotice(updated, shopName, shopAddress, shopMobile, noticeDays, girviSettings ?? undefined);
+    } catch (err) {
+      toast({ title: (err as Error).message || "Failed to send notice", variant: "destructive" });
+    }
+  };
+
+  const handleTopUp = (updated: Loan) => {
+    setLoans(prev => prev.map(l => l.id === updated.id ? updated : l));
+    setLoanItems(prev => { const n = { ...prev }; delete n[updated.id]; return n; });
+    setLoanPayments(prev => { const n = { ...prev }; delete n[updated.id]; return n; });
+    loadAll();
+    loadFollowUps();
   };
 
   const sendWaReminder = (loan: Loan, type: "due" | "overdue") => {
@@ -414,8 +466,9 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
             Girvi Loans
           </h1>
           <p className="text-muted-foreground text-sm mt-0.5">Gold & silver collateral loans with live interest</p>
-          <div className="mt-1">
+          <div className="mt-1 flex items-center gap-3">
             <ShortcutsHelpButton onClick={() => setShortcutsHelpOpen(true)} />
+            <PageHelpButton onClick={() => setPageHelpOpen(true)} />
           </div>
         </div>
         <div className="flex flex-col items-end gap-1.5">
@@ -479,6 +532,43 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
             </div>
           )}
         </div>
+      )}
+
+      {followUps.length > 0 && (
+        <Card className="border-indigo-300 bg-indigo-50/40">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm flex items-center gap-2 text-indigo-800">
+                <Bell className="w-4 h-4" />
+                Today's Follow-Ups ({followUps.length})
+              </CardTitle>
+              <button type="button" className="text-xs text-indigo-700 hover:underline" onClick={() => setFollowUpsCollapsed(v => !v)}>
+                {followUpsCollapsed ? "Show" : "Hide"}
+              </button>
+            </div>
+          </CardHeader>
+          {!followUpsCollapsed && (
+            <CardContent className="space-y-1.5">
+              {followUps.map(l => (
+                <div key={l.id} className="flex items-center justify-between gap-2 flex-wrap px-3 py-2 rounded-lg bg-white border border-indigo-200 text-xs">
+                  <div>
+                    <span className="font-medium">{l.customerName}</span>
+                    <span className="text-muted-foreground ml-2 font-mono">{l.loanNumber}</span>
+                    <span className={`ml-2 font-semibold ${l.isOverdue ? "text-red-600" : "text-amber-600"}`}>
+                      {l.isOverdue ? `${Math.abs(l.daysRemaining)}d overdue` : l.daysRemaining === 0 ? "due today" : `due in ${l.daysRemaining}d`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold">{formatCurrency(l.totalDue)}</span>
+                    <Button size="sm" variant="outline" className="h-6 text-[11px] gap-1" onClick={() => sendWaReminder(l, l.isOverdue ? "overdue" : "due")}>
+                      <MessageCircle className="w-3 h-3" />WhatsApp
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          )}
+        </Card>
       )}
 
       {customerExposure.length > 0 && (
@@ -598,6 +688,7 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
                   shopName={shopName}
                   shopAddress={shopAddress}
                   shopMobile={shopMobile}
+                  girviSettings={girviSettings}
                   onExpand={() => handleExpand(loan.id)}
                   onAction={(type) => {
                     setActionLoan(loan);
@@ -635,6 +726,8 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
                   }}
                   onWaReminder={sendWaReminder}
                   onEdit={() => setEditLoan(loan)}
+                  onSendNotice={() => handleSendNotice(loan)}
+                  onTopUp={() => setTopUpLoan(loan)}
                 />
               ))}
             </div>
@@ -652,6 +745,42 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
           { keys: "O", description: "Jump to Overdue tab" },
           { keys: "R", description: "Recalculate loans" },
           { keys: "?", description: "Show this help" },
+        ]}
+      />
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Girvi Loans"
+        description="This is where you manage gold/silver pawn loans — from pledging an item and disbursing cash, through collecting interest, to closing the loan out by redemption, renewal, or forfeiture."
+        sections={[
+          {
+            heading: "Everyday actions",
+            items: [
+              "New Girvi — pledge an item and disburse a new loan",
+              "Collect Interest — record any payment; splits between interest and principal automatically",
+              "Renew — collect interest and push the due date out, resetting the interest clock",
+              "Top-Up — lend more against the same (or newly added) collateral",
+              "Redeem — customer pays everything owed and takes their item(s) back",
+            ],
+          },
+          {
+            heading: "Less common actions",
+            items: [
+              "Extend — push the due date without collecting anything",
+              "Transfer Items — move pledged items to another branch, or reassign the loan to a different customer",
+              "Release Items — return some (not all) pledged items against a partial payment",
+              "Send Forfeiture Notice / Forfeit — once a loan is badly overdue, notice must be sent and the notice period must pass before you can keep/sell the pledge",
+            ],
+          },
+          {
+            heading: "Terms you'll see",
+            items: [
+              "LTV — the loan amount as a % of the collateral's current market value; higher = riskier for the shop",
+              "Grace Period — days after the due date before penalty interest starts (set in Settings)",
+              "Today's Follow-Ups — overdue/due-soon loans worth calling about today",
+            ],
+          },
         ]}
       />
 
@@ -677,6 +806,14 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
           setLoans(prev => prev.filter(l => l.id !== loanId));
           loadAll();
         }}
+      />
+
+      <TopUpDialog
+        open={!!topUpLoan}
+        loan={topUpLoan}
+        onClose={() => setTopUpLoan(null)}
+        onToppedUp={handleTopUp}
+        rates={rates}
       />
 
       <Dialog open={!!actionLoan} onOpenChange={v => { if (!v) { setActionLoan(null); setActionType(null); setRedeemConfirmed(false); } }}>
@@ -771,7 +908,10 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
                   })()}
 
                   <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Type</label>
+                    <label className="text-xs text-muted-foreground flex items-center gap-1 mb-1">
+                      Type
+                      <InfoTooltip text="Auto-allocate: pays off outstanding interest first, then any leftover reduces principal. Interest only / Penalty: doesn't touch principal. Waiver: forgives interest without any cash changing hands." />
+                    </label>
                     <Select value={collectType} onValueChange={setCollectType}>
                       <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -1090,8 +1230,8 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
 
 function LoanRow({
   loan, expanded, payments, items, releases, rates, branchName, calendarMode, formatDateDisplay,
-  shopName, shopAddress, shopMobile,
-  onExpand, onAction, onWaReminder, onEdit,
+  shopName, shopAddress, shopMobile, girviSettings,
+  onExpand, onAction, onWaReminder, onEdit, onSendNotice, onTopUp,
 }: {
   loan: Loan;
   expanded: boolean;
@@ -1105,14 +1245,21 @@ function LoanRow({
   shopName: string;
   shopAddress: string;
   shopMobile: string;
+  girviSettings: GirviSettings | null;
   onExpand: () => void;
   onAction: (type: "redeem" | "forfeit" | "extend" | "collect" | "renew" | "transfer" | "partialRelease") => void;
   onWaReminder: (loan: Loan, type: "due" | "overdue") => void;
   onEdit: () => void;
+  onSendNotice: () => void;
+  onTopUp: () => void;
 }) {
   const isActive = loan.status === "active" || loan.status === "extended";
   const liveEstValue = computeLiveEstValue(loan, items, rates);
   const pledgedCount = (items ?? []).filter(it => it.status === "pledged").length;
+  const noticeDays = girviSettings?.forfeitureNoticeDays ?? 15;
+  const noticeSentAt = loan.noticeSentAt ? new Date(loan.noticeSentAt) : null;
+  const forfeitureEligibleFrom = noticeSentAt ? new Date(noticeSentAt.getTime() + noticeDays * 86400000) : null;
+  const forfeitureEligible = !!forfeitureEligibleFrom && new Date() >= forfeitureEligibleFrom;
 
   return (
     <div className={`px-3 md:px-4 py-3 ${loan.isOverdue ? "bg-red-50/50 dark:bg-red-950/10" : ""}`}>
@@ -1140,6 +1287,9 @@ function LoanRow({
               >
                 LTV {((loan.currentPrincipal / (liveEstValue ?? loan.estimatedValue)) * 100).toFixed(0)}%
               </span>
+            )}
+            {isActive && (liveEstValue ?? loan.estimatedValue) > 0 && (
+              <InfoTooltip text="LTV (Loan-to-Value) = current principal owed ÷ the collateral's live market value. Above ~80% means the loan is only thinly covered by the gold/silver backing it." />
             )}
           </div>
           <div className="text-xs text-muted-foreground mt-0.5 truncate">
@@ -1280,6 +1430,9 @@ function LoanRow({
               <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onAction("transfer")}>
                 <ArrowLeftRight className="w-3.5 h-3.5" />Transfer Items
               </Button>
+              <Button size="sm" variant="outline" className="gap-1.5 border-indigo-400/50 text-indigo-700 hover:bg-indigo-50" onClick={onTopUp}>
+                <PlusCircle className="w-3.5 h-3.5" />Top-Up
+              </Button>
               {pledgedCount > 1 && (
                 <Button size="sm" variant="outline" className="gap-1.5 border-teal-400/50 text-teal-700 hover:bg-teal-50" onClick={() => onAction("partialRelease")}>
                   <PackageCheck className="w-3.5 h-3.5" />Release Items
@@ -1288,7 +1441,20 @@ function LoanRow({
               <Button size="sm" className="gap-1.5 bg-green-600 hover:bg-green-700 text-white" onClick={() => onAction("redeem")}>
                 <CheckCircle2 className="w-3.5 h-3.5" />Redeem
               </Button>
-              {loan.isOverdue && (
+              {loan.isOverdue && !noticeSentAt && (
+                <Button size="sm" variant="outline" className="gap-1.5 border-red-400/50 text-red-700 hover:bg-red-50" onClick={onSendNotice}>
+                  <Send className="w-3.5 h-3.5" />Send Forfeiture Notice
+                </Button>
+              )}
+              {loan.isOverdue && noticeSentAt && !forfeitureEligible && (
+                <span className="text-[11px] text-muted-foreground self-center px-1 flex items-center gap-1.5">
+                  Notice sent {formatDateDisplay(noticeSentAt.toISOString())} — forfeitable from {forfeitureEligibleFrom ? formatDateDisplay(forfeitureEligibleFrom.toISOString()) : "—"}
+                  <button type="button" className="text-primary hover:underline" onClick={() => printForfeitureNotice(loan, shopName, shopAddress, shopMobile, noticeDays, girviSettings ?? undefined)}>
+                    Reprint
+                  </button>
+                </span>
+              )}
+              {loan.isOverdue && forfeitureEligible && (
                 <Button size="sm" variant="destructive" className="gap-1.5" onClick={() => onAction("forfeit")}>
                   <XCircle className="w-3.5 h-3.5" />Forfeit
                 </Button>

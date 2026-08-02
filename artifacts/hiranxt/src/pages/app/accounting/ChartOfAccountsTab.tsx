@@ -11,6 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Landmark, Plus, Lock, Ban, RotateCcw, Trash2 } from "lucide-react";
 import { apiGet, apiSend } from "./api";
 import type { Account } from "./types";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
+import { InfoTooltip } from "@/components/InfoTooltip";
 
 const TYPE_LABELS: Record<Account["accountType"], string> = {
   asset: "Assets", liability: "Liabilities", equity: "Equity", income: "Income", expense: "Expenses",
@@ -24,6 +26,7 @@ export default function ChartOfAccountsTab() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ code: "", name: "", accountType: "expense" as Account["accountType"], openingBalance: "0", openingBalanceType: "debit" as "debit" | "credit" });
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,6 +84,7 @@ export default function ChartOfAccountsTab() {
             Chart of Accounts
           </h1>
           <p className="text-muted-foreground text-sm mt-0.5">Every sale, purchase, girvi, repair, and karigar transaction posts against these accounts</p>
+          <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
@@ -105,7 +109,10 @@ export default function ChartOfAccountsTab() {
               <div className="grid grid-cols-2 gap-3">
                 <div><Label>Opening Balance</Label><Input type="number" value={form.openingBalance} onChange={e => setForm(f => ({ ...f, openingBalance: e.target.value }))} /></div>
                 <div>
-                  <Label>Balance Side</Label>
+                  <Label className="flex items-center gap-1">
+                    Balance Side
+                    <InfoTooltip text="Which side of the ledger this account's opening balance sits on. Assets/Expenses normally start Debit; Liabilities/Equity/Income normally start Credit." />
+                  </Label>
                   <Select value={form.openingBalanceType} onValueChange={v => setForm(f => ({ ...f, openingBalanceType: v as "debit" | "credit" }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -159,6 +166,30 @@ export default function ChartOfAccountsTab() {
           </Card>
         ))
       )}
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Chart of Accounts"
+        description="The full list of accounts your books are built from — grouped into Assets, Liabilities, Equity, Income, and Expenses. Every transaction in the app posts against one or more of these automatically."
+        sections={[
+          {
+            heading: "What you can do here",
+            items: [
+              "Add Account — create your own account (e.g. a specific expense category) alongside the built-in system accounts",
+              "Deactivate/Reactivate — hide an account you no longer use without deleting its history",
+              "Delete — only possible for accounts with no journal entries posted against them yet",
+            ],
+          },
+          {
+            heading: "Terms you'll see",
+            items: [
+              "System account — a built-in account (like Cash or Sales Revenue) that the app itself posts to; can't be deleted",
+              "Opening Balance / Balance Side — the starting balance for this account and which side (Debit or Credit) it sits on",
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }

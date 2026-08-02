@@ -17,6 +17,8 @@ import {
   AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
+import { InfoTooltip } from "@/components/InfoTooltip";
 
 const PIE_COLORS = ["#16a34a", "#f59e0b", "#3b82f6", "#8b5cf6", "#ef4444"];
 const CHART_GREEN = "#16a34a";
@@ -108,6 +110,7 @@ export default function Dashboard() {
   const { data: dailyStats } = useGetDailySalesStats();
   const { data: categoryStats } = useGetSalesByCategory();
 
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiQuery, setAiQuery] = useState("");
   const [aiMessages, setAiMessages] = useState<{ role: "user" | "ai"; text: string }[]>([
@@ -137,6 +140,7 @@ export default function Dashboard() {
           <p className="text-sm text-muted-foreground mt-0.5">
             {new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
           </p>
+          <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
         </div>
         <div className="flex gap-2 flex-wrap">
           <Link href="/app/billing">
@@ -184,7 +188,10 @@ export default function Dashboard() {
               <div className={`text-lg md:text-xl font-bold leading-tight tracking-tight ${summaryLoading ? "animate-pulse text-muted-foreground" : ""}`}>
                 {getStatValue(card)}
               </div>
-              <div className="text-xs text-muted-foreground mt-1 font-medium leading-tight">{card.label}</div>
+              <div className="text-xs text-muted-foreground mt-1 font-medium leading-tight flex items-center gap-1">
+                {card.label}
+                <InfoTooltip text={card.hint} />
+              </div>
             </CardContent>
           </Card>
         ))}
@@ -486,6 +493,31 @@ export default function Dashboard() {
       >
         <Bot className="w-6 h-6 text-primary-foreground" />
       </button>
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Dashboard"
+        description="Your shop's home screen — a live snapshot of today's business plus quick shortcuts to the things you do most."
+        sections={[
+          {
+            heading: "What you can do here",
+            items: [
+              "New Sale / New Girvi Loan / New Customer / Add Item — jump straight into the most common actions",
+              "Sales Trend — revenue over the last 30 days",
+              "Ask the AI assistant (bottom-right chat button) — quick questions about stock, sales, or profit",
+            ],
+          },
+          {
+            heading: "What the numbers mean",
+            items: [
+              "Today's Profit — an estimate based on making charges earned today, not a full accounting P&L",
+              "Inventory Value — total worth of everything currently in stock",
+              "Active Repairs — repair jobs that haven't been delivered back to the customer yet",
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }

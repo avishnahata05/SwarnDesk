@@ -15,6 +15,8 @@ import {
   Plus, Pencil, Trash2, PrinterIcon, AlertTriangle, CheckCircle2,
   ArrowRight, User, Hammer, Package, ChevronRight,
 } from "lucide-react";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
+import { InfoTooltip } from "@/components/InfoTooltip";
 import { useToast } from "@/hooks/use-toast";
 
 // ─── Status config ─────────────────────────────────────────────────────────────
@@ -207,6 +209,7 @@ export default function CustomOrders() {
 
   // ── View filter ──
   const [statusView, setStatusView] = useState<"active" | "delivered" | "cancelled">("active");
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
 
   // ── Create dialog ──
   const [addOpen, setAddOpen] = useState(false);
@@ -425,6 +428,7 @@ export default function CustomOrders() {
         <div>
           <h1 className="text-2xl font-bold">Custom Orders</h1>
           <p className="text-muted-foreground text-sm">Customer orders made-to-order via karigar</p>
+          <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
         </div>
         <Button onClick={() => setAddOpen(true)} className="gap-2">
           <Plus className="w-4 h-4" />New Order
@@ -866,6 +870,44 @@ export default function CustomOrders() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Custom Orders"
+        description="Track jewellery a customer has commissioned to be made-to-order — from taking the order and handing metal to a karigar (artisan), through to delivery."
+        sections={[
+          {
+            heading: "What you can do here",
+            items: [
+              "New Order — record a customer's custom order and its item specifications",
+              "Assign to a karigar and track metal issued to them for the job",
+              "Move an order through its status stages as work progresses",
+              "Mark Delivered — record final collection and any balance payment",
+              "Print — generate an order card for the customer or workshop",
+            ],
+          },
+          {
+            heading: "Status stages",
+            items: [
+              "Pending — order taken, not yet assigned",
+              "Karigar Assigned — handed off to an artisan",
+              "With Karigar — actively being made",
+              "Quality Check — returned from the karigar for inspection",
+              "Ready for Pickup — finished, waiting on the customer",
+              "Delivered / Cancelled — closed out",
+            ],
+          },
+          {
+            heading: "Terms you'll see",
+            items: [
+              "Karigar — your artisan/goldsmith who does the crafting work",
+              "Metal Issued Weight — how much gold/silver you handed the karigar for this order, tracked separately from the order's billed weight",
+              "Advance Paid — any deposit the customer already gave toward this order",
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }

@@ -112,6 +112,10 @@ export type Loan = {
   // corrected via PATCH/DELETE instead of only through the normal business
   // actions (collect/renew/redeem/forfeit/partial-release).
   isEditable: boolean;
+  // Set once a forfeiture notice has been issued (POST /:id/send-notice) —
+  // forfeiture is blocked until settings.forfeitureNoticeDays have elapsed since this.
+  noticeSentAt: string | null;
+  noticeNumber: string | null;
 };
 
 export type LoanItem = {
@@ -189,9 +193,11 @@ export type GirviSettings = {
   defaultLoanDurationDays: number;
   cashTransactionLimit: number;
   overdueGraceDays: number;
+  forfeitureNoticeDays: number;
   receiptPrefix: string;
   returnPrefix: string;
   transferPrefix: string;
   partialReleasePrefix: string;
+  noticePrefix: string;
   updatedAt: string;
 };

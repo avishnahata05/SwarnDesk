@@ -243,7 +243,45 @@ router.get("/financial-summary", async (req, res) => {
   }
 });
 
-// 6. Cash Compliance Flag — same-day cash receipts per customer exceeding the
+// 6. Aging Analysis — active loans bucketed by days overdue, for portfolio risk
+// review. "As of now" only, no date range (unlike the other registers).
+router.get("/aging", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const settings = await getOrCreateGirviSettings(userId);
+    const loans = await db.select().from(girviLoansTable).where(eq(girviLoansTable.userId, userId));
+    const now = new Date();
+    const active = loans.filter(l => l.status === "active" || l.status === "extended").map(l => mapLoan(l, now, settings.overdueGraceDays));
+
+    const BUCKETS: { key: string; label: string; test: (l: ReturnType<typeof mapLoan>) => boolean }[] = [
+      { key: "current", label: "Not Yet Due", test: l => !l.isOverdue },
+      { key: "1-30", label: "1–30 Days Overdue", test: l => l.isOverdue && l.overdueDaysRaw <= 30 },
+      { key: "31-60", label: "31–60 Days Overdue", test: l => l.isOverdue && l.overdueDaysRaw > 30 && l.overdueDaysRaw <= 60 },
+      { key: "61-90", label: "61–90 Days Overdue", test: l => l.isOverdue && l.overdueDaysRaw > 60 && l.overdueDaysRaw <= 90 },
+      { key: "90+", label: "90+ Days Overdue", test: l => l.isOverdue && l.overdueDaysRaw > 90 },
+    ];
+
+    const buckets = BUCKETS.map(b => {
+      const rows = active.filter(b.test);
+      return {
+        key: b.key,
+        label: b.label,
+        count: rows.length,
+        principal: Math.round(rows.reduce((s, l) => s + l.currentPrincipal, 0)),
+        outstandingInterest: Math.round(rows.reduce((s, l) => s + l.outstandingInterest, 0)),
+        totalDue: Math.round(rows.reduce((s, l) => s + l.totalDue, 0)),
+        loans: rows.map(l => ({ loanNumber: l.loanNumber, customerName: l.customerName, customerMobile: l.customerMobile, overdueDaysRaw: l.overdueDaysRaw, totalDue: l.totalDue })),
+      };
+    });
+
+    res.json({ asOf: now.toISOString(), buckets });
+  } catch (err) {
+    req.log.error({ err }, "Failed to build aging report");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// 7. Cash Compliance Flag — same-day cash receipts per customer exceeding the
 // configured limit (Sec. 269ST awareness — not a hard block, just a flag).
 router.get("/cash-compliance", async (req, res) => {
   try {

@@ -763,6 +763,202 @@ router.get("/:id/partial-releases", async (req, res) => {
   }
 });
 
+// Issue (or reissue) a forfeiture notice to the customer on an overdue loan.
+// Forfeiture (PATCH /:id with status:"forfeited") is blocked until
+// settings.forfeitureNoticeDays have elapsed since the LATEST notice — resending
+// simply restarts that clock, e.g. if the shop wants to give a fresh warning.
+router.post("/:id/send-notice", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const [loan] = await db.select().from(girviLoansTable).where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)));
+    if (!loan) return res.status(404).json({ error: "Not found" });
+    if (loan.status !== "active" && loan.status !== "extended") {
+      return res.status(400).json({ error: "Can only send a forfeiture notice on an active or extended loan" });
+    }
+    const settings = await getOrCreateGirviSettings(userId);
+    const now = new Date();
+    const mappedLoan = mapLoan(loan, now, settings.overdueGraceDays);
+    if (!mappedLoan.isOverdue) {
+      return res.status(400).json({ error: "This loan is not overdue yet — a forfeiture notice can only be sent once the due date has passed" });
+    }
+    const noticeNumber = await nextGirviNumber(userId, "notice", settings.noticePrefix, now);
+    const [updated] = await db.update(girviLoansTable)
+      .set({ noticeSentAt: now, noticeNumber, updatedAt: now })
+      .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
+      .returning();
+    res.json(mapLoan(updated, now, settings.overdueGraceDays));
+  } catch (err) {
+    req.log.error({ err }, "Failed to send forfeiture notice");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// "Today's Follow-Ups" — active loans overdue or due within `days` (default 3),
+// most urgent first. Deliberately independent of whatever status/due filter the
+// Loans tab currently has selected, so this always reflects the full book.
+router.get("/follow-ups", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const settings = await getOrCreateGirviSettings(userId);
+    const days = Math.max(0, parseInt(String(req.query.days ?? "3")) || 3);
+    const loans = await db.select().from(girviLoansTable).where(eq(girviLoansTable.userId, userId));
+    const now = new Date();
+    const active = loans.filter(l => l.status === "active" || l.status === "extended").map(l => mapLoan(l, now, settings.overdueGraceDays));
+    const dueSoon = active.filter(l => l.isOverdue || l.daysRemaining <= days).sort((a, b) => a.daysRemaining - b.daysRemaining);
+    res.json(dueSoon);
+  } catch (err) {
+    req.log.error({ err }, "Failed to build follow-ups list");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Top-up: increase the disbursed principal on an active loan, optionally against
+// newly added collateral and/or an interest payment collected at the same time.
+// Resets the interest clock (same as renew) so the added principal doesn't
+// appear to have been accruing interest since the ORIGINAL start date — any
+// interest already owed as of now is preserved via interestBaseline exactly
+// like renew does, it just isn't erased by the reset.
+router.post("/:id/topup", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const [loan] = await db.select().from(girviLoansTable).where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)));
+    if (!loan) return res.status(404).json({ error: "Not found" });
+    if (loan.status !== "active" && loan.status !== "extended") {
+      return res.status(400).json({ error: "Can only top up active or extended loans" });
+    }
+
+    const { additionalAmount, interestPaid, newDueDate, notes, paymentMode, referenceNumber, items } = req.body;
+    const addAmt = safeFloat(additionalAmount);
+    if (addAmt <= 0 || !isFinite(addAmt)) return res.status(400).json({ error: "Top-up amount must be a positive number" });
+    const paid = safeFloat(interestPaid, 0);
+    if (paid < 0 || !isFinite(paid)) return res.status(400).json({ error: "Interest amount must be zero or positive" });
+
+    const now = new Date();
+    const topupDueDate = newDueDate ? new Date(newDueDate) : new Date(loan.dueDate);
+    if (isNaN(topupDueDate.getTime())) return res.status(400).json({ error: "Invalid due date" });
+    if (topupDueDate <= now) return res.status(400).json({ error: "Due date must be in the future" });
+
+    // Optional additional collateral pledged alongside the top-up — same shape/
+    // validation as POST / and POST /:id/items.
+    type ItemInput = { itemType: string; quantity: number; metalType: string; purity: string; grossWeight: number; netWeight: number; estimatedValue: number; notes?: string; itemCode?: string };
+    const rawItems: ItemInput[] = Array.isArray(items) ? items : [];
+    const newItems = rawItems.map(it => ({
+      itemType: String(it.itemType ?? "Item").trim() || "Item",
+      quantity: Math.max(1, parseInt(String(it.quantity)) || 1),
+      metalType: VALID_METAL_TYPES.has(it.metalType) ? it.metalType : "gold",
+      purity: String(it.purity ?? "22K").trim() || "22K",
+      grossWeight: safeFloat(it.grossWeight),
+      netWeight: safeFloat(it.netWeight ?? it.grossWeight, safeFloat(it.grossWeight)),
+      estimatedValue: safeFloat(it.estimatedValue),
+      notes: it.notes ? String(it.notes).slice(0, MAX_NOTES_LEN) : null,
+      itemCode: it.itemCode ? String(it.itemCode).trim().slice(0, 100) || null : null,
+    }));
+    const invalidItem = newItems.find(it => it.grossWeight <= 0);
+    if (invalidItem) return res.status(400).json({ error: `Item "${invalidItem.itemType}" must have a positive gross weight` });
+
+    const resolvedNotes = notes ? String(notes).slice(0, MAX_NOTES_LEN) : null;
+    const resolvedMode = VALID_PAYMENT_MODES.has(paymentMode) ? paymentMode : "cash";
+    const resolvedRef = referenceNumber ? String(referenceNumber).trim().slice(0, 100) || null : null;
+    const mergedNotes = resolvedNotes
+      ? (loan.notes ? `${loan.notes}\n${resolvedNotes}`.slice(0, MAX_NOTES_LEN) : resolvedNotes)
+      : loan.notes;
+
+    const settings = await getOrCreateGirviSettings(userId);
+    const graceDays = settings.overdueGraceDays;
+    const { total: accruedBeforeTopup } = calcAccruedInterest(loan, now, graceDays);
+    const interestBaselineBefore = safeFloat((loan as any).interestBaseline ?? "0");
+    const collectedSinceReset = Math.max(0, safeFloat(loan.totalInterestCollected) - interestBaselineBefore);
+    const outstandingBeforeTopup = Math.max(0, accruedBeforeTopup - collectedSinceReset);
+
+    const accts = await getOrCreateDefaultAccounts(userId);
+    const newTotalCollected = safeFloat(loan.totalInterestCollected) + paid;
+    const newInterestBaseline = newTotalCollected + Math.max(0, outstandingBeforeTopup - paid);
+    const newLoanAmount = safeFloat(loan.loanAmount) + addAmt;
+
+    const updated = await db.transaction(async tx => {
+      if (newItems.length > 0) {
+        await tx.insert(girviLoanItemsTable).values(newItems.map(it => ({
+          userId, loanId: id, itemType: it.itemType, quantity: it.quantity, metalType: it.metalType, purity: it.purity,
+          grossWeight: (it.grossWeight * it.quantity).toFixed(3), netWeight: (it.netWeight * it.quantity).toFixed(3),
+          estimatedValue: (it.estimatedValue * it.quantity).toFixed(2), notes: it.notes, itemCode: it.itemCode,
+          status: "pledged" as const, currentBranchId: loan.branchId,
+        })));
+      }
+      if (paid > 0) {
+        await tx.insert(girviPaymentsTable).values({
+          userId, loanId: id, loanNumber: loan.loanNumber, customerName: loan.customerName,
+          amount: paid.toFixed(2), paymentType: "interest", paymentMode: resolvedMode, referenceNumber: resolvedRef,
+          paymentDate: now, notes: resolvedNotes ? `${resolvedNotes} [top-up]` : "Interest collected at top-up",
+        });
+      }
+
+      const loanUpdates: Record<string, unknown> = {
+        loanAmount: newLoanAmount.toFixed(2),
+        startDate: now,
+        dueDate: topupDueDate,
+        status: "active",
+        totalInterestCollected: newTotalCollected.toFixed(2),
+        interestBaseline: newInterestBaseline.toFixed(2),
+        notes: mergedNotes ?? null,
+        updatedAt: now,
+      };
+      if (newItems.length > 0) {
+        const allPledged = await tx.select().from(girviLoanItemsTable)
+          .where(and(eq(girviLoanItemsTable.loanId, id), eq(girviLoanItemsTable.userId, userId), eq(girviLoanItemsTable.status, "pledged")));
+        const aggregates = computeLoanAggregatesFromItems(allPledged.map(it => ({
+          itemType: it.itemType, quantity: it.quantity, metalType: it.metalType, purity: it.purity,
+          grossWeight: safeFloat(it.grossWeight), netWeight: safeFloat(it.netWeight), estimatedValue: safeFloat(it.estimatedValue),
+        })));
+        loanUpdates.grossWeight = aggregates.grossWeight.toFixed(3);
+        loanUpdates.netWeight = aggregates.netWeight.toFixed(3);
+        loanUpdates.estimatedValue = aggregates.estimatedValue.toFixed(2);
+        loanUpdates.metalType = aggregates.metalType;
+        loanUpdates.purity = aggregates.purity;
+        loanUpdates.itemDescription = aggregates.itemDescription;
+      }
+
+      const [u] = await tx.update(girviLoansTable).set(loanUpdates as Partial<typeof girviLoansTable.$inferInsert>)
+        .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
+        .returning();
+
+      // Dr Girvi Loans Receivable (addAmt) / Cr Cash (addAmt) — additional principal disbursed.
+      await postJournalEntry(tx, {
+        userId, voucherDate: now, voucherType: "payment",
+        narration: `Girvi loan ${loan.loanNumber} top-up disbursed`,
+        sourceModule: "girvi", sourceId: id,
+        lines: [
+          { accountId: accts.GIRVI_LOANS_RECEIVABLE, debit: addAmt, partyType: "girvi_customer", partyId: loan.customerId ?? undefined, particulars: "Top-up principal disbursed" },
+          { accountId: accts.CASH, credit: addAmt, particulars: "Cash disbursed (top-up)" },
+        ],
+      });
+
+      if (paid > 0) {
+        await postJournalEntry(tx, {
+          userId, voucherDate: now, voucherType: "receipt",
+          narration: `Interest collected at top-up on girvi loan ${loan.loanNumber}`,
+          sourceModule: "girvi", sourceId: id,
+          lines: [
+            { accountId: accts[cashOrBankKey(resolvedMode)], debit: paid, particulars: "Interest received" },
+            { accountId: accts.INTEREST_INCOME, credit: paid, particulars: "Interest" },
+          ],
+        });
+      }
+
+      return u;
+    });
+
+    res.json(mapLoan(updated, new Date(), graceDays));
+  } catch (err) {
+    req.log.error({ err }, "Failed to top up loan");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Record a payment — supports interest, penalty, and smart auto-allocation.
 // paymentType: "auto" (default) | "interest" | "penalty"
 //
@@ -1168,6 +1364,15 @@ router.patch("/:id", async (req, res) => {
     } else if (data.status === "forfeited") {
       if (loan.status !== "active" && loan.status !== "extended") {
         return res.status(400).json({ error: "Only active/extended loans can be forfeited" });
+      }
+      // A forfeiture notice must have been sent, and the configured notice
+      // period must have fully elapsed since it — see POST /:id/send-notice.
+      if (!loan.noticeSentAt) {
+        return res.status(400).json({ error: "Send a forfeiture notice to the customer first — required before this loan can be forfeited" });
+      }
+      const eligibleFrom = new Date(loan.noticeSentAt.getTime() + settings.forfeitureNoticeDays * 86400000);
+      if (now < eligibleFrom) {
+        return res.status(400).json({ error: `Notice period not yet complete — this loan can be forfeited on or after ${eligibleFrom.toISOString().slice(0, 10)} (${settings.forfeitureNoticeDays} days from the notice)` });
       }
       const { total: accruedInterest } = calcAccruedInterest(loan, now, graceDays);
       const interestBaseline = safeFloat((loan as any).interestBaseline ?? "0");

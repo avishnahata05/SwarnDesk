@@ -16,26 +16,30 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 
+// `description` is a one-line "what is this module" hint, shown as a hover
+// tooltip on the nav link — the same native title= pattern already used for
+// the rate ticker below, so a first-time user can tell what a module does
+// before ever clicking into it.
 const navItems = [
   // Daily operations
-  { href: "/app/dashboard", label: "Dashboard", labelHi: "डैशबोर्ड", icon: LayoutDashboard },
-  { href: "/app/billing", label: "Billing & POS", labelHi: "बिलिंग", icon: ShoppingCart },
-  { href: "/app/customers", label: "Customers", labelHi: "ग्राहक", icon: Users },
+  { href: "/app/dashboard", label: "Dashboard", labelHi: "डैशबोर्ड", icon: LayoutDashboard, description: "Live overview of today's sales, profit, and shop activity" },
+  { href: "/app/billing", label: "Billing & POS", labelHi: "बिलिंग", icon: ShoppingCart, description: "Create sales, print invoices, apply GST and old-gold exchange" },
+  { href: "/app/customers", label: "Customers", labelHi: "ग्राहक", icon: Users, description: "Customer directory, purchase history, and loyalty points" },
   // Stock & supply
-  { href: "/app/inventory", label: "Inventory", labelHi: "इन्वेंटरी", icon: Package },
-  { href: "/app/purchases", label: "Purchases", labelHi: "खरीद", icon: TruckIcon },
+  { href: "/app/inventory", label: "Inventory", labelHi: "इन्वेंटरी", icon: Package, description: "Manage stock, HUID/hallmark, and barcode labels" },
+  { href: "/app/purchases", label: "Purchases", labelHi: "खरीद", icon: TruckIcon, description: "Track metal and stock bought in from suppliers" },
   // Production
-  { href: "/app/custom-orders", label: "Custom Orders", labelHi: "कस्टम ऑर्डर", icon: ClipboardList },
-  { href: "/app/karigars", label: "Karigars", labelHi: "कारीगर", icon: Hammer },
+  { href: "/app/custom-orders", label: "Custom Orders", labelHi: "कस्टम ऑर्डर", icon: ClipboardList, description: "Track made-to-order jewellery from order to delivery" },
+  { href: "/app/karigars", label: "Karigars", labelHi: "कारीगर", icon: Hammer, description: "Manage your artisans/goldsmiths and metal issued to them" },
   // Services
-  { href: "/app/repairs", label: "Repairs", labelHi: "मरम्मत", icon: Wrench },
-  { href: "/app/girvi", label: "Girvi", labelHi: "गिरवी", icon: Banknote },
+  { href: "/app/repairs", label: "Repairs", labelHi: "मरम्मत", icon: Wrench, description: "Track repair jobs from intake to delivery" },
+  { href: "/app/girvi", label: "Girvi", labelHi: "गिरवी", icon: Banknote, description: "Gold/silver pawn loans — pledge, collect interest, redeem" },
   // Finance & growth
-  { href: "/app/pending-payments", label: "Pending Payments", labelHi: "बकाया भुगतान", icon: Clock },
-  { href: "/app/accounting", label: "Accounting", labelHi: "लेखा", icon: BookOpen },
-  { href: "/app/marketing", label: "Marketing", labelHi: "मार्केटिंग", icon: Megaphone },
-  { href: "/app/reports", label: "Reports", labelHi: "रिपोर्ट", icon: BarChart3 },
-  { href: "/app/settings", label: "Settings", labelHi: "सेटिंग्स", icon: Settings },
+  { href: "/app/pending-payments", label: "Pending Payments", labelHi: "बकाया भुगतान", icon: Clock, description: "Outstanding balances customers still owe you" },
+  { href: "/app/accounting", label: "Accounting", labelHi: "लेखा", icon: BookOpen, description: "Full double-entry books, ledgers, and financial reports" },
+  { href: "/app/marketing", label: "Marketing", labelHi: "मार्केटिंग", icon: Megaphone, description: "Send WhatsApp promotions and greetings to customers" },
+  { href: "/app/reports", label: "Reports", labelHi: "रिपोर्ट", icon: BarChart3, description: "Sales trends, category breakdowns, and GSTR-1 export" },
+  { href: "/app/settings", label: "Settings", labelHi: "सेटिंग्स", icon: Settings, description: "Shop profile, tax rules, metal rates, and integrations" },
 ];
 
 interface AppLayoutProps {
@@ -129,12 +133,13 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
         {/* Nav */}
         <nav className="flex-1 py-4 px-3 space-y-0.5 overflow-y-auto">
-          {navItems.map(({ href, label, labelHi, icon: Icon }) => {
+          {navItems.map(({ href, label, labelHi, icon: Icon, description }) => {
             const isActive = location === href || location.startsWith(href + "/");
             return (
               <Link
                 key={href}
                 href={href}
+                title={description}
                 data-testid={`nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all duration-150 group",

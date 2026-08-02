@@ -12,6 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Users, Plus, Search, ChevronDown, ChevronUp, ShieldCheck, ShieldAlert, Pencil, Trash2 } from "lucide-react";
 import { API, getAuthHeaders, authHeader } from "./api";
 import type { Customer, CustomerStatement } from "./types";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
+import { InfoTooltip } from "@/components/InfoTooltip";
 
 type CustomerForm = {
   name: string; mobile: string; fatherName: string; address: string; altMobile: string; email: string;
@@ -39,6 +41,7 @@ export default function CustomersTab() {
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
 
   const closeForm = useCallback(() => setShowForm(false), []);
   useBackClose(showForm, closeForm);
@@ -140,6 +143,7 @@ export default function CustomersTab() {
             Girvi Customers
           </h1>
           <p className="text-muted-foreground text-sm mt-0.5">Standalone customer ledger — KYC, contact details, full transaction history</p>
+          <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
         </div>
         <Button size="sm" onClick={openCreate} className="gap-1.5">
           <Plus className="w-3.5 h-3.5" />New Customer
@@ -175,6 +179,9 @@ export default function CustomersTab() {
                           ) : (
                             <Badge variant="outline" className="text-[10px] gap-1 text-amber-700 border-amber-300"><ShieldAlert className="w-3 h-3" />KYC Missing</Badge>
                           )}
+                          <span onClick={e => e.stopPropagation()}>
+                            <InfoTooltip text="KYC (Know Your Customer) = has an ID proof type AND number on file. 'Missing' just means one of those two fields is blank — it doesn't block creating a loan." />
+                          </span>
                         </div>
                         <div className="text-xs text-muted-foreground mt-0.5">{c.mobile}{c.fatherName ? ` · F/H: ${c.fatherName}` : ""}</div>
                       </div>
@@ -314,6 +321,31 @@ export default function CustomersTab() {
           )}
         </DialogContent>
       </Dialog>
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Girvi Customers"
+        description="This is the customer directory just for the Girvi (pawn loan) module — kept separate from your regular shop customers so KYC and loan history stay specific to pawnbroking. Click any customer to see their full statement."
+        sections={[
+          {
+            heading: "What you can do here",
+            items: [
+              "New Customer — add someone before their first loan (or let New Girvi Loan create them inline)",
+              "Search — by name, mobile, or customer code",
+              "Click a row — expand to see their loan history, payment history, and current outstanding balance",
+              "Edit / Delete — delete is blocked if the customer has any loan history, to protect the audit trail",
+            ],
+          },
+          {
+            heading: "Terms you'll see",
+            items: [
+              "KYC OK / Missing — whether an ID proof type and number are both on file for this customer",
+              "Customer Code — an internal reference number assigned automatically",
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }

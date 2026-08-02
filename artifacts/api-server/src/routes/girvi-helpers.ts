@@ -214,6 +214,8 @@ export function mapLoan(l: typeof girviLoansTable.$inferSelect, asOf = new Date(
     notes: l.notes,
     createdAt: l.createdAt.toISOString(),
     isEditable: isLoanEditable(l),
+    noticeSentAt: l.noticeSentAt?.toISOString() ?? null,
+    noticeNumber: l.noticeNumber,
   };
 }
 

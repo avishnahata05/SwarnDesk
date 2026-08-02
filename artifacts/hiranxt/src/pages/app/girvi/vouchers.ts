@@ -129,6 +129,70 @@ ${payment.notes ? `<div style="margin-top:8px;padding:6px;background:#f8f9fa;bor
   openWindow(html, 420, 600);
 }
 
+// ─── Forfeiture notice — issued before an overdue loan can be forfeited ────
+export function printForfeitureNotice(
+  loan: Loan,
+  shopName: string,
+  shopAddress: string,
+  shopMobile: string,
+  noticeDays: number,
+  settings?: GirviSettings,
+) {
+  const noticeDate = loan.noticeSentAt ? new Date(loan.noticeSentAt) : new Date();
+  const eligibleFrom = new Date(noticeDate.getTime() + noticeDays * 86400000);
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+<title>Notice — ${loan.loanNumber}</title>
+<style>${printCss}</style></head><body><div class="page">
+<div class="no-print" style="text-align:right;margin-bottom:16px">
+  <button onclick="window.print()" style="background:#1a3e6e;color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">🖨️ Print Notice</button>
+</div>
+${shopHeader(settings, shopName, shopAddress, shopMobile)}
+<div class="doc-title" style="border-color:#c0392b;color:#c0392b">Notice of Overdue Pledge</div>
+<div class="meta-row">
+  <div class="meta-item"><div class="meta-label">Notice #</div><div class="meta-value">${esc(loan.noticeNumber) || "—"}</div></div>
+  <div class="meta-item"><div class="meta-label">Notice Date</div><div class="meta-value">${fmtDate(noticeDate.toISOString())}</div></div>
+  <div class="meta-item"><div class="meta-label">Loan #</div><div class="meta-value">${esc(loan.loanNumber)}</div></div>
+</div>
+<div class="section" style="margin-bottom:12px">
+  <div class="section-title">To</div>
+  <div class="field"><span class="field-label">Name</span><span class="field-value">${esc(loan.customerName)}</span></div>
+  ${loan.fatherName ? `<div class="field"><span class="field-label">Father's Name</span><span class="field-value">${esc(loan.fatherName)}</span></div>` : ""}
+  <div class="field"><span class="field-label">Mobile</span><span class="field-value">${esc(loan.customerMobile)}</span></div>
+  ${loan.address ? `<div class="field"><span class="field-label">Address</span><span class="field-value" style="white-space:pre-line">${esc(loan.address)}</span></div>` : ""}
+</div>
+<div class="section" style="margin-bottom:12px">
+  <div class="section-title">Regarding</div>
+  <div class="field"><span class="field-label">Collateral</span><span class="field-value">${loan.metalType.toUpperCase()} ${esc(loan.purity)} · ${loan.grossWeight.toFixed(3)}g</span></div>
+  ${loan.itemDescription ? `<div class="field"><span class="field-label">Items</span><span class="field-value" style="max-width:60%">${esc(loan.itemDescription)}</span></div>` : ""}
+  <div class="field"><span class="field-label">Due Date</span><span class="field-value">${fmtDate(loan.dueDate)}</span></div>
+  <div class="field"><span class="field-label">Days Overdue</span><span class="field-value" style="color:#c0392b">${loan.overdueDaysRaw}</span></div>
+</div>
+<div class="amount-box" style="background:#fef2f2;border-color:#c0392b">
+  <div class="amount-label" style="color:#c0392b">Total Amount Due</div>
+  <div class="amount-value" style="color:#c0392b">${fmt(loan.totalDue)}</div>
+</div>
+<div class="terms">
+  <div class="section-title">Notice</div>
+  <p style="font-size:11.5px;color:#333;line-height:1.6">
+    This is to notify you that the above loan, secured against the pledged item(s) described above, is overdue as of ${fmtDate(loan.dueDate)}.
+    You are hereby given <strong>${noticeDays} days</strong> from the date of this notice — i.e. until <strong>${fmtDate(eligibleFrom.toISOString())}</strong> —
+    to clear the outstanding dues of <strong>${fmt(loan.totalDue)}</strong> and redeem your pledged item(s).
+  </p>
+  <p style="font-size:11.5px;color:#333;line-height:1.6;margin-top:8px">
+    If the dues remain unpaid after this date, the shop reserves the right to forfeit and dispose of the pledged item(s) as per the terms agreed at the time of pledge, without further notice.
+  </p>
+</div>
+<div class="sig-row">
+  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Customer Signature (on receipt of notice)</div></div>
+  <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised by ${esc(settings?.shopName || shopName)}</div></div>
+</div>
+<div class="footer">This is a computer-generated notice. Powered by SwarnDesk Girvi.</div>
+</div></body></html>`;
+
+  openWindow(html, 720, 700);
+}
+
 // ─── Pledge voucher (Girvi Receipt Voucher) ────────────────────────────────
 export function openGirviVoucher(
   loan: Loan, shopName: string, shopAddress: string, shopMobile: string,

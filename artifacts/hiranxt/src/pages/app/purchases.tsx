@@ -16,6 +16,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { useForm } from "react-hook-form";
 import { Plus, Pencil, Ban, Users2, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
+import { InfoTooltip } from "@/components/InfoTooltip";
 
 interface PurchaseForm {
   supplierId: string; supplierName: string; metalType: string; purity: string;
@@ -33,6 +35,7 @@ export default function Purchases() {
   const [suppliersOpen, setSuppliersOpen] = useState(false);
   const [supplierForm, setSupplierForm] = useState({ id: 0, name: "", mobile: "", address: "", gstin: "", email: "" });
   const [supplierDialogOpen, setSupplierDialogOpen] = useState(false);
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -229,7 +232,10 @@ export default function Purchases() {
           <Input type="number" step="0.001" {...register("netWeight", { required: true })} data-testid="input-purchase-net" />
         </div>
         <div>
-          <label className="text-xs text-muted-foreground mb-1 block" title="Fine weight = pure metal equivalent after adjusting for purity">Fine Weight (g)</label>
+          <label className="text-xs text-muted-foreground flex items-center gap-1 mb-1">
+            Fine Weight (g)
+            <InfoTooltip text="Fine weight = pure metal equivalent after adjusting for purity — e.g. 100g of 22K gold (91.6% pure) is about 91.6g fine weight." />
+          </label>
           <Input type="number" step="0.001" {...register("fineWeight")} placeholder="Same as net if pure" data-testid="input-purchase-fine" />
         </div>
         <div>
@@ -285,6 +291,7 @@ export default function Purchases() {
         <div>
           <h1 className="text-2xl font-bold">Purchases</h1>
           <p className="text-muted-foreground text-sm">Track metal receipts and supplier purchases</p>
+          <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => setSuppliersOpen(true)} className="gap-2" data-testid="button-manage-suppliers">
@@ -406,6 +413,31 @@ export default function Purchases() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Purchases"
+        description="Records of gold/silver bought in from suppliers — raw metal or bullion coming into your shop, separate from finished-item sales."
+        sections={[
+          {
+            heading: "What you can do here",
+            items: [
+              "New Purchase — record a metal receipt from a supplier",
+              "Suppliers — add/edit the supplier list used when recording a purchase",
+              "Edit / Cancel — corrections are only allowed before any follow-up payment is collected against a purchase",
+            ],
+          },
+          {
+            heading: "Terms you'll see",
+            items: [
+              "Fine Weight — the pure-metal equivalent of the weight purchased, adjusted for purity",
+              "Balance — how much of the total purchase amount is still unpaid to the supplier",
+              "Payment Mode: Credit — nothing paid yet, the full amount is owed",
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }

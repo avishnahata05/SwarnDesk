@@ -21,6 +21,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useMetalRateForm } from "@/hooks/use-metal-rate-form";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { ShortcutsHelpDialog, ShortcutsHelpButton } from "@/components/ShortcutsHelp";
+import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
+import { InfoTooltip } from "@/components/InfoTooltip";
 
 interface CartItem {
   inventoryItemId: number;
@@ -385,6 +387,7 @@ export default function Billing() {
   const customerSearchInputRef = useRef<HTMLInputElement>(null);
   const itemSearchInputRef = useRef<HTMLInputElement>(null);
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
+  const [pageHelpOpen, setPageHelpOpen] = useState(false);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -790,7 +793,10 @@ export default function Billing() {
           <h1 className="text-2xl font-bold">Billing & POS</h1>
           <p className="text-muted-foreground text-sm">{shopInfo.name}</p>
         </div>
-        <ShortcutsHelpButton onClick={() => setShortcutsHelpOpen(true)} />
+        <div className="flex items-center gap-3">
+          <ShortcutsHelpButton onClick={() => setShortcutsHelpOpen(true)} />
+          <PageHelpButton onClick={() => setPageHelpOpen(true)} />
+        </div>
       </div>
 
       <ShortcutsHelpDialog
@@ -805,6 +811,38 @@ export default function Billing() {
           { keys: "2", description: "Quick Entry tab" },
           { keys: "3", description: "Barcode Scan tab" },
           { keys: "?", description: "Show this help" },
+        ]}
+      />
+
+      <PageHelpDialog
+        open={pageHelpOpen}
+        onClose={() => setPageHelpOpen(false)}
+        title="Billing & POS"
+        description="Where you build and finalize a sale — pick items from stock, or enter one quickly by weight, apply discounts or an old-gold exchange, and print/save the invoice."
+        sections={[
+          {
+            heading: "The three ways to add an item",
+            items: [
+              "Stock — pick an existing inventory item; price is calculated from its weight, purity, and making charges",
+              "Quick Entry — bill something not in your stock list by typing its weight/rate directly",
+              "Barcode Scan — scan a printed tag to add that exact item instantly",
+            ],
+          },
+          {
+            heading: "What you can apply to a sale",
+            items: [
+              "Discount — a flat reduction off the subtotal",
+              "Exchange Gold — old gold the customer traded in; its value is deducted from what they owe",
+            ],
+          },
+          {
+            heading: "Terms you'll see",
+            items: [
+              "Making Charges — the labour/craftsmanship fee, usually a % of the metal value",
+              "CGST / SGST — the two halves of GST split between center and state for an in-state sale",
+              "HUID — BIS Hallmark Unique ID, printed on the invoice for hallmarked items",
+            ],
+          },
         ]}
       />
 
@@ -1310,7 +1348,10 @@ export default function Billing() {
                     className="w-24 text-right bg-background border border-border rounded px-2 py-1 text-sm focus:border-primary outline-none" data-testid="input-discount" />
                 </div>
                 <div className="flex justify-between items-center gap-2">
-                  <span className="text-muted-foreground shrink-0">Exchange Gold (g)</span>
+                  <span className="text-muted-foreground shrink-0 flex items-center gap-1">
+                    Exchange Gold (g)
+                    <InfoTooltip text="Old gold the customer is trading in as part-payment. Its value (at today's rate) is deducted from what they owe on this sale." />
+                  </span>
                   <input type="number" step="0.001" value={exchangeGoldWeight} onChange={e => setExchangeGoldWeight(parseFloat(e.target.value) || 0)}
                     className="w-24 text-right bg-background border border-border rounded px-2 py-1 text-sm focus:border-primary outline-none" data-testid="input-exchange-gold" />
                 </div>
