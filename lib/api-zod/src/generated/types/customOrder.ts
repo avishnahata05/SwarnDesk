@@ -24,6 +24,8 @@ export interface CustomOrder {
   estimatedPrice: number | null;
   /** @nullable */
   agreedPrice: number | null;
+  /** @nullable */
+  bookingMetalRate: number | null;
   advancePaid: number;
   /** pending, karigar_assigned, in_progress, karigar_returned, ready, delivered, cancelled */
   status: string;

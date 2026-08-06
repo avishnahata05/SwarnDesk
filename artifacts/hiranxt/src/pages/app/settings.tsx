@@ -12,6 +12,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Link } from "wouter";
 import { useMetalRateForm } from "@/hooks/use-metal-rate-form";
 import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
+import StaffRolesCard from "@/components/StaffRolesCard";
 
 function getAuthHeaders(): Record<string, string> {
   const token = localStorage.getItem("swarndesk_token");
@@ -37,7 +38,7 @@ interface LoyaltyConfig {
 
 export default function Settings() {
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, isShopAdmin } = useAuth();
   const queryClient = useQueryClient();
   const { data: settings, isLoading } = useGetSettings();
   const updateSettings = useUpdateSettings();
@@ -470,39 +471,14 @@ export default function Settings() {
           </CardContent>
         </Card>
 
-        {/* User Roles */}
-        <Card className="border-border">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <SettingsIcon className="w-4 h-4 text-primary" />User Roles
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-xs text-muted-foreground mb-3">(Role assignment for staff logins is coming soon — this is a preview of upcoming roles.)</p>
-            <div className="space-y-2">
-              {[
-                { role: "Admin", desc: "Full access to all modules", active: true },
-                { role: "Salesperson", desc: "Billing, inventory view, customer management", active: true },
-                { role: "Accountant", desc: "Reports, purchases, ledger access", active: false },
-              ].map(r => (
-                <div key={r.role} className="flex items-center justify-between p-3 rounded-lg border border-border">
-                  <div>
-                    <div className="text-sm font-medium">{r.role}</div>
-                    <div className="text-xs text-muted-foreground">{r.desc}</div>
-                  </div>
-                  <div className={`text-xs font-medium ${r.active ? "text-green-400" : "text-muted-foreground"}`}>
-                    {r.active ? "Active" : "Inactive"}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
         <Button type="submit" disabled={updateSettings.isPending} className="w-full" data-testid="button-save-settings">
           {updateSettings.isPending ? "Saving..." : "Save Settings"}
         </Button>
       </form>
+
+      {/* Staff & Roles — separate save, only shown to the owner/admin (route+API already
+          gate this, but hiding it here avoids showing a card whose actions would all 403). */}
+      {isShopAdmin && <StaffRolesCard />}
 
       {/* WhatsApp Business API — separate save */}
       <Card className="border-border border-green-500/20">

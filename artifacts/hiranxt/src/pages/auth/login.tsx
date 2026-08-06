@@ -139,6 +139,9 @@ export default function LoginPage() {
         <p className="text-center text-xs text-muted-foreground">
           7-day free trial — no credit card required
         </p>
+        <p className="text-center text-[10px] text-muted-foreground/40">
+          SwarnDesk by <a href="https://www.tirthontech.com" target="_blank" rel="noopener noreferrer" className="hover:text-muted-foreground hover:underline underline-offset-2">TirthonTech</a>
+        </p>
       </div>
     </div>
   );

@@ -10,6 +10,11 @@ export const repairJobsTable = pgTable("repair_jobs", {
   customerMobile: text("customer_mobile").notNull(),
   itemDescription: text("item_description").notNull(),
   issue: text("issue").notNull(),
+  // Weight at intake — captured so the shop can verify the item comes back at (about) the
+  // same weight at delivery, rather than taking the karigar's/customer's word for it.
+  // Nullable: not every repair (e.g. a clasp fix) needs this level of scrutiny.
+  grossWeight: numeric("gross_weight", { precision: 10, scale: 3 }),
+  netWeight: numeric("net_weight", { precision: 10, scale: 3 }),
   estimatedCost: numeric("estimated_cost", { precision: 10, scale: 2 }).notNull(),
   actualCost: numeric("actual_cost", { precision: 10, scale: 2 }),
   status: text("status").notNull().default("received"), // received, in_progress, ready, delivered

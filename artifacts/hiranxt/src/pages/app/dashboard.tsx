@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   TrendingUp, Package, Users, Wrench, AlertTriangle, Plus,
-  Bot, X, Send, ShoppingCart, IndianRupee, ArrowUpRight,
+  ShoppingCart, IndianRupee, ArrowUpRight,
   Banknote, UserPlus,
 } from "lucide-react";
 import {
@@ -22,23 +22,6 @@ import { InfoTooltip } from "@/components/InfoTooltip";
 
 const PIE_COLORS = ["#16a34a", "#f59e0b", "#3b82f6", "#8b5cf6", "#ef4444"];
 const CHART_GREEN = "#16a34a";
-
-const AI_RESPONSES: Record<string, string> = {
-  "low stock": "You have items with low stock. Check the Inventory page for details and reorder alerts.",
-  "today": "Today's sales are live on your dashboard. Scroll up to see the summary cards.",
-  "best selling": "Gold bangles and chains are your top-selling categories this month based on transaction data.",
-  "profit": "Today's estimated profit is 15% of sales revenue. Check the Reports page for detailed P&L.",
-  "repair": "There are pending repair jobs awaiting delivery. Visit the Repairs page to update statuses.",
-  "customer": "You have customers with upcoming birthdays and anniversaries. Send them a WhatsApp greeting!",
-};
-
-function getAIResponse(query: string): string {
-  const q = query.toLowerCase();
-  for (const [key, resp] of Object.entries(AI_RESPONSES)) {
-    if (q.includes(key)) return resp;
-  }
-  return `I found information related to "${query}". Your SwarnDesk data shows healthy business activity. Visit the relevant module for detailed insights.`;
-}
 
 const statCards = [
   {
@@ -111,18 +94,6 @@ export default function Dashboard() {
   const { data: categoryStats } = useGetSalesByCategory();
 
   const [pageHelpOpen, setPageHelpOpen] = useState(false);
-  const [aiOpen, setAiOpen] = useState(false);
-  const [aiQuery, setAiQuery] = useState("");
-  const [aiMessages, setAiMessages] = useState<{ role: "user" | "ai"; text: string }[]>([
-    { role: "ai", text: "Hello! I'm your SwarnDesk AI assistant. Ask me about low stock, today's sales, best-selling categories, or anything about your business." }
-  ]);
-
-  const sendAiQuery = () => {
-    if (!aiQuery.trim()) return;
-    const q = aiQuery.trim();
-    setAiMessages(prev => [...prev, { role: "user", text: q }, { role: "ai", text: getAIResponse(q) }]);
-    setAiQuery("");
-  };
 
   function getStatValue(card: typeof statCards[0]): string {
     if (summaryLoading) return "—";
@@ -428,71 +399,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
-
-      {/* AI Chat widget */}
-      {aiOpen && (
-        <div className="fixed bottom-24 right-4 z-50 w-[calc(100vw-2rem)] sm:w-80 max-w-sm bg-white border border-border rounded-2xl shadow-xl flex flex-col overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-sidebar text-white">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center">
-                <Bot className="w-4 h-4 text-white" />
-              </div>
-              <div>
-                <div className="text-sm font-semibold">SwarnDesk AI</div>
-                <div className="text-[10px] text-white/60">Ask me anything</div>
-              </div>
-            </div>
-            <button onClick={() => setAiOpen(false)} className="text-white/70 hover:text-white transition-colors">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="px-3 pt-2 pb-1 bg-amber-50 border-b border-amber-200">
-            <p className="text-[10px] text-amber-800 leading-snug">
-              Demo assistant — answers are illustrative examples, not based on your live shop data.
-            </p>
-          </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-3 max-h-64 bg-muted/30">
-            {aiMessages.map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-xs leading-relaxed ${
-                  msg.role === "user"
-                    ? "bg-primary text-primary-foreground rounded-br-sm"
-                    : "bg-white border border-border text-foreground rounded-bl-sm shadow-xs"
-                }`}>
-                  {msg.text}
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="p-3 border-t border-border bg-white flex gap-2">
-            <input
-              className="flex-1 bg-muted border border-border rounded-xl px-3 py-2 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all"
-              placeholder="Ask about stock, sales, profits…"
-              value={aiQuery}
-              onChange={e => setAiQuery(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && sendAiQuery()}
-              data-testid="input-ai-query"
-            />
-            <button
-              onClick={sendAiQuery}
-              className="w-9 h-9 bg-primary rounded-xl flex items-center justify-center hover:opacity-90 transition-opacity shrink-0 shadow-sm"
-              data-testid="button-ai-send"
-            >
-              <Send className="w-3.5 h-3.5 text-primary-foreground" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* AI FAB */}
-      <button
-        onClick={() => setAiOpen(o => !o)}
-        className="fixed bottom-6 right-4 z-40 w-14 h-14 bg-primary rounded-full flex items-center justify-center shadow-lg hover:scale-105 hover:opacity-95 transition-all duration-200"
-        data-testid="button-ai-chat"
-        title="Ask SwarnDesk AI"
-      >
-        <Bot className="w-6 h-6 text-primary-foreground" />
-      </button>
 
       <PageHelpDialog
         open={pageHelpOpen}

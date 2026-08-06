@@ -40,6 +40,8 @@ function mapRepair(r: typeof repairJobsTable.$inferSelect) {
     customerMobile: r.customerMobile,
     itemDescription: r.itemDescription,
     issue: r.issue,
+    grossWeight: r.grossWeight ? parseFloat(r.grossWeight) : null,
+    netWeight: r.netWeight ? parseFloat(r.netWeight) : null,
     estimatedCost: parseFloat(r.estimatedCost),
     actualCost: r.actualCost ? parseFloat(r.actualCost) : null,
     status: r.status,
@@ -107,6 +109,8 @@ router.post("/", async (req, res) => {
         customerMobile: data.customerMobile.trim(),
         itemDescription: data.itemDescription.trim(),
         issue: data.issue.trim(),
+        grossWeight: data.grossWeight ? safeFloat(data.grossWeight).toString() : null,
+        netWeight: data.netWeight ? safeFloat(data.netWeight).toString() : null,
         estimatedCost: estimatedCost.toString(),
         promisedDate,
         ...(receivedDate ? { receivedDate } : {}),
@@ -159,6 +163,8 @@ router.patch("/:id", async (req, res) => {
     if (data.customerMobile !== undefined) updateData.customerMobile = String(data.customerMobile).trim();
     if (data.itemDescription !== undefined) updateData.itemDescription = String(data.itemDescription).trim();
     if (data.issue !== undefined) updateData.issue = String(data.issue).trim();
+    if (data.grossWeight !== undefined) updateData.grossWeight = data.grossWeight ? safeFloat(data.grossWeight).toString() : null;
+    if (data.netWeight !== undefined) updateData.netWeight = data.netWeight ? safeFloat(data.netWeight).toString() : null;
     if (data.estimatedCost !== undefined) updateData.estimatedCost = parseFloat(String(data.estimatedCost)).toString();
     if (data.promisedDate !== undefined) updateData.promisedDate = new Date(data.promisedDate);
     if (data.receivedDate !== undefined) updateData.receivedDate = new Date(data.receivedDate);

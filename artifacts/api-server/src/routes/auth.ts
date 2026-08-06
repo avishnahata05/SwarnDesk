@@ -1,7 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
-import { db, usersTable, paymentRequestsTable } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
+import { db, usersTable, paymentRequestsTable, staffTable } from "@workspace/db";
+import { eq, and, desc } from "drizzle-orm";
 import { signToken, verifyToken, authMiddleware } from "../middleware/auth.js";
 import { PLANS, isValidPlanId } from "../lib/plans.js";
 
@@ -37,8 +37,10 @@ router.post("/register", async (req, res) => {
       trialEndsAt: user.trialEndsAt.toISOString(),
       subscriptionEndsAt: null,
       shopName: user.shopName,
+      staffId: null,
+      staffRole: null,
     });
-    res.status(201).json({ token, user: { id: user.id, email: user.email, name: user.name, shopName: user.shopName, role: user.role, plan: user.plan, trialEndsAt: user.trialEndsAt, subscriptionEndsAt: null } });
+    res.status(201).json({ token, user: { id: user.id, email: user.email, name: user.name, shopName: user.shopName, role: user.role, plan: user.plan, trialEndsAt: user.trialEndsAt, subscriptionEndsAt: null, staffId: null, staffRole: null } });
   } catch (err) {
     req.log.error({ err }, "Register failed");
     res.status(500).json({ error: "Registration failed" });
@@ -50,7 +52,7 @@ router.post("/login", async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: "Email and password required" });
     const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email.toLowerCase())).limit(1);
-    if (!user) return res.status(401).json({ error: "Invalid email or password" });
+    if (!user) return loginAsStaff(req, res, email, password);
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) return res.status(401).json({ error: "Invalid email or password" });
     // Refresh plan status on login
@@ -71,13 +73,46 @@ router.post("/login", async (req, res) => {
       trialEndsAt: user.trialEndsAt.toISOString(),
       subscriptionEndsAt: user.subscriptionEndsAt ? new Date(user.subscriptionEndsAt).toISOString() : null,
       shopName: user.shopName,
+      staffId: null,
+      staffRole: null,
     });
-    res.json({ token, user: { id: user.id, email: user.email, name: user.name, shopName: user.shopName, role: user.role, plan, trialEndsAt: user.trialEndsAt, subscriptionEndsAt: user.subscriptionEndsAt ?? null } });
+    res.json({ token, user: { id: user.id, email: user.email, name: user.name, shopName: user.shopName, role: user.role, plan, trialEndsAt: user.trialEndsAt, subscriptionEndsAt: user.subscriptionEndsAt ?? null, staffId: null, staffRole: null } });
   } catch (err) {
     req.log.error({ err }, "Login failed");
     res.status(500).json({ error: "Login failed" });
   }
 });
+
+// Falls back here when the email doesn't match a shop-owner account — checks staff logins
+// instead. The resulting token/user carries the OWNER's userId (so every other route's
+// data scoping keeps working unchanged) plus staffId/staffRole for permission checks.
+async function loginAsStaff(req: import("express").Request, res: import("express").Response, email: string, password: string) {
+  const [staff] = await db.select().from(staffTable).where(eq(staffTable.email, email.toLowerCase())).limit(1);
+  if (!staff || !staff.isActive) return res.status(401).json({ error: "Invalid email or password" });
+  const valid = await bcrypt.compare(password, staff.passwordHash);
+  if (!valid) return res.status(401).json({ error: "Invalid email or password" });
+  const [owner] = await db.select().from(usersTable).where(eq(usersTable.id, staff.ownerUserId)).limit(1);
+  if (!owner) return res.status(401).json({ error: "Invalid email or password" });
+  const token = signToken({
+    userId: owner.id,
+    email: staff.email,
+    role: owner.role,
+    plan: owner.plan,
+    trialEndsAt: owner.trialEndsAt.toISOString(),
+    subscriptionEndsAt: owner.subscriptionEndsAt ? new Date(owner.subscriptionEndsAt).toISOString() : null,
+    shopName: owner.shopName,
+    staffId: staff.id,
+    staffRole: staff.role,
+  });
+  res.json({
+    token,
+    user: {
+      id: owner.id, email: staff.email, name: staff.name, shopName: owner.shopName,
+      role: owner.role, plan: owner.plan, trialEndsAt: owner.trialEndsAt, subscriptionEndsAt: owner.subscriptionEndsAt ?? null,
+      staffId: staff.id, staffRole: staff.role,
+    },
+  });
+}
 
 // One-time admin setup — protected by ADMIN_SETUP_SECRET
 router.post("/setup-admin", async (req, res) => {
@@ -115,6 +150,15 @@ router.post("/change-password", authMiddleware, async (req, res) => {
     const { currentPassword, newPassword } = req.body as { currentPassword?: string; newPassword?: string };
     if (!currentPassword || !newPassword) return res.status(400).json({ error: "currentPassword and newPassword required" });
     if (newPassword.length < 8) return res.status(400).json({ error: "New password must be at least 8 characters" });
+    if (req.user!.staffId !== null) {
+      const [staff] = await db.select().from(staffTable).where(eq(staffTable.id, req.user!.staffId)).limit(1);
+      if (!staff) return res.status(404).json({ error: "Account not found" });
+      const validStaff = await bcrypt.compare(currentPassword, staff.passwordHash);
+      if (!validStaff) return res.status(401).json({ error: "Current password is incorrect" });
+      const staffPasswordHash = await bcrypt.hash(newPassword, 10);
+      await db.update(staffTable).set({ passwordHash: staffPasswordHash }).where(eq(staffTable.id, staff.id));
+      return res.json({ success: true });
+    }
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
     if (!user) return res.status(404).json({ error: "User not found" });
     const valid = await bcrypt.compare(currentPassword, user.passwordHash);
@@ -134,7 +178,7 @@ router.get("/me", async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
     const token = authHeader.slice(7);
-    let payload: { userId: number };
+    let payload: { userId: number; staffId: number | null };
     try {
       payload = verifyToken(token) as typeof payload;
     } catch {
@@ -142,6 +186,23 @@ router.get("/me", async (req, res) => {
     }
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, payload.userId)).limit(1);
     if (!user) return res.status(404).json({ error: "User not found" });
+
+    // Re-verify staff status/role every refresh — if they were deactivated or had their
+    // role changed since they last logged in, that must take effect immediately, not just
+    // on their next login.
+    let staffId: number | null = null;
+    let staffRole: string | null = null;
+    let name = user.name;
+    let email = user.email;
+    if (payload.staffId !== null && payload.staffId !== undefined) {
+      const [staff] = await db.select().from(staffTable).where(eq(staffTable.id, payload.staffId)).limit(1);
+      if (!staff || !staff.isActive || staff.ownerUserId !== user.id) return res.status(401).json({ error: "Your access has been revoked" });
+      staffId = staff.id;
+      staffRole = staff.role;
+      name = staff.name;
+      email = staff.email;
+    }
+
     // Refresh expired plan
     let plan = user.plan;
     const now = new Date();
@@ -154,16 +215,18 @@ router.get("/me", async (req, res) => {
     }
     const newToken = signToken({
       userId: user.id,
-      email: user.email,
+      email,
       role: user.role,
       plan,
       trialEndsAt: user.trialEndsAt.toISOString(),
       subscriptionEndsAt: user.subscriptionEndsAt ? new Date(user.subscriptionEndsAt).toISOString() : null,
       shopName: user.shopName,
+      staffId,
+      staffRole,
     });
     res.json({
       token: newToken,
-      user: { id: user.id, email: user.email, name: user.name, shopName: user.shopName, role: user.role, plan, trialEndsAt: user.trialEndsAt, subscriptionEndsAt: user.subscriptionEndsAt ?? null },
+      user: { id: user.id, email, name, shopName: user.shopName, role: user.role, plan, trialEndsAt: user.trialEndsAt, subscriptionEndsAt: user.subscriptionEndsAt ?? null, staffId, staffRole },
     });
   } catch (err) {
     req.log.error({ err }, "/me failed");

@@ -22,6 +22,7 @@ function mapCustomer(c: typeof customersTable.$inferSelect) {
     anniversary: c.anniversary,
     totalPurchases: safeFloat(c.totalPurchases),
     balance: safeFloat(c.balance),
+    pan: c.pan,
     loyaltyPoints: c.loyaltyPoints,
     gstin: c.gstin,
     stateCode: c.stateCode,
@@ -156,6 +157,7 @@ router.post("/", async (req, res) => {
       anniversary: data.anniversary || null,
       balance: safeFloat(data.balance).toString(),
       gstin: data.gstin ? String(data.gstin).trim() || null : null,
+      pan: data.pan ? String(data.pan).trim().toUpperCase() || null : null,
       stateCode: data.stateCode ? String(data.stateCode).trim().slice(0, 2) || null : null,
       notes: data.notes ? String(data.notes).slice(0, 500) || null : null,
     }).returning();
@@ -259,6 +261,7 @@ router.patch("/:id", async (req, res) => {
       updateData.anniversary = data.anniversary || null;
     }
     if (data.gstin !== undefined) updateData.gstin = String(data.gstin).trim() || null;
+    if (data.pan !== undefined) updateData.pan = data.pan ? String(data.pan).trim().toUpperCase() || null : null;
     if (data.stateCode !== undefined) updateData.stateCode = String(data.stateCode).trim().slice(0, 2) || null;
     if (data.notes !== undefined) updateData.notes = String(data.notes).slice(0, 500) || null;
     // Opening balance — not touched by any transaction, so it's always safe to edit directly.

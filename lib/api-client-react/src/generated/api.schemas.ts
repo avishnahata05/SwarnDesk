@@ -80,7 +80,7 @@ export interface InventoryItemInput {
   stoneWeight: number;
   /** @nullable */
   stoneValue?: number | null;
-  makingCharges: number;
+  makingCharges?: number;
   metalRate: number;
   totalValue: number;
   quantity: number;
@@ -141,6 +141,11 @@ export interface Customer {
   loyaltyPoints?: number;
   /** @nullable */
   gstin?: string | null;
+  /**
+     * for Sec. 269ST compliance on cash sales >= 2 lakh
+     * @nullable
+     */
+  pan?: string | null;
   /** @nullable */
   stateCode?: string | null;
   /** @nullable */
@@ -161,6 +166,11 @@ export interface CustomerInput {
   anniversary?: string | null;
   /** @nullable */
   gstin?: string | null;
+  /**
+     * for Sec. 269ST compliance on cash sales >= 2 lakh
+     * @nullable
+     */
+  pan?: string | null;
   /** @nullable */
   stateCode?: string | null;
   /** @nullable */
@@ -182,6 +192,11 @@ export interface CustomerUpdate {
   anniversary?: string | null;
   /** @nullable */
   gstin?: string | null;
+  /**
+     * for Sec. 269ST compliance on cash sales >= 2 lakh
+     * @nullable
+     */
+  pan?: string | null;
   /** @nullable */
   stateCode?: string | null;
   /** @nullable */
@@ -206,6 +221,10 @@ export interface Sale {
   paymentMode: string;
   /** @nullable */
   bankAccountId?: number | null;
+  /** @nullable */
+  salespersonId?: number | null;
+  /** @nullable */
+  salespersonName?: string | null;
   /** paid, partial, pending */
   paymentStatus: string;
   invoiceNumber: string;
@@ -223,6 +242,10 @@ export interface RepairJob {
   customerMobile: string;
   itemDescription: string;
   issue: string;
+  /** @nullable */
+  grossWeight?: number | null;
+  /** @nullable */
+  netWeight?: number | null;
   estimatedCost: number;
   /** @nullable */
   actualCost?: number | null;
@@ -279,6 +302,10 @@ export interface SaleInput {
   paymentMode: string;
   /** @nullable */
   bankAccountId?: number | null;
+  /** @nullable */
+  salespersonId?: number | null;
+  /** @nullable */
+  salespersonName?: string | null;
   paymentStatus: string;
   /** @nullable */
   notes?: string | null;
@@ -408,6 +435,10 @@ export interface RepairJobInput {
   customerMobile: string;
   itemDescription: string;
   issue: string;
+  /** @nullable */
+  grossWeight?: number | null;
+  /** @nullable */
+  netWeight?: number | null;
   estimatedCost: number;
   promisedDate: string;
   /** @nullable */
@@ -428,6 +459,10 @@ export interface RepairJobUpdate {
   customerMobile?: string;
   itemDescription?: string;
   issue?: string;
+  /** @nullable */
+  grossWeight?: number | null;
+  /** @nullable */
+  netWeight?: number | null;
   estimatedCost?: number;
   promisedDate?: string;
   /** @nullable */
@@ -452,6 +487,8 @@ export interface CustomOrder {
   estimatedPrice: number | null;
   /** @nullable */
   agreedPrice: number | null;
+  /** @nullable */
+  bookingMetalRate: number | null;
   advancePaid: number;
   /** pending, karigar_assigned, in_progress, karigar_returned, ready, delivered, cancelled */
   status: string;
@@ -499,6 +536,8 @@ export interface CustomOrderInput {
   estimatedPrice?: number | null;
   /** @nullable */
   agreedPrice?: number | null;
+  /** @nullable */
+  bookingMetalRate?: number | null;
   advancePaid?: number;
   dueDate: string;
   /** @nullable */
@@ -519,6 +558,8 @@ export interface CustomOrderUpdate {
   estimatedPrice?: number | null;
   /** @nullable */
   agreedPrice?: number | null;
+  /** @nullable */
+  bookingMetalRate?: number | null;
   advancePaid?: number;
   status?: string;
   /** @nullable */
@@ -654,6 +695,38 @@ export interface SupplierInput {
   email?: string | null;
   openingBalance?: number;
   openingBalanceType?: string;
+}
+
+export interface Staff {
+  id: number;
+  name: string;
+  email: string;
+  /** @nullable */
+  mobile?: string | null;
+  /** admin, accountant, or salesperson */
+  role: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface StaffInput {
+  name: string;
+  email: string;
+  /** @nullable */
+  mobile?: string | null;
+  password: string;
+  role?: string;
+}
+
+export interface StaffUpdate {
+  name?: string;
+  email?: string;
+  /** @nullable */
+  mobile?: string | null;
+  /** omit or leave blank to keep the current password */
+  password?: string;
+  role?: string;
+  isActive?: boolean;
 }
 
 export interface BusinessSettings {

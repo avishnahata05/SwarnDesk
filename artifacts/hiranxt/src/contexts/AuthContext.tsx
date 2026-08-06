@@ -11,6 +11,9 @@ interface AuthUser {
   plan: string;
   trialEndsAt: string;
   subscriptionEndsAt: string | null;
+  // Set only when a staff login (not the shop owner) is signed in.
+  staffId: number | null;
+  staffRole: string | null; // admin | accountant | salesperson
 }
 
 interface AuthContextType {
@@ -20,6 +23,14 @@ interface AuthContextType {
   register: (data: { email: string; password: string; name: string; shopName: string; mobile?: string }) => Promise<void>;
   logout: () => void;
   isLoading: boolean;
+  // True only for the actual shop-owner login (not any staff role).
+  isOwner: boolean;
+  // Owner, or a staff login with the "admin" role — mirrors requireShopRole("admin") on
+  // the backend. Gates Settings, Staff management, WhatsApp API config.
+  isShopAdmin: boolean;
+  // Owner, or a staff login with "admin"/"accountant" — mirrors
+  // requireShopRole("admin","accountant"). Gates the whole Accounting module.
+  canAccessAccounting: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -119,8 +130,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryClient.clear();
   };
 
+  const isOwner = !!user && user.staffId === null;
+  const isShopAdmin = isOwner || user?.staffRole === "admin";
+  const canAccessAccounting = isOwner || user?.staffRole === "admin" || user?.staffRole === "accountant";
+
   return (
-    <AuthContext.Provider value={{ user, token, login, register, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, token, login, register, logout, isLoading, isOwner, isShopAdmin, canAccessAccounting }}>
       {children}
     </AuthContext.Provider>
   );

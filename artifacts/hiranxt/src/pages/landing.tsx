@@ -432,7 +432,10 @@ export default function LandingPage() {
             <span className="font-bold">SwarnDesk</span>
             <span className="text-muted-foreground text-sm ml-2">India's Smartest Jewellery ERP</span>
           </div>
-          <div className="text-xs text-muted-foreground">© 2025 SwarnDesk. Made with love for Indian jewellers.</div>
+          <div className="text-xs text-muted-foreground text-center sm:text-right">
+            © 2025 SwarnDesk. Made with love for Indian jewellers.
+            <span className="text-muted-foreground/50"> · by <a href="https://www.tirthontech.com" target="_blank" rel="noopener noreferrer" className="hover:text-muted-foreground hover:underline underline-offset-2">TirthonTech</a></span>
+          </div>
         </div>
       </footer>
 

@@ -13,6 +13,10 @@ export interface RepairJobInput {
   customerMobile: string;
   itemDescription: string;
   issue: string;
+  /** @nullable */
+  grossWeight?: number | null;
+  /** @nullable */
+  netWeight?: number | null;
   estimatedCost: number;
   promisedDate: string;
   /** @nullable */

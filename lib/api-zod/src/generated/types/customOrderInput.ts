@@ -22,6 +22,8 @@ export interface CustomOrderInput {
   estimatedPrice?: number | null;
   /** @nullable */
   agreedPrice?: number | null;
+  /** @nullable */
+  bookingMetalRate?: number | null;
   advancePaid?: number;
   dueDate: string;
   /** @nullable */

@@ -22,6 +22,10 @@ export interface Sale {
   paymentMode: string;
   /** @nullable */
   bankAccountId?: number | null;
+  /** @nullable */
+  salespersonId?: number | null;
+  /** @nullable */
+  salespersonName?: string | null;
   /** paid, partial, pending */
   paymentStatus: string;
   invoiceNumber: string;

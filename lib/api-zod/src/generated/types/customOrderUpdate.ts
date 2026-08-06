@@ -20,6 +20,8 @@ export interface CustomOrderUpdate {
   estimatedPrice?: number | null;
   /** @nullable */
   agreedPrice?: number | null;
+  /** @nullable */
+  bookingMetalRate?: number | null;
   advancePaid?: number;
   status?: string;
   /** @nullable */

@@ -19,6 +19,11 @@ export interface CustomerUpdate {
   anniversary?: string | null;
   /** @nullable */
   gstin?: string | null;
+  /**
+     * for Sec. 269ST compliance on cash sales >= 2 lakh
+     * @nullable
+     */
+  pan?: string | null;
   /** @nullable */
   stateCode?: string | null;
   /** @nullable */

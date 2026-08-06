@@ -63,6 +63,15 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Restricts a route to shop owner + a given set of staff roles — bounces a salesperson
+ * off /app/settings or /app/accounting instead of rendering a page whose every API call
+ * would 403 anyway. Mirrors requireShopRole() on the backend. */
+function ShopRoleRoute({ allow, children }: { allow: "isShopAdmin" | "canAccessAccounting"; children: React.ReactNode }) {
+  const auth = useAuth();
+  if (!auth[allow]) return <Redirect to="/app/dashboard" />;
+  return <>{children}</>;
+}
+
 function Router() {
   return (
     <Switch>
@@ -87,12 +96,16 @@ function Router() {
               <Route path="/app/repairs" component={Repairs} />
               <Route path="/app/purchases" component={Purchases} />
               <Route path="/app/reports" component={Reports} />
-              <Route path="/app/settings" component={Settings} />
+              <Route path="/app/settings">
+                <ShopRoleRoute allow="isShopAdmin"><Settings /></ShopRoleRoute>
+              </Route>
               <Route path="/app/girvi" component={Girvi} />
               <Route path="/app/marketing" component={Marketing} />
               <Route path="/app/pending-payments" component={PendingPayments} />
               <Route path="/app/custom-orders" component={CustomOrders} />
-              <Route path="/app/accounting" component={Accounting} />
+              <Route path="/app/accounting">
+                <ShopRoleRoute allow="canAccessAccounting"><Accounting /></ShopRoleRoute>
+              </Route>
               <Route component={Dashboard} />
             </Switch>
           </AppLayout>

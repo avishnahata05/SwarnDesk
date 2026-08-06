@@ -32,23 +32,41 @@ function esc(s: string | null | undefined): string {
   return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
 
-function openWindow(html: string, width = 800, height = 700) {
-  // noopener: the injected-script risk above aside, a print popup should never
-  // retain a `window.opener` handle back into the authenticated app tab.
-  const w = window.open("", "_blank", `width=${width},height=${height},noopener`);
-  // window.open silently returns null when the browser's popup blocker kicks in —
-  // every voucher/receipt/notice in this module funnels through here, and without
-  // this check "Print Voucher" just does nothing with zero feedback, which reads
-  // as the feature being broken rather than a blocked popup the user can allow.
-  if (!w) {
-    alert("Your browser blocked the print window. Please allow pop-ups for this site, then try printing again.");
+function openWindow(html: string) {
+  // Print via a hidden same-page <iframe> instead of window.open(). A real popup window
+  // is subject to popup blockers (silent no-op), and even when allowed, document.write()
+  // on a freshly window.open()'d window has proven unreliable across browsers (blank
+  // page). An iframe never triggers popup blocking at all, and print()ing it goes
+  // straight to the browser's print dialog — which also covers "Save as PDF".
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.setAttribute("aria-hidden", "true");
+  document.body.appendChild(iframe);
+
+  const cleanup = () => { if (iframe.parentNode) iframe.parentNode.removeChild(iframe); };
+  const doc = iframe.contentWindow?.document;
+  if (!doc) {
+    cleanup();
+    alert("Couldn't open the print preview. Please try again.");
     return;
   }
-  // Some browsers only reliably apply document.write() after an explicit open() —
-  // opening a window with an empty URL doesn't always leave the document ready.
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
+
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  const win = iframe.contentWindow!;
+  win.onafterprint = cleanup;
+  // Fallback in case onafterprint doesn't fire (some browsers, or user cancels via Esc
+  // before the dialog fully registers the listener) — don't leak iframes indefinitely.
+  setTimeout(cleanup, 60_000);
+  win.focus();
+  win.print();
 }
 
 const printCss = `
@@ -135,10 +153,10 @@ ${payment.notes ? `<div style="margin-top:8px;padding:6px;background:#f8f9fa;bor
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Customer Signature</div></div>
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised by ${esc(settings?.shopName || shopName)}</div></div>
 </div>
-<div class="footer">This is a computer-generated receipt. Powered by SwarnDesk Girvi.</div>
+<div class="footer">This is a computer-generated receipt. Powered by SwarnDesk (by TirthonTech)</div>
 </div></body></html>`;
 
-  openWindow(html, 420, 600);
+  openWindow(html);
 }
 
 // ─── Forfeiture notice — issued before an overdue loan can be forfeited ────
@@ -199,10 +217,10 @@ ${shopHeader(settings, shopName, shopAddress, shopMobile)}
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Customer Signature (on receipt of notice)</div></div>
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised by ${esc(settings?.shopName || shopName)}</div></div>
 </div>
-<div class="footer">This is a computer-generated notice. Powered by SwarnDesk Girvi.</div>
+<div class="footer">This is a computer-generated notice. Powered by SwarnDesk (by TirthonTech)</div>
 </div></body></html>`;
 
-  openWindow(html, 720, 700);
+  openWindow(html);
 }
 
 // ─── Pledge voucher (Girvi Receipt Voucher) ────────────────────────────────
@@ -347,7 +365,7 @@ ${payments && payments.length > 0 ? (() => {
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Customer Signature</div><div style="font-size:10px;color:#999;margin-top:2px">${esc(loan.customerName)}</div></div>
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised Signatory</div><div style="font-size:10px;color:#999;margin-top:2px">${esc(settings?.shopName || shopName)}</div></div>
 </div>
-<div class="footer">This is a computer-generated Girvi voucher. Powered by SwarnDesk Girvi.</div>
+<div class="footer">This is a computer-generated Girvi voucher. Powered by SwarnDesk (by TirthonTech)</div>
 </div></body></html>`;
 
   openWindow(html);
@@ -408,10 +426,10 @@ ${!isForfeit ? `<div class="terms"><div class="section-title">Confirmation</div>
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Customer Signature</div></div>
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised by ${esc(settings?.shopName || shopName)}</div></div>
 </div>
-<div class="footer">This is a computer-generated return voucher. Powered by SwarnDesk Girvi.</div>
+<div class="footer">This is a computer-generated return voucher. Powered by SwarnDesk (by TirthonTech)</div>
 </div></body></html>`;
 
-  openWindow(html, 720, 700);
+  openWindow(html);
 }
 
 // ─── Partial release voucher (some, not all, pledged items returned) ──────
@@ -485,10 +503,10 @@ ${shopHeader(settings, shopName, shopAddress, shopMobile)}
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Customer Signature</div></div>
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised by ${esc(settings?.shopName || shopName)}</div></div>
 </div>
-<div class="footer">This is a computer-generated partial release voucher. Powered by SwarnDesk Girvi.</div>
+<div class="footer">This is a computer-generated partial release voucher. Powered by SwarnDesk (by TirthonTech)</div>
 </div></body></html>`;
 
-  openWindow(html, 720, 700);
+  openWindow(html);
 }
 
 // ─── Transfer voucher ───────────────────────────────────────────────────────
@@ -541,8 +559,8 @@ ${transfer.reason ? `<div style="font-size:11px;color:#666;margin-bottom:12px;pa
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Dispatched By (${esc(branchName(transfer.fromBranchId))})</div></div>
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Received By (${transfer.toBranchId ? esc(branchName(transfer.toBranchId)) : "—"})</div></div>
 </div>
-<div class="footer">This is a computer-generated transfer voucher. Powered by SwarnDesk Girvi.</div>
+<div class="footer">This is a computer-generated transfer voucher. Powered by SwarnDesk (by TirthonTech)</div>
 </div></body></html>`;
 
-  openWindow(html, 720, 700);
+  openWindow(html);
 }

@@ -29,6 +29,8 @@ tags:
     description: Dashboard summary data
   - name: settings
     description: Business settings
+  - name: staff
+    description: Shop staff logins and roles
 
 paths:
   /healthz:
@@ -965,6 +967,77 @@ paths:
         "204":
           description: Deleted
 
+  # ---------- STAFF ----------
+  /staff:
+    get:
+      operationId: listStaff
+      tags: [staff]
+      summary: List staff for the current shop
+      responses:
+        "200":
+          description: Staff
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Staff"
+    post:
+      operationId: createStaff
+      tags: [staff]
+      summary: Create a staff login (owner or admin-role staff only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffInput"
+      responses:
+        "201":
+          description: Created staff member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Staff"
+
+  /staff/{id}:
+    patch:
+      operationId: updateStaff
+      tags: [staff]
+      summary: Update a staff member (owner or admin-role staff only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffUpdate"
+      responses:
+        "200":
+          description: Updated staff member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Staff"
+    delete:
+      operationId: deleteStaff
+      tags: [staff]
+      summary: Delete a staff member (owner or admin-role staff only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
   # ---------- SETTINGS ----------
   /settings:
     get:
@@ -1112,7 +1185,7 @@ components:
 
     InventoryItemInput:
       type: object
-      required: [name, category, purity, grossWeight, netWeight, stoneWeight, makingCharges, metalRate, totalValue, quantity, branch]
+      required: [name, category, purity, grossWeight, netWeight, stoneWeight, metalRate, totalValue, quantity, branch]
       properties:
         name:
           type: string
@@ -1221,6 +1294,9 @@ components:
           type: integer
         gstin:
           type: ["string", "null"]
+        pan:
+          type: ["string", "null"]
+          description: for Sec. 269ST compliance on cash sales >= 2 lakh
         stateCode:
           type: ["string", "null"]
         notes:
@@ -1246,6 +1322,9 @@ components:
           type: ["string", "null"]
         gstin:
           type: ["string", "null"]
+        pan:
+          type: ["string", "null"]
+          description: for Sec. 269ST compliance on cash sales >= 2 lakh
         stateCode:
           type: ["string", "null"]
         notes:
@@ -1271,6 +1350,9 @@ components:
           type: ["string", "null"]
         gstin:
           type: ["string", "null"]
+        pan:
+          type: ["string", "null"]
+          description: for Sec. 269ST compliance on cash sales >= 2 lakh
         stateCode:
           type: ["string", "null"]
         notes:
@@ -1340,6 +1422,10 @@ components:
           description: cash, upi, card, bank, credit, partial
         bankAccountId:
           type: ["integer", "null"]
+        salespersonId:
+          type: ["integer", "null"]
+        salespersonName:
+          type: ["string", "null"]
         paymentStatus:
           type: string
           description: paid, partial, pending
@@ -1376,6 +1462,10 @@ components:
           type: string
         bankAccountId:
           type: ["integer", "null"]
+        salespersonId:
+          type: ["integer", "null"]
+        salespersonName:
+          type: ["string", "null"]
         paymentStatus:
           type: string
         notes:
@@ -1627,6 +1717,10 @@ components:
           type: string
         issue:
           type: string
+        grossWeight:
+          type: ["number", "null"]
+        netWeight:
+          type: ["number", "null"]
         estimatedCost:
           type: number
         actualCost:
@@ -1663,6 +1757,10 @@ components:
           type: string
         issue:
           type: string
+        grossWeight:
+          type: ["number", "null"]
+        netWeight:
+          type: ["number", "null"]
         estimatedCost:
           type: number
         promisedDate:
@@ -1691,6 +1789,10 @@ components:
           type: string
         issue:
           type: string
+        grossWeight:
+          type: ["number", "null"]
+        netWeight:
+          type: ["number", "null"]
         estimatedCost:
           type: number
         promisedDate:
@@ -1700,7 +1802,7 @@ components:
 
     CustomOrder:
       type: object
-      required: [id, orderNumber, customerId, customerName, customerMobile, itemType, description, metalType, purity, targetWeight, estimatedPrice, agreedPrice, advancePaid, status, karigarId, karigarName, metalIssuedWeight, metalIssuedDate, finishedWeight, wastageWeight, karigarReturnDate, karigarWages, karigarNotes, dueDate, deliveryDate, finalPrice, notes, createdAt]
+      required: [id, orderNumber, customerId, customerName, customerMobile, itemType, description, metalType, purity, targetWeight, estimatedPrice, agreedPrice, bookingMetalRate, advancePaid, status, karigarId, karigarName, metalIssuedWeight, metalIssuedDate, finishedWeight, wastageWeight, karigarReturnDate, karigarWages, karigarNotes, dueDate, deliveryDate, finalPrice, notes, createdAt]
       properties:
         id:
           type: integer
@@ -1725,6 +1827,8 @@ components:
         estimatedPrice:
           type: ["number", "null"]
         agreedPrice:
+          type: ["number", "null"]
+        bookingMetalRate:
           type: ["number", "null"]
         advancePaid:
           type: number
@@ -1784,6 +1888,8 @@ components:
           type: ["number", "null"]
         agreedPrice:
           type: ["number", "null"]
+        bookingMetalRate:
+          type: ["number", "null"]
         advancePaid:
           type: number
         dueDate:
@@ -1811,6 +1917,8 @@ components:
         estimatedPrice:
           type: ["number", "null"]
         agreedPrice:
+          type: ["number", "null"]
+        bookingMetalRate:
           type: ["number", "null"]
         advancePaid:
           type: number
@@ -2009,6 +2117,58 @@ components:
           type: number
         openingBalanceType:
           type: string
+
+    Staff:
+      type: object
+      required: [id, name, email, role, isActive, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        mobile:
+          type: ["string", "null"]
+        role:
+          type: string
+          description: admin, accountant, or salesperson
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+
+    StaffInput:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        mobile:
+          type: ["string", "null"]
+        password:
+          type: string
+        role:
+          type: string
+
+    StaffUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        mobile:
+          type: ["string", "null"]
+        password:
+          type: string
+          description: omit or leave blank to keep the current password
+        role:
+          type: string
+        isActive:
+          type: boolean
 
     BusinessSettings:
       type: object

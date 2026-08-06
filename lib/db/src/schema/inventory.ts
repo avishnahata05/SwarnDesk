@@ -12,7 +12,7 @@ export const inventoryItemsTable = pgTable("inventory_items", {
   netWeight: numeric("net_weight", { precision: 10, scale: 3 }).notNull(),
   stoneWeight: numeric("stone_weight", { precision: 10, scale: 3 }).notNull().default("0"),
   stoneValue: numeric("stone_value", { precision: 10, scale: 2 }),
-  makingCharges: numeric("making_charges", { precision: 10, scale: 2 }).notNull(),
+  makingCharges: numeric("making_charges", { precision: 10, scale: 2 }).notNull().default("0"),
   metalRate: numeric("metal_rate", { precision: 10, scale: 2 }).notNull(),
   totalValue: numeric("total_value", { precision: 12, scale: 2 }).notNull(),
   quantity: integer("quantity").notNull().default(1),

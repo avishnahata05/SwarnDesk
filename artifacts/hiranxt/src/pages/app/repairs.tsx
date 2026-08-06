@@ -56,6 +56,8 @@ type Repair = {
   customerMobile: string;
   itemDescription: string;
   issue: string;
+  grossWeight?: number | null;
+  netWeight?: number | null;
   estimatedCost: number;
   actualCost?: number | null;
   status: string;
@@ -72,6 +74,8 @@ type RepairForm = {
   customerMobile: string;
   itemDescription: string;
   issue: string;
+  grossWeight: string;
+  netWeight: string;
   estimatedCost: string;
   receivedDate: string;
   promisedDate: string;
@@ -81,7 +85,7 @@ type RepairForm = {
 
 const EMPTY_FORM: RepairForm = {
   customerName: "", customerMobile: "", itemDescription: "",
-  issue: "", estimatedCost: "", receivedDate: new Date().toISOString().split("T")[0], promisedDate: "", notes: "", karigarId: "",
+  issue: "", grossWeight: "", netWeight: "", estimatedCost: "", receivedDate: new Date().toISOString().split("T")[0], promisedDate: "", notes: "", karigarId: "",
 };
 
 // ─── Print job card ────────────────────────────────────────────────────────────
@@ -137,7 +141,7 @@ ${repair.notes ? `<div class="note-box">Notes: ${repair.notes}</div>` : ""}
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Customer Signature</div></div>
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised by ${shopName}</div></div>
 </div>
-<div class="footer">This is a computer-generated repair job card. Powered by SwarnDesk.</div>
+<div class="footer">This is a computer-generated repair job card. Powered by SwarnDesk (by TirthonTech)</div>
 </div></body></html>`;
 
   const w = window.open("", "_blank", "width=460,height=640");
@@ -204,6 +208,8 @@ export default function Repairs() {
       customerMobile: form.customerMobile,
       itemDescription: form.itemDescription,
       issue: form.issue,
+      grossWeight: form.grossWeight ? parseFloat(form.grossWeight) : null,
+      netWeight: form.netWeight ? parseFloat(form.netWeight) : null,
       estimatedCost: cost,
       receivedDate: form.receivedDate ? new Date(form.receivedDate).toISOString() : undefined,
       promisedDate: new Date(form.promisedDate).toISOString(),
@@ -230,6 +236,8 @@ export default function Repairs() {
       customerMobile: r.customerMobile,
       itemDescription: r.itemDescription,
       issue: r.issue,
+      grossWeight: r.grossWeight != null ? String(r.grossWeight) : "",
+      netWeight: r.netWeight != null ? String(r.netWeight) : "",
       estimatedCost: String(r.estimatedCost),
       receivedDate: r.receivedDate.split("T")[0],
       promisedDate: r.promisedDate.split("T")[0],
@@ -250,6 +258,8 @@ export default function Repairs() {
       customerMobile: editForm.customerMobile,
       itemDescription: editForm.itemDescription,
       issue: editForm.issue,
+      grossWeight: editForm.grossWeight ? parseFloat(editForm.grossWeight) : null,
+      netWeight: editForm.netWeight ? parseFloat(editForm.netWeight) : null,
       estimatedCost: cost,
       receivedDate: editForm.receivedDate ? new Date(editForm.receivedDate).toISOString() : undefined,
       promisedDate: new Date(editForm.promisedDate).toISOString(),
@@ -503,6 +513,14 @@ export default function Repairs() {
                 <input className={inp} value={form.issue} onChange={e => setF("issue", e.target.value)} placeholder="Clasp broken, needs replacement" />
               </div>
               <div>
+                <label className={lbl}>Gross Weight (g) <span className="text-muted-foreground/60">optional — to verify it comes back the same</span></label>
+                <input className={inp} type="number" step="0.001" min="0" value={form.grossWeight} onChange={e => setF("grossWeight", e.target.value)} placeholder="0.000" />
+              </div>
+              <div>
+                <label className={lbl}>Net Weight (g)</label>
+                <input className={inp} type="number" step="0.001" min="0" value={form.netWeight} onChange={e => setF("netWeight", e.target.value)} placeholder="0.000" />
+              </div>
+              <div>
                 <label className={lbl}>Estimated Cost (₹) *</label>
                 <input className={inp} type="number" min="0" value={form.estimatedCost} onChange={e => setF("estimatedCost", e.target.value)} placeholder="e.g. 500" />
               </div>
@@ -562,6 +580,14 @@ export default function Repairs() {
               <div className="col-span-2">
                 <label className={lbl}>Issue / Work Required *</label>
                 <input className={inp} value={editForm.issue} onChange={e => setEF("issue", e.target.value)} />
+              </div>
+              <div>
+                <label className={lbl}>Gross Weight (g)</label>
+                <input className={inp} type="number" step="0.001" min="0" value={editForm.grossWeight} onChange={e => setEF("grossWeight", e.target.value)} />
+              </div>
+              <div>
+                <label className={lbl}>Net Weight (g)</label>
+                <input className={inp} type="number" step="0.001" min="0" value={editForm.netWeight} onChange={e => setEF("netWeight", e.target.value)} />
               </div>
               <div>
                 <label className={lbl}>Estimated Cost (₹) *</label>

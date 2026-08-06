@@ -15,7 +15,7 @@ export interface InventoryItemInput {
   stoneWeight: number;
   /** @nullable */
   stoneValue?: number | null;
-  makingCharges: number;
+  makingCharges?: number;
   metalRate: number;
   totalValue: number;
   quantity: number;

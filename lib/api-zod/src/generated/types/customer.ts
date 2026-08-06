@@ -24,6 +24,11 @@ export interface Customer {
   loyaltyPoints?: number;
   /** @nullable */
   gstin?: string | null;
+  /**
+     * for Sec. 269ST compliance on cash sales >= 2 lakh
+     * @nullable
+     */
+  pan?: string | null;
   /** @nullable */
   stateCode?: string | null;
   /** @nullable */

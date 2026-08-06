@@ -9,6 +9,11 @@ export interface AuthUser {
   trialEndsAt: string;
   subscriptionEndsAt: string | null;
   shopName: string;
+  // Set only when a staff login (not the shop owner) is signed in — userId above is always
+  // the OWNER's id (every other table stays scoped by it), staffId/staffRole identify which
+  // staff member is actually acting and what they're allowed to do. Null for the owner.
+  staffId: number | null;
+  staffRole: string | null; // admin | accountant | salesperson — see staffTable
 }
 
 declare global {
@@ -48,6 +53,20 @@ export function adminOnly(req: Request, res: Response, next: NextFunction) {
     return res.status(403).json({ error: "Admin access required" });
   }
   next();
+}
+
+// Gates a route to specific shop-level roles. The shop OWNER (staffId === null) always
+// passes, regardless of which roles are listed — it's their own shop's data. A staff login
+// only passes if their staffRole is in the allowed list, e.g.
+// requireShopRole("admin", "accountant") lets the owner and admin/accountant staff through
+// but blocks a salesperson with a 403.
+export function requireShopRole(...roles: string[]) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+    if (req.user.staffId === null) return next(); // shop owner — full access
+    if (req.user.staffRole && roles.includes(req.user.staffRole)) return next();
+    return res.status(403).json({ error: "You don't have permission to access this" });
+  };
 }
 
 export function subscriptionCheck(req: Request, res: Response, next: NextFunction) {

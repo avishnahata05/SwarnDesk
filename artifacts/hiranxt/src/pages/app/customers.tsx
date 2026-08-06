@@ -26,7 +26,7 @@ import { InfoTooltip } from "@/components/InfoTooltip";
 
 interface CustomerForm {
   name: string; mobile: string; email: string; address: string;
-  birthday: string; anniversary: string; gstin: string; stateCode: string; notes: string;
+  birthday: string; anniversary: string; gstin: string; pan: string; stateCode: string; notes: string;
   openingBalance: string; openingBalanceType: "debit" | "credit";
 }
 
@@ -487,6 +487,7 @@ export default function Customers() {
         birthday: data.birthday || null,
         anniversary: data.anniversary || null,
         gstin: data.gstin || null,
+        pan: data.pan ? data.pan.trim().toUpperCase() || null : null,
         stateCode: data.stateCode || null,
         notes: data.notes || null,
         // balance sign convention (see mapCustomer on the backend): positive = credit
@@ -874,6 +875,13 @@ export default function Customers() {
                 <label className="text-xs text-muted-foreground mb-1 block">GST State Code</label>
                 <Input {...register("stateCode")} placeholder="27" maxLength={2} data-testid="input-customer-state-code" />
                 <p className="text-[10px] text-muted-foreground mt-1">For B2B invoices — decides CGST+SGST vs IGST</p>
+              </div>
+              <div>
+                <Label className="flex items-center gap-1">
+                  PAN
+                  <InfoTooltip text="Required on file for any cash sale of ₹2 lakh or more to this customer (Sec. 269ST) — collect it ahead of time so you're not scrambling at billing." />
+                </Label>
+                <Input {...register("pan")} placeholder="ABCDE1234F" maxLength={10} className="uppercase" data-testid="input-customer-pan" />
               </div>
               <div>
                 <Label className="flex items-center gap-1">

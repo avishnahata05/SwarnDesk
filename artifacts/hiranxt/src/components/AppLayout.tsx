@@ -36,10 +36,10 @@ const navItems = [
   { href: "/app/girvi", label: "Girvi", labelHi: "गिरवी", icon: Banknote, description: "Gold/silver pawn loans — pledge, collect interest, redeem" },
   // Finance & growth
   { href: "/app/pending-payments", label: "Pending Payments", labelHi: "बकाया भुगतान", icon: Clock, description: "Outstanding balances customers still owe you" },
-  { href: "/app/accounting", label: "Accounting", labelHi: "लेखा", icon: BookOpen, description: "Full double-entry books, ledgers, and financial reports" },
+  { href: "/app/accounting", label: "Accounting", labelHi: "लेखा", icon: BookOpen, description: "Full double-entry books, ledgers, and financial reports", restricted: "accounting" as const },
   { href: "/app/marketing", label: "Marketing", labelHi: "मार्केटिंग", icon: Megaphone, description: "Send WhatsApp promotions and greetings to customers" },
   { href: "/app/reports", label: "Reports", labelHi: "रिपोर्ट", icon: BarChart3, description: "Sales trends, category breakdowns, and GSTR-1 export" },
-  { href: "/app/settings", label: "Settings", labelHi: "सेटिंग्स", icon: Settings, description: "Shop profile, tax rules, metal rates, and integrations" },
+  { href: "/app/settings", label: "Settings", labelHi: "सेटिंग्स", icon: Settings, description: "Shop profile, tax rules, metal rates, and integrations", restricted: "settings" as const },
 ];
 
 interface AppLayoutProps {
@@ -49,7 +49,12 @@ interface AppLayoutProps {
 export default function AppLayout({ children }: AppLayoutProps) {
   const [location] = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { user, logout } = useAuth();
+  const { user, logout, isShopAdmin, canAccessAccounting } = useAuth();
+  const visibleNavItems = navItems.filter(item => {
+    if (item.restricted === "settings") return isShopAdmin;
+    if (item.restricted === "accounting") return canAccessAccounting;
+    return true;
+  });
   // Seed from localStorage so rate shows immediately on refresh (before API responds)
   const [goldRate, setGoldRate] = useState(() => {
     const cached = parseFloat(localStorage.getItem("sd_gold22k") || "");
@@ -132,8 +137,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 py-4 px-3 space-y-0.5 overflow-y-auto">
-          {navItems.map(({ href, label, labelHi, icon: Icon, description }) => {
+        <nav className="flex-1 py-4 px-3 space-y-0.5 overflow-y-auto sidebar-scroll">
+          {visibleNavItems.map(({ href, label, labelHi, icon: Icon, description }) => {
             const isActive = location === href || location.startsWith(href + "/");
             return (
               <Link
@@ -197,6 +202,13 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <LogOut className="w-4 h-4 flex-shrink-0" />
             Sign Out
           </button>
+
+          <div className="px-3 pt-1 text-center text-[10px] text-white/30">
+            SwarnDesk by{" "}
+            <a href="https://www.tirthontech.com" target="_blank" rel="noopener noreferrer" className="hover:text-white/60 hover:underline underline-offset-2">
+              TirthonTech
+            </a>
+          </div>
         </div>
       </aside>
 

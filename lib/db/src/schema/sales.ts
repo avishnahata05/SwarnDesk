@@ -17,6 +17,11 @@ export const salesTable = pgTable("sales", {
   // Which bank account (chart_of_accounts row) the money landed in — only set when
   // paymentMode is a bank-like mode and the shop has more than one bank account.
   bankAccountId: integer("bank_account_id"),
+  // Which staff member rang up this sale — nullable since sales made before staff logins
+  // existed (or by the owner) have no staff row to point to. Name is a snapshot so it still
+  // reads correctly even if that staff member is later deactivated/deleted.
+  salespersonId: integer("salesperson_id"),
+  salespersonName: text("salesperson_name"),
   paymentStatus: text("payment_status").notNull().default("paid"), // paid, partial, pending
   // Fulfillment state — distinct from paymentStatus, which tracks money, not whether the
   // sale itself still stands. A returned sale keeps its paymentStatus as a historical

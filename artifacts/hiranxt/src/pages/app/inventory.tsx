@@ -258,8 +258,8 @@ function ItemFormDialog({
               <Input type="number" step="0.001" {...register("stoneWeight")} data-testid={`${testIdPrefix}-stone-weight`} />
             </div>
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Making Charges (%) *</label>
-              <Input type="number" step="0.01" placeholder="e.g. 12" {...register("makingCharges", { required: true })} data-testid={`${testIdPrefix}-making-charges`} />
+              <label className="text-xs text-muted-foreground mb-1 block">Making Charges (%)</label>
+              <Input type="number" step="0.01" placeholder="0 if not charged" {...register("makingCharges")} data-testid={`${testIdPrefix}-making-charges`} />
             </div>
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Quantity</label>
@@ -488,7 +488,7 @@ export default function Inventory() {
     const metalRate = getLiveRate(data.category, data.purity);
     const netW = parseFloat(String(data.netWeight));
     const stoneW = parseFloat(String(data.stoneWeight || 0));
-    const makingPct = parseFloat(String(data.makingCharges));
+    const makingPct = parseFloat(String(data.makingCharges || 0));
     const metalVal = Math.max(0, netW - stoneW) * metalRate;
     // Round making charges first, then the grand total — matches the dialog's live
     // preview so the saved totalValue is never a rupee off from what was shown before saving.

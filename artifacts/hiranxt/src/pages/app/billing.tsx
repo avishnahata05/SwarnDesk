@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { formatCurrency } from "@/lib/utils";
 import {
   useListInventoryItems, useListCustomers, useCreateSale, useGetCurrentRates,
-  useGetSettings, useCreateCustomer, useGetCustomer, useUpdateRates,
+  useGetSettings, useCreateCustomer, useGetCustomer, useUpdateRates, useListStaff,
   getListInventoryItemsQueryKey, getListCustomersQueryKey, getGetCurrentRatesQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -24,6 +24,7 @@ import { ShortcutsHelpDialog, ShortcutsHelpButton } from "@/components/Shortcuts
 import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
 import { InfoTooltip } from "@/components/InfoTooltip";
 import { BankAccountSelect } from "@/components/BankAccountSelect";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface CartItem {
   inventoryItemId: number;
@@ -285,6 +286,7 @@ ${isEstimate ? `<div class="watermark">${escapeHtml(shop.name)}</div>` : ""}
       <div style="font-weight:600;margin-top:2px;">${escapeHtml(shop.name)}</div>
     </div>
   </div>
+  <div style="text-align:center;font-size:10px;color:#aaa;margin-top:14px;">Powered by SwarnDesk (by TirthonTech)</div>
 
 </div>
 </body>
@@ -323,6 +325,8 @@ function amountToWords(amount: number): string {
 export default function Billing() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const { data: staff } = useListStaff();
   const { data: rates } = useGetCurrentRates();
 
   const [tab, setTab] = useState<"stock" | "quick" | "scan">("stock");
@@ -340,6 +344,10 @@ export default function Billing() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMode, setPaymentMode] = useState("cash");
   const [bankAccountId, setBankAccountId] = useState<number | null>(null);
+  // "" means "the person currently logged in" (owner or whichever staff login this is) —
+  // resolved to a concrete id/name at submit time so it stays correct even if the shop
+  // owner rings up a sale while logged in as themselves.
+  const [salespersonSelection, setSalespersonSelection] = useState("");
   const [paymentStatus, setPaymentStatus] = useState("paid");
   const [paidNow, setPaidNow] = useState<string>("");
   const [discount, setDiscount] = useState(0);
@@ -691,13 +699,24 @@ export default function Billing() {
       paidAmount = paidNow !== "" ? parseFloat(paidNow) || 0 : totalAmount;
     }
 
+    let salespersonId: number | null = null;
+    let salespersonName: string | null = null;
+    if (salespersonSelection === "") {
+      salespersonId = user?.staffId ?? null;
+      salespersonName = user?.name ?? null;
+    } else {
+      const sid = parseInt(salespersonSelection);
+      salespersonId = sid;
+      salespersonName = (staff ?? []).find(s => s.id === sid)?.name ?? null;
+    }
+
     const cartSnap = [...cart];
     createSale.mutate({
       data: {
         customerId: selectedCustomer?.id && selectedCustomer.id > 0 ? selectedCustomer.id : null,
         customerName: selectedCustomer?.name ?? "Walk-in Customer",
         totalAmount, gstAmount, discountAmount: discount,
-        exchangeGoldWeight, exchangeGoldValue, paymentMode, bankAccountId, paymentStatus,
+        exchangeGoldWeight, exchangeGoldValue, paymentMode, bankAccountId, salespersonId, salespersonName, paymentStatus,
         paidAmount,
         notes: null,
         items: cart.map(c => ({
@@ -1391,6 +1410,19 @@ export default function Billing() {
                   </Select>
                   <BankAccountSelect paymentMode={paymentMode} bankAccountId={bankAccountId} onChange={setBankAccountId} className="mt-2" />
                 </div>
+
+                {staff && staff.length > 0 && (
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Salesperson</label>
+                    <Select value={salespersonSelection} onValueChange={setSalespersonSelection}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Myself{user?.name ? ` (${user.name})` : ""}</SelectItem>
+                        {staff.filter(s => s.isActive).map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
 
                 {(paymentMode === "partial" || paymentStatus === "partial" || paymentStatus === "pending") && (
                   <div className="space-y-2 p-3 rounded-lg bg-orange-50 border border-orange-200">

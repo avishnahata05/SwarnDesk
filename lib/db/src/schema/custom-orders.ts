@@ -21,6 +21,10 @@ export const customOrdersTable = pgTable("custom_orders", {
   estimatedPrice: numeric("estimated_price", { precision: 12, scale: 2 }),
   agreedPrice: numeric("agreed_price", { precision: 12, scale: 2 }),
   advancePaid: numeric("advance_paid", { precision: 12, scale: 2 }).default("0"),
+  // The metal rate (₹/gram) assumed when agreedPrice was set at booking — locks in what
+  // "the rate" meant at that moment so there's an audit trail if the customer or shop later
+  // disputes the price, since gold/silver rates move daily between booking and delivery.
+  bookingMetalRate: numeric("booking_metal_rate", { precision: 10, scale: 2 }),
 
   // Workflow status: pending → karigar_assigned → in_progress → karigar_returned → ready → delivered | cancelled
   status: text("status").notNull().default("pending"),
@@ -39,6 +43,11 @@ export const customOrdersTable = pgTable("custom_orders", {
   karigarReturnDate: timestamp("karigar_return_date"),
   karigarWages: numeric("karigar_wages", { precision: 10, scale: 2 }),
   karigarNotes: text("karigar_notes"),
+
+  // When the order was actually booked — distinct from createdAt (the row's technical
+  // insert time), settable so a shop can log an order a day or two after the customer
+  // actually placed it without the paperwork date being wrong.
+  orderDate: timestamp("order_date").defaultNow().notNull(),
 
   // Delivery
   dueDate: timestamp("due_date").notNull(),

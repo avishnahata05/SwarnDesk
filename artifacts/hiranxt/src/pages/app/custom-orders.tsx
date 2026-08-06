@@ -4,6 +4,7 @@ import {
   useListCustomOrders, useCreateCustomOrder, useUpdateCustomOrder, useDeleteCustomOrder,
   useListKarigars, useGetSettings, getListCustomOrdersQueryKey,
 } from "@workspace/api-client-react";
+import type { CustomOrderInput, CustomOrderUpdate } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -66,6 +67,7 @@ type Order = {
   targetWeight?: number | null;
   estimatedPrice?: number | null;
   agreedPrice?: number | null;
+  bookingMetalRate?: number | null;
   advancePaid: number;
   status: string;
   karigarId?: number | null;
@@ -77,6 +79,7 @@ type Order = {
   karigarReturnDate?: string | null;
   karigarWages?: number | null;
   karigarNotes?: string | null;
+  orderDate: string;
   dueDate: string;
   deliveryDate?: string | null;
   finalPrice?: number | null;
@@ -88,16 +91,16 @@ type CreateForm = {
   customerName: string; customerMobile: string;
   itemType: string; description: string;
   metalType: string; purity: string;
-  targetWeight: string; estimatedPrice: string; agreedPrice: string; advancePaid: string;
-  dueDate: string; notes: string;
+  targetWeight: string; estimatedPrice: string; agreedPrice: string; bookingMetalRate: string; advancePaid: string;
+  orderDate: string; dueDate: string; notes: string;
 };
 
 const EMPTY_CREATE: CreateForm = {
   customerName: "", customerMobile: "",
   itemType: "Ring", description: "",
   metalType: "gold", purity: "22K",
-  targetWeight: "", estimatedPrice: "", agreedPrice: "", advancePaid: "",
-  dueDate: "", notes: "",
+  targetWeight: "", estimatedPrice: "", agreedPrice: "", bookingMetalRate: "", advancePaid: "",
+  orderDate: new Date().toISOString().split("T")[0], dueDate: "", notes: "",
 };
 
 // ─── Print order card ─────────────────────────────────────────────────────────
@@ -140,7 +143,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;color:#111;font-size:12px;backgroun
 </div>
 <div class="title">CUSTOM ORDER RECEIPT</div>
 <div class="row"><span class="label">Order No.</span><span class="value">${order.orderNumber}</span></div>
-<div class="row"><span class="label">Date</span><span class="value">${fmtD(order.createdAt)}</span></div>
+<div class="row"><span class="label">Date</span><span class="value">${fmtD(order.orderDate)}</span></div>
 <div class="row"><span class="label">Status</span><span class="value"><span class="status-badge">${STATUS_LABEL[order.status as Status] ?? order.status}</span></span></div>
 
 <div class="section-title">Customer</div>
@@ -181,7 +184,7 @@ ${order.notes ? `<div class="note-box">Notes: ${order.notes}</div>` : ""}
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Customer Signature</div><div style="font-size:10px;color:#999;margin-top:2px">${order.customerName}</div></div>
   <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorised by ${shopName}</div></div>
 </div>
-<div class="footer">This is a computer-generated custom order receipt. Powered by SwarnDesk.</div>
+<div class="footer">This is a computer-generated custom order receipt. Powered by SwarnDesk (by TirthonTech)</div>
 </div></body></html>`;
 
   const w = window.open("", "_blank", "width=480,height=700");
@@ -254,22 +257,23 @@ export default function CustomOrders() {
       toast({ title: "Customer name and mobile required", variant: "destructive" }); return;
     }
     if (!form.dueDate) { toast({ title: "Due date required", variant: "destructive" }); return; }
-    createOrder.mutate({
-      data: {
-        customerName: form.customerName.trim(),
-        customerMobile: form.customerMobile.trim(),
-        itemType: form.itemType,
-        description: form.description.trim() || null,
-        metalType: form.metalType,
-        purity: form.purity,
-        targetWeight: form.targetWeight ? parseFloat(form.targetWeight) : null,
-        estimatedPrice: form.estimatedPrice ? parseFloat(form.estimatedPrice) : null,
-        agreedPrice: form.agreedPrice ? parseFloat(form.agreedPrice) : null,
-        advancePaid: form.advancePaid ? parseFloat(form.advancePaid) : 0,
-        dueDate: new Date(form.dueDate).toISOString(),
-        notes: form.notes.trim() || null,
-      }
-    }, {
+    const createPayload: CustomOrderInput & { orderDate?: string } = {
+      customerName: form.customerName.trim(),
+      customerMobile: form.customerMobile.trim(),
+      itemType: form.itemType,
+      description: form.description.trim() || null,
+      metalType: form.metalType,
+      purity: form.purity,
+      targetWeight: form.targetWeight ? parseFloat(form.targetWeight) : null,
+      estimatedPrice: form.estimatedPrice ? parseFloat(form.estimatedPrice) : null,
+      agreedPrice: form.agreedPrice ? parseFloat(form.agreedPrice) : null,
+      bookingMetalRate: form.bookingMetalRate ? parseFloat(form.bookingMetalRate) : null,
+      advancePaid: form.advancePaid ? parseFloat(form.advancePaid) : 0,
+      orderDate: form.orderDate ? new Date(form.orderDate).toISOString() : undefined,
+      dueDate: new Date(form.dueDate).toISOString(),
+      notes: form.notes.trim() || null,
+    };
+    createOrder.mutate({ data: createPayload }, {
       onSuccess: () => { invalidate(); toast({ title: "Custom order created" }); setAddOpen(false); setForm(EMPTY_CREATE); },
       onError: () => toast({ title: "Failed to create order", variant: "destructive" }),
     });
@@ -284,7 +288,9 @@ export default function CustomOrders() {
       targetWeight: o.targetWeight != null ? String(o.targetWeight) : "",
       estimatedPrice: o.estimatedPrice != null ? String(o.estimatedPrice) : "",
       agreedPrice: o.agreedPrice != null ? String(o.agreedPrice) : "",
+      bookingMetalRate: o.bookingMetalRate != null ? String(o.bookingMetalRate) : "",
       advancePaid: String(o.advancePaid),
+      orderDate: o.orderDate.split("T")[0],
       dueDate: o.dueDate.split("T")[0],
       notes: o.notes ?? "",
     });
@@ -292,22 +298,25 @@ export default function CustomOrders() {
 
   const handleEdit = () => {
     if (!editOrder) return;
+    const editPayload: CustomOrderUpdate & { orderDate?: string } = {
+      customerName: editForm.customerName.trim(),
+      customerMobile: editForm.customerMobile.trim(),
+      itemType: editForm.itemType,
+      description: editForm.description.trim() || null,
+      metalType: editForm.metalType,
+      purity: editForm.purity,
+      targetWeight: editForm.targetWeight ? parseFloat(editForm.targetWeight) : null,
+      estimatedPrice: editForm.estimatedPrice ? parseFloat(editForm.estimatedPrice) : null,
+      agreedPrice: editForm.agreedPrice ? parseFloat(editForm.agreedPrice) : null,
+      bookingMetalRate: editForm.bookingMetalRate ? parseFloat(editForm.bookingMetalRate) : null,
+      advancePaid: editForm.advancePaid ? parseFloat(editForm.advancePaid) : 0,
+      orderDate: editForm.orderDate ? new Date(editForm.orderDate).toISOString() : undefined,
+      dueDate: new Date(editForm.dueDate).toISOString(),
+      notes: editForm.notes.trim() || null,
+    };
     updateOrder.mutate({
       id: editOrder.id,
-      data: {
-        customerName: editForm.customerName.trim(),
-        customerMobile: editForm.customerMobile.trim(),
-        itemType: editForm.itemType,
-        description: editForm.description.trim() || null,
-        metalType: editForm.metalType,
-        purity: editForm.purity,
-        targetWeight: editForm.targetWeight ? parseFloat(editForm.targetWeight) : null,
-        estimatedPrice: editForm.estimatedPrice ? parseFloat(editForm.estimatedPrice) : null,
-        agreedPrice: editForm.agreedPrice ? parseFloat(editForm.agreedPrice) : null,
-        advancePaid: editForm.advancePaid ? parseFloat(editForm.advancePaid) : 0,
-        dueDate: new Date(editForm.dueDate).toISOString(),
-        notes: editForm.notes.trim() || null,
-      }
+      data: editPayload
     }, {
       onSuccess: () => { invalidate(); toast({ title: "Order updated" }); setEditOrder(null); },
       onError: () => toast({ title: "Failed to update", variant: "destructive" }),
@@ -637,7 +646,12 @@ export default function CustomOrders() {
               <div className="grid grid-cols-2 gap-3">
                 <div><label className={lbl}>Estimated Price (₹)</label><input className={inp} type="number" value={form.estimatedPrice} onChange={e => setF("estimatedPrice", e.target.value)} /></div>
                 <div><label className={lbl}>Agreed Price (₹)</label><input className={inp} type="number" value={form.agreedPrice} onChange={e => setF("agreedPrice", e.target.value)} /></div>
+                <div>
+                  <label className={lbl}>Metal Rate at Booking (₹/g) <span className="text-muted-foreground/60">optional — locks in what "the rate" meant today</span></label>
+                  <input className={inp} type="number" value={form.bookingMetalRate} onChange={e => setF("bookingMetalRate", e.target.value)} placeholder="e.g. 7250" />
+                </div>
                 <div><label className={lbl}>Advance Collected (₹)</label><input className={inp} type="number" value={form.advancePaid} onChange={e => setF("advancePaid", e.target.value)} placeholder="0" /></div>
+                <div><label className={lbl}>Order Date *</label><input className={inp} type="date" value={form.orderDate} onChange={e => setF("orderDate", e.target.value)} /></div>
                 <div><label className={lbl}>Due Date *</label><input className={inp} type="date" value={form.dueDate} min={new Date().toISOString().split("T")[0]} onChange={e => setF("dueDate", e.target.value)} /></div>
                 <div className="col-span-2"><label className={lbl}>Notes</label><input className={inp} value={form.notes} onChange={e => setF("notes", e.target.value)} placeholder="Remarks…" /></div>
               </div>
@@ -695,7 +709,12 @@ export default function CustomOrders() {
               <div className="grid grid-cols-2 gap-3">
                 <div><label className={lbl}>Estimated Price (₹)</label><input className={inp} type="number" value={editForm.estimatedPrice} onChange={e => setEF("estimatedPrice", e.target.value)} /></div>
                 <div><label className={lbl}>Agreed Price (₹)</label><input className={inp} type="number" value={editForm.agreedPrice} onChange={e => setEF("agreedPrice", e.target.value)} /></div>
+                <div>
+                  <label className={lbl}>Metal Rate at Booking (₹/g)</label>
+                  <input className={inp} type="number" value={editForm.bookingMetalRate} onChange={e => setEF("bookingMetalRate", e.target.value)} />
+                </div>
                 <div><label className={lbl}>Advance Paid (₹)</label><input className={inp} type="number" value={editForm.advancePaid} onChange={e => setEF("advancePaid", e.target.value)} /></div>
+                <div><label className={lbl}>Order Date *</label><input className={inp} type="date" value={editForm.orderDate} onChange={e => setEF("orderDate", e.target.value)} /></div>
                 <div><label className={lbl}>Due Date *</label><input className={inp} type="date" value={editForm.dueDate} onChange={e => setEF("dueDate", e.target.value)} /></div>
                 <div className="col-span-2"><label className={lbl}>Notes</label><input className={inp} value={editForm.notes} onChange={e => setEF("notes", e.target.value)} /></div>
               </div>

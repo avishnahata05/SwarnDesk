@@ -89,6 +89,8 @@ export const GetRecentSalesResponseItem = zod.object({
   "exchangeGoldValue": zod.number(),
   "paymentMode": zod.string().describe('cash, upi, card, bank, credit, partial'),
   "bankAccountId": zod.number().nullish(),
+  "salespersonId": zod.number().nullish(),
+  "salespersonName": zod.string().nullish(),
   "paymentStatus": zod.string().describe('paid, partial, pending'),
   "invoiceNumber": zod.string(),
   "saleDate": zod.string(),
@@ -169,7 +171,7 @@ export const CreateInventoryItemBody = zod.object({
   "netWeight": zod.number(),
   "stoneWeight": zod.number(),
   "stoneValue": zod.number().nullish(),
-  "makingCharges": zod.number(),
+  "makingCharges": zod.number().optional(),
   "metalRate": zod.number(),
   "totalValue": zod.number(),
   "quantity": zod.number(),
@@ -298,6 +300,7 @@ export const ListCustomersResponseItem = zod.object({
   "balance": zod.number().describe('positive = credit, negative = debit'),
   "loyaltyPoints": zod.number().optional(),
   "gstin": zod.string().nullish(),
+  "pan": zod.string().nullish().describe('for Sec. 269ST compliance on cash sales >= 2 lakh'),
   "stateCode": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string()
@@ -316,6 +319,7 @@ export const CreateCustomerBody = zod.object({
   "birthday": zod.string().nullish(),
   "anniversary": zod.string().nullish(),
   "gstin": zod.string().nullish(),
+  "pan": zod.string().nullish().describe('for Sec. 269ST compliance on cash sales >= 2 lakh'),
   "stateCode": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "balance": zod.number().optional().describe('opening balance — positive = credit (advance), negative = debit (due)')
@@ -342,6 +346,7 @@ export const GetCustomerResponse = zod.object({
   "balance": zod.number().describe('positive = credit, negative = debit'),
   "loyaltyPoints": zod.number().optional(),
   "gstin": zod.string().nullish(),
+  "pan": zod.string().nullish().describe('for Sec. 269ST compliance on cash sales >= 2 lakh'),
   "stateCode": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string()
@@ -359,6 +364,8 @@ export const GetCustomerResponse = zod.object({
   "exchangeGoldValue": zod.number(),
   "paymentMode": zod.string().describe('cash, upi, card, bank, credit, partial'),
   "bankAccountId": zod.number().nullish(),
+  "salespersonId": zod.number().nullish(),
+  "salespersonName": zod.string().nullish(),
   "paymentStatus": zod.string().describe('paid, partial, pending'),
   "invoiceNumber": zod.string(),
   "saleDate": zod.string(),
@@ -372,6 +379,8 @@ export const GetCustomerResponse = zod.object({
   "customerMobile": zod.string(),
   "itemDescription": zod.string(),
   "issue": zod.string(),
+  "grossWeight": zod.number().nullish(),
+  "netWeight": zod.number().nullish(),
   "estimatedCost": zod.number(),
   "actualCost": zod.number().nullish(),
   "status": zod.string().describe('received, in_progress, ready, delivered'),
@@ -401,6 +410,7 @@ export const UpdateCustomerBody = zod.object({
   "birthday": zod.string().nullish(),
   "anniversary": zod.string().nullish(),
   "gstin": zod.string().nullish(),
+  "pan": zod.string().nullish().describe('for Sec. 269ST compliance on cash sales >= 2 lakh'),
   "stateCode": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "balance": zod.number().optional().describe('opening balance, not touched by transactions — positive = credit (advance), negative = debit (due)')
@@ -418,6 +428,7 @@ export const UpdateCustomerResponse = zod.object({
   "balance": zod.number().describe('positive = credit, negative = debit'),
   "loyaltyPoints": zod.number().optional(),
   "gstin": zod.string().nullish(),
+  "pan": zod.string().nullish().describe('for Sec. 269ST compliance on cash sales >= 2 lakh'),
   "stateCode": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string()
@@ -468,6 +479,8 @@ export const ListSalesResponseItem = zod.object({
   "exchangeGoldValue": zod.number(),
   "paymentMode": zod.string().describe('cash, upi, card, bank, credit, partial'),
   "bankAccountId": zod.number().nullish(),
+  "salespersonId": zod.number().nullish(),
+  "salespersonName": zod.string().nullish(),
   "paymentStatus": zod.string().describe('paid, partial, pending'),
   "invoiceNumber": zod.string(),
   "saleDate": zod.string(),
@@ -491,6 +504,8 @@ export const CreateSaleBody = zod.object({
   "exchangeGoldValue": zod.number(),
   "paymentMode": zod.string(),
   "bankAccountId": zod.number().nullish(),
+  "salespersonId": zod.number().nullish(),
+  "salespersonName": zod.string().nullish(),
   "paymentStatus": zod.string(),
   "notes": zod.string().nullish(),
   "items": zod.array(zod.object({
@@ -526,6 +541,8 @@ export const GetSaleResponse = zod.object({
   "exchangeGoldValue": zod.number(),
   "paymentMode": zod.string().describe('cash, upi, card, bank, credit, partial'),
   "bankAccountId": zod.number().nullish(),
+  "salespersonId": zod.number().nullish(),
+  "salespersonName": zod.string().nullish(),
   "paymentStatus": zod.string().describe('paid, partial, pending'),
   "invoiceNumber": zod.string(),
   "saleDate": zod.string(),
@@ -574,6 +591,8 @@ export const UpdateSaleResponse = zod.object({
   "exchangeGoldValue": zod.number(),
   "paymentMode": zod.string().describe('cash, upi, card, bank, credit, partial'),
   "bankAccountId": zod.number().nullish(),
+  "salespersonId": zod.number().nullish(),
+  "salespersonName": zod.string().nullish(),
   "paymentStatus": zod.string().describe('paid, partial, pending'),
   "invoiceNumber": zod.string(),
   "saleDate": zod.string(),
@@ -767,6 +786,8 @@ export const ListRepairsResponseItem = zod.object({
   "customerMobile": zod.string(),
   "itemDescription": zod.string(),
   "issue": zod.string(),
+  "grossWeight": zod.number().nullish(),
+  "netWeight": zod.number().nullish(),
   "estimatedCost": zod.number(),
   "actualCost": zod.number().nullish(),
   "status": zod.string().describe('received, in_progress, ready, delivered'),
@@ -790,6 +811,8 @@ export const CreateRepairBody = zod.object({
   "customerMobile": zod.string(),
   "itemDescription": zod.string(),
   "issue": zod.string(),
+  "grossWeight": zod.number().nullish(),
+  "netWeight": zod.number().nullish(),
   "estimatedCost": zod.number(),
   "promisedDate": zod.string(),
   "notes": zod.string().nullish(),
@@ -811,6 +834,8 @@ export const GetRepairResponse = zod.object({
   "customerMobile": zod.string(),
   "itemDescription": zod.string(),
   "issue": zod.string(),
+  "grossWeight": zod.number().nullish(),
+  "netWeight": zod.number().nullish(),
   "estimatedCost": zod.number(),
   "actualCost": zod.number().nullish(),
   "status": zod.string().describe('received, in_progress, ready, delivered'),
@@ -840,6 +865,8 @@ export const UpdateRepairBody = zod.object({
   "customerMobile": zod.string().optional(),
   "itemDescription": zod.string().optional(),
   "issue": zod.string().optional(),
+  "grossWeight": zod.number().nullish(),
+  "netWeight": zod.number().nullish(),
   "estimatedCost": zod.number().optional(),
   "promisedDate": zod.string().optional(),
   "karigarId": zod.number().nullish()
@@ -852,6 +879,8 @@ export const UpdateRepairResponse = zod.object({
   "customerMobile": zod.string(),
   "itemDescription": zod.string(),
   "issue": zod.string(),
+  "grossWeight": zod.number().nullish(),
+  "netWeight": zod.number().nullish(),
   "estimatedCost": zod.number(),
   "actualCost": zod.number().nullish(),
   "status": zod.string().describe('received, in_progress, ready, delivered'),
@@ -893,6 +922,7 @@ export const ListCustomOrdersResponseItem = zod.object({
   "targetWeight": zod.number().nullable(),
   "estimatedPrice": zod.number().nullable(),
   "agreedPrice": zod.number().nullable(),
+  "bookingMetalRate": zod.number().nullable(),
   "advancePaid": zod.number(),
   "status": zod.string().describe('pending, karigar_assigned, in_progress, karigar_returned, ready, delivered, cancelled'),
   "karigarId": zod.number().nullable(),
@@ -927,6 +957,7 @@ export const CreateCustomOrderBody = zod.object({
   "targetWeight": zod.number().nullish(),
   "estimatedPrice": zod.number().nullish(),
   "agreedPrice": zod.number().nullish(),
+  "bookingMetalRate": zod.number().nullish(),
   "advancePaid": zod.number().optional(),
   "dueDate": zod.string(),
   "notes": zod.string().nullish()
@@ -953,6 +984,7 @@ export const GetCustomOrderResponse = zod.object({
   "targetWeight": zod.number().nullable(),
   "estimatedPrice": zod.number().nullable(),
   "agreedPrice": zod.number().nullable(),
+  "bookingMetalRate": zod.number().nullable(),
   "advancePaid": zod.number(),
   "status": zod.string().describe('pending, karigar_assigned, in_progress, karigar_returned, ready, delivered, cancelled'),
   "karigarId": zod.number().nullable(),
@@ -989,6 +1021,7 @@ export const UpdateCustomOrderBody = zod.object({
   "targetWeight": zod.number().nullish(),
   "estimatedPrice": zod.number().nullish(),
   "agreedPrice": zod.number().nullish(),
+  "bookingMetalRate": zod.number().nullish(),
   "advancePaid": zod.number().optional(),
   "status": zod.string().optional(),
   "karigarId": zod.number().nullish(),
@@ -1019,6 +1052,7 @@ export const UpdateCustomOrderResponse = zod.object({
   "targetWeight": zod.number().nullable(),
   "estimatedPrice": zod.number().nullable(),
   "agreedPrice": zod.number().nullable(),
+  "bookingMetalRate": zod.number().nullable(),
   "advancePaid": zod.number(),
   "status": zod.string().describe('pending, karigar_assigned, in_progress, karigar_returned, ready, delivered, cancelled'),
   "karigarId": zod.number().nullable(),
@@ -1286,6 +1320,68 @@ export const UpdateSupplierResponse = zod.object({
  * @summary Delete a supplier
  */
 export const DeleteSupplierParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+/**
+ * @summary List staff for the current shop
+ */
+export const ListStaffResponseItem = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "email": zod.string(),
+  "mobile": zod.string().nullish(),
+  "role": zod.string().describe('admin, accountant, or salesperson'),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string()
+})
+export const ListStaffResponse = zod.array(ListStaffResponseItem)
+
+
+/**
+ * @summary Create a staff login (owner or admin-role staff only)
+ */
+export const CreateStaffBody = zod.object({
+  "name": zod.string(),
+  "email": zod.string(),
+  "mobile": zod.string().nullish(),
+  "password": zod.string(),
+  "role": zod.string().optional()
+})
+
+
+/**
+ * @summary Update a staff member (owner or admin-role staff only)
+ */
+export const UpdateStaffParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateStaffBody = zod.object({
+  "name": zod.string().optional(),
+  "email": zod.string().optional(),
+  "mobile": zod.string().nullish(),
+  "password": zod.string().optional().describe('omit or leave blank to keep the current password'),
+  "role": zod.string().optional(),
+  "isActive": zod.boolean().optional()
+})
+
+export const UpdateStaffResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "email": zod.string(),
+  "mobile": zod.string().nullish(),
+  "role": zod.string().describe('admin, accountant, or salesperson'),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Delete a staff member (owner or admin-role staff only)
+ */
+export const DeleteStaffParams = zod.object({
   "id": zod.coerce.number()
 })
 

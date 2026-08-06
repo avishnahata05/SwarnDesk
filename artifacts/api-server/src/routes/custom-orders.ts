@@ -47,6 +47,7 @@ function mapOrder(r: typeof customOrdersTable.$inferSelect) {
     targetWeight: r.targetWeight ? parseFloat(r.targetWeight) : null,
     estimatedPrice: r.estimatedPrice ? parseFloat(r.estimatedPrice) : null,
     agreedPrice: r.agreedPrice ? parseFloat(r.agreedPrice) : null,
+    bookingMetalRate: r.bookingMetalRate ? parseFloat(r.bookingMetalRate) : null,
     advancePaid: parseFloat(r.advancePaid ?? "0"),
     status: r.status,
     karigarId: r.karigarId,
@@ -58,6 +59,7 @@ function mapOrder(r: typeof customOrdersTable.$inferSelect) {
     karigarReturnDate: r.karigarReturnDate ? r.karigarReturnDate.toISOString() : null,
     karigarWages: r.karigarWages ? parseFloat(r.karigarWages) : null,
     karigarNotes: r.karigarNotes,
+    orderDate: r.orderDate.toISOString(),
     dueDate: r.dueDate.toISOString(),
     deliveryDate: r.deliveryDate ? r.deliveryDate.toISOString() : null,
     finalPrice: r.finalPrice ? parseFloat(r.finalPrice) : null,
@@ -96,6 +98,14 @@ router.post("/", async (req, res) => {
     const dueDate = new Date(d.dueDate);
     if (isNaN(dueDate.getTime())) return res.status(400).json({ error: "Invalid due date" });
 
+    // Optional — defaults to now (order logged as booked today) if not given, same as
+    // before this was settable; lets a shop backdate an order entered a day or two late.
+    let orderDate: Date | undefined;
+    if (d.orderDate !== undefined && d.orderDate !== null && d.orderDate !== "") {
+      orderDate = new Date(d.orderDate);
+      if (isNaN(orderDate.getTime())) return res.status(400).json({ error: "Invalid order date" });
+    }
+
     let advancePaid = 0;
     if (d.advancePaid != null) {
       advancePaid = safeFloat(d.advancePaid);
@@ -118,7 +128,9 @@ router.post("/", async (req, res) => {
       targetWeight: d.targetWeight != null ? String(d.targetWeight) : null,
       estimatedPrice: d.estimatedPrice != null ? String(d.estimatedPrice) : null,
       agreedPrice: d.agreedPrice != null ? String(d.agreedPrice) : null,
+      bookingMetalRate: d.bookingMetalRate != null ? String(d.bookingMetalRate) : null,
       advancePaid: advancePaid.toString(),
+      ...(orderDate ? { orderDate } : {}),
       dueDate,
       notes: d.notes?.trim() || null,
     }).returning();
@@ -160,6 +172,8 @@ router.patch("/:id", async (req, res) => {
     if (d.targetWeight !== undefined) update.targetWeight = d.targetWeight != null ? String(d.targetWeight) : null;
     if (d.estimatedPrice !== undefined) update.estimatedPrice = d.estimatedPrice != null ? String(d.estimatedPrice) : null;
     if (d.agreedPrice !== undefined) update.agreedPrice = d.agreedPrice != null ? String(d.agreedPrice) : null;
+    if (d.bookingMetalRate !== undefined) update.bookingMetalRate = d.bookingMetalRate != null ? String(d.bookingMetalRate) : null;
+    if (d.orderDate !== undefined) update.orderDate = new Date(d.orderDate);
     if (d.dueDate !== undefined) update.dueDate = new Date(d.dueDate);
     if (d.notes !== undefined) update.notes = d.notes?.trim() || null;
 

@@ -20,6 +20,10 @@ export interface SaleInput {
   paymentMode: string;
   /** @nullable */
   bankAccountId?: number | null;
+  /** @nullable */
+  salespersonId?: number | null;
+  /** @nullable */
+  salespersonName?: string | null;
   paymentStatus: string;
   /** @nullable */
   notes?: string | null;

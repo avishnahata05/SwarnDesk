@@ -15,6 +15,9 @@ export const customersTable = pgTable("customers", {
   balance: numeric("balance", { precision: 12, scale: 2 }).notNull().default("0"),
   loyaltyPoints: integer("loyalty_points").notNull().default(0),
   gstin: text("gstin"),
+  // For Sec. 269ST compliance — Indian law requires PAN on file for cash transactions
+  // >= 2 lakh with any single customer. Optional here; enforced at billing time, not schema level.
+  pan: text("pan"),
   // 2-digit GST state code for this customer — blank means "assume same state as the
   // shop" (intra-state, CGST+SGST). Only matters for B2B invoices where gstin is set.
   stateCode: text("state_code"),
