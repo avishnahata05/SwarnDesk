@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { salesTable, saleLineItemsTable, inventoryItemsTable, customersTable, paymentTransactionsTable, businessSettingsTable, saleReturnsTable, journalVouchersTable } from "@workspace/db";
 import { eq, and, gte, lte, sql, desc, inArray } from "drizzle-orm";
-import { postJournalEntry, getOrCreateDefaultAccounts, cashOrBankKey, nextVoucherNumber, reverseVoucher, safeFloat } from "./accounting-helpers";
+import { postJournalEntry, getOrCreateDefaultAccounts, resolveMoneyAccountId, isValidBankAccount, nextVoucherNumber, reverseVoucher, safeFloat } from "./accounting-helpers";
 
 const router = Router();
 
@@ -21,6 +21,7 @@ function mapSale(s: typeof salesTable.$inferSelect) {
     exchangeGoldWeight: parseFloat(s.exchangeGoldWeight) || 0,
     exchangeGoldValue: parseFloat(s.exchangeGoldValue) || 0,
     paymentMode: s.paymentMode,
+    bankAccountId: s.bankAccountId,
     paymentStatus: s.paymentStatus,
     status: s.status,
     invoiceNumber: s.invoiceNumber,
@@ -38,6 +39,7 @@ function mapTransaction(t: typeof paymentTransactionsTable.$inferSelect) {
     customerName: t.customerName,
     amount: parseFloat(t.amount) || 0,
     paymentMode: t.paymentMode,
+    bankAccountId: t.bankAccountId,
     paidAt: t.paidAt.toISOString(),
     notes: t.notes,
   };
@@ -178,6 +180,12 @@ router.post("/", async (req, res) => {
     const loyaltyRate = (loyaltySettings ? parseFloat(loyaltySettings.loyaltyPointsRate) : NaN) || 1000;
     const accts = await getOrCreateDefaultAccounts(userId);
 
+    const bankAccountId = data.bankAccountId ? parseInt(data.bankAccountId) : null;
+    if (bankAccountId && !(await isValidBankAccount(userId, bankAccountId))) {
+      return res.status(400).json({ error: "Invalid bank account" });
+    }
+    const moneyAccountId = await resolveMoneyAccountId(userId, data.paymentMode, bankAccountId, accts);
+
     const sale = await db.transaction(async (tx) => {
       // 1. Lock inventory rows and check stock atomically
       for (const item of items) {
@@ -210,6 +218,7 @@ router.post("/", async (req, res) => {
         exchangeGoldWeight: (parseFloat(data.exchangeGoldWeight) || 0).toString(),
         exchangeGoldValue: (parseFloat(data.exchangeGoldValue) || 0).toString(),
         paymentMode: data.paymentMode ?? "cash",
+        bankAccountId,
         paymentStatus: autoStatus,
         invoiceNumber,
         notes: data.notes ?? null,
@@ -276,6 +285,7 @@ router.post("/", async (req, res) => {
           customerName: data.customerName.trim(),
           amount: paidAmount.toString(),
           paymentMode: data.paymentMode ?? "cash",
+          bankAccountId,
           notes: "Initial payment at time of sale",
         });
       }
@@ -316,7 +326,7 @@ router.post("/", async (req, res) => {
         sourceModule: "sales",
         sourceId: newSale.id,
         lines: [
-          { accountId: accts[cashOrBankKey(data.paymentMode)], debit: cashPortion, particulars: "Cash/bank received" },
+          { accountId: moneyAccountId, debit: cashPortion, particulars: "Cash/bank received" },
           { accountId: accts.INVENTORY_GOLD, debit: goldPortion, particulars: "Old gold taken in exchange" },
           { accountId: accts.ACCOUNTS_RECEIVABLE, debit: arPortion, partyType: "customer", partyId: data.customerId ? parseInt(data.customerId) || null : null, particulars: "Balance owed" },
           { accountId: accts.SALES_REVENUE, credit: totalAmount - gstAmount, particulars: "Sale revenue" },
@@ -444,9 +454,13 @@ router.post("/:id/payments", async (req, res) => {
     const amount = parseFloat(req.body.amount);
     if (!isFinite(amount) || amount <= 0) return res.status(400).json({ error: "Invalid payment amount" });
 
-    const allowedModes = ["cash", "upi", "card", "credit", "partial"];
+    const allowedModes = ["cash", "upi", "card", "bank", "credit", "partial"];
     const paymentMode = allowedModes.includes(req.body.paymentMode) ? req.body.paymentMode : "cash";
     const notes = req.body.notes ? String(req.body.notes).slice(0, 500) : null;
+    const bankAccountId = req.body.bankAccountId ? parseInt(req.body.bankAccountId) : null;
+    if (bankAccountId && !(await isValidBankAccount(userId, bankAccountId))) {
+      return res.status(400).json({ error: "Invalid bank account" });
+    }
 
     const updated = await db.transaction(async (tx) => {
       const [sale] = await tx.select().from(salesTable)
@@ -465,6 +479,7 @@ router.post("/:id/payments", async (req, res) => {
         customerName: sale.customerName,
         amount: amount.toString(),
         paymentMode,
+        bankAccountId,
         notes,
       });
 
@@ -474,6 +489,7 @@ router.post("/:id/payments", async (req, res) => {
         .returning();
 
       const accts = await getOrCreateDefaultAccounts(userId);
+      const moneyAccountId = await resolveMoneyAccountId(userId, paymentMode, bankAccountId, accts);
       await postJournalEntry(tx, {
         userId,
         voucherType: "receipt",
@@ -481,7 +497,7 @@ router.post("/:id/payments", async (req, res) => {
         sourceModule: "sales",
         sourceId: id,
         lines: [
-          { accountId: accts[cashOrBankKey(paymentMode)], debit: amount, particulars: "Payment received" },
+          { accountId: moneyAccountId, debit: amount, particulars: "Payment received" },
           { accountId: accts.ACCOUNTS_RECEIVABLE, credit: amount, partyType: "customer", partyId: sale.customerId, particulars: "Balance settled" },
         ],
       });

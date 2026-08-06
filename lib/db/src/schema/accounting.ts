@@ -16,6 +16,14 @@ export const chartOfAccountsTable = pgTable("chart_of_accounts", {
   openingBalance: numeric("opening_balance", { precision: 14, scale: 2 }).notNull().default("0"),
   openingBalanceType: text("opening_balance_type").notNull().default("debit"), // debit | credit
   isActive: boolean("is_active").notNull().default(true),
+  // Only meaningful when accountSubType = "bank" — lets a shop track more than one bank
+  // account (each with its own opening balance) instead of a single catch-all "Bank Account".
+  bankName: text("bank_name"),
+  bankAccountNumber: text("bank_account_number"),
+  bankIfsc: text("bank_ifsc"),
+  // Pre-selected in payment-mode pickers when a shop has multiple bank accounts. Only one
+  // bank account should have this true at a time (enforced in the route, not the DB).
+  isDefaultBank: boolean("is_default_bank").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
   uniqueIndex("coa_user_code_idx").on(t.userId, t.code),

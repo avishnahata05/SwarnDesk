@@ -19,6 +19,8 @@ export interface PurchaseInput {
   totalAmount: number;
   paidAmount?: number;
   paymentMode?: string;
+  /** @nullable */
+  bankAccountId?: number | null;
   gstRate?: number;
   hsnCode?: string;
   purchaseDate: string;

@@ -5,6 +5,11 @@ import { eq, and } from "drizzle-orm";
 
 const router = Router();
 
+function safeFloat(val: unknown, fallback = 0): number {
+  const n = parseFloat(String(val ?? ""));
+  return isFinite(n) ? n : fallback;
+}
+
 function mapSupplier(s: typeof suppliersTable.$inferSelect) {
   return {
     id: s.id,
@@ -13,6 +18,8 @@ function mapSupplier(s: typeof suppliersTable.$inferSelect) {
     address: s.address,
     gstin: s.gstin,
     email: s.email,
+    openingBalance: safeFloat(s.openingBalance),
+    openingBalanceType: s.openingBalanceType,
     createdAt: s.createdAt.toISOString(),
   };
 }
@@ -39,6 +46,8 @@ router.post("/", async (req, res) => {
       address: data.address,
       gstin: data.gstin,
       email: data.email,
+      openingBalance: safeFloat(data.openingBalance, 0).toString(),
+      openingBalanceType: data.openingBalanceType === "debit" ? "debit" : "credit",
     }).returning();
     res.status(201).json(mapSupplier(supplier));
   } catch (err) {
@@ -67,6 +76,8 @@ router.patch("/:id", async (req, res) => {
     if (data.address !== undefined) updateData.address = data.address ? String(data.address).trim() || null : null;
     if (data.gstin !== undefined) updateData.gstin = data.gstin ? String(data.gstin).trim() || null : null;
     if (data.email !== undefined) updateData.email = data.email ? String(data.email).trim() || null : null;
+    if (data.openingBalance !== undefined) updateData.openingBalance = safeFloat(data.openingBalance, 0).toString();
+    if (data.openingBalanceType !== undefined) updateData.openingBalanceType = data.openingBalanceType === "debit" ? "debit" : "credit";
     const [supplier] = await db.update(suppliersTable).set(updateData)
       .where(and(eq(suppliersTable.id, id), eq(suppliersTable.userId, userId)))
       .returning();

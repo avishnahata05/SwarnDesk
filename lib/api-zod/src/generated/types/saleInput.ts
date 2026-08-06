@@ -18,6 +18,8 @@ export interface SaleInput {
   exchangeGoldWeight: number;
   exchangeGoldValue: number;
   paymentMode: string;
+  /** @nullable */
+  bankAccountId?: number | null;
   paymentStatus: string;
   /** @nullable */
   notes?: string | null;

@@ -12,4 +12,6 @@ export interface KarigarInput {
   specialization: string;
   /** @nullable */
   address?: string | null;
+  openingBalance?: number;
+  openingBalanceType?: string;
 }

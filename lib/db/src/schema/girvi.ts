@@ -133,6 +133,11 @@ export const girviLoansTable = pgTable("girvi_loans", {
   // (PATCH loanAmount/processingFee) or void (DELETE) can reverse the exact
   // entry instead of guessing which of the loan's several vouchers it was.
   disbursementVoucherId: integer("disbursement_voucher_id"),
+  // How the loan amount was actually handed to the customer — defaults to "cash" so
+  // existing rows (disbursement was always hardcoded to Cash before this field existed)
+  // read back accurately. bankAccountId only set when disbursementMode is bank-like.
+  disbursementMode: text("disbursement_mode").notNull().default("cash"), // cash | bank | upi | cheque
+  disbursementBankAccountId: integer("disbursement_bank_account_id"),
   // Set when a forfeiture notice is issued to the customer (POST /:id/send-notice).
   // Forfeiture is blocked until forfeitureNoticeDays have elapsed since this date —
   // resending a notice bumps both fields forward. Nullable: most loans never reach
@@ -190,6 +195,7 @@ export const girviPaymentsTable = pgTable("girvi_payments", {
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   paymentType: text("payment_type").notNull().default("interest"), // interest | penalty | renewal | principal
   paymentMode: text("payment_mode").notNull().default("cash"), // cash | bank | upi | cheque
+  bankAccountId: integer("bank_account_id"),
   referenceNumber: text("reference_number"), // cheque #, UTR, etc.
   paymentDate: timestamp("payment_date").notNull().defaultNow(),
   notes: text("notes"),

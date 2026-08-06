@@ -29,6 +29,8 @@ function mapKarigar(k: typeof karigarsTable.$inferSelect) {
     pendingSilverWeight: parseFloat(k.pendingSilverWeight),
     pendingOrders: k.pendingOrders,
     totalWagesPaid: parseFloat(k.totalWagesPaid),
+    openingBalance: safeFloat(k.openingBalance),
+    openingBalanceType: k.openingBalanceType,
     createdAt: k.createdAt.toISOString(),
   };
 }
@@ -84,6 +86,8 @@ router.post("/", async (req, res) => {
       mobile: String(data.mobile).trim(),
       specialization: String(data.specialization).trim(),
       address: data.address ? String(data.address).trim() || null : null,
+      openingBalance: safeFloat(data.openingBalance, 0).toString(),
+      openingBalanceType: data.openingBalanceType === "debit" ? "debit" : "credit",
     }).returning();
     res.status(201).json(mapKarigar(karigar));
   } catch (err) {
@@ -120,6 +124,8 @@ router.patch("/:id", async (req, res) => {
     if (data.mobile !== undefined) updateData.mobile = data.mobile;
     if (data.specialization !== undefined) updateData.specialization = data.specialization;
     if (data.address !== undefined) updateData.address = data.address;
+    if (data.openingBalance !== undefined) updateData.openingBalance = safeFloat(data.openingBalance, 0).toString();
+    if (data.openingBalanceType !== undefined) updateData.openingBalanceType = data.openingBalanceType === "debit" ? "debit" : "credit";
     const [karigar] = await db.update(karigarsTable).set(updateData).where(and(eq(karigarsTable.id, parseInt(req.params.id)), eq(karigarsTable.userId, userId))).returning();
     if (!karigar) return res.status(404).json({ error: "Not found" });
     res.json(mapKarigar(karigar));
@@ -146,21 +152,27 @@ router.post("/:id/issue-metal", async (req, res) => {
       .where(and(eq(karigarsTable.id, karigarId), eq(karigarsTable.userId, userId)));
     if (!karigar) return res.status(404).json({ error: "Karigar not found" });
 
-    const [issue] = await db.insert(metalIssuesTable).values({
-      userId,
-      karigarId,
-      metalType: data.metalType,
-      weight: weight.toString(),
-      purity: data.purity ? String(data.purity).trim() || "22K" : "22K",
-      notes: data.notes ? String(data.notes).trim() || null : null,
-    }).returning();
+    const issue = await db.transaction(async (tx) => {
+      const [newIssue] = await tx.insert(metalIssuesTable).values({
+        userId,
+        karigarId,
+        metalType: data.metalType,
+        weight: weight.toString(),
+        purity: data.purity ? String(data.purity).trim() || "22K" : "22K",
+        notes: data.notes ? String(data.notes).trim() || null : null,
+      }).returning();
 
-    // Atomically increment pending weight — avoids read-modify-write race under concurrent requests
-    if (data.metalType === "gold") {
-      await db.execute(sql`UPDATE karigars SET pending_gold_weight = pending_gold_weight + ${weight}::numeric WHERE id = ${karigarId} AND user_id = ${userId}`);
-    } else {
-      await db.execute(sql`UPDATE karigars SET pending_silver_weight = pending_silver_weight + ${weight}::numeric WHERE id = ${karigarId} AND user_id = ${userId}`);
-    }
+      // Atomically increment pending weight — avoids read-modify-write race under concurrent
+      // requests; wrapped with the insert above so a crash can't leave the ledger row and the
+      // running balance out of sync with each other.
+      if (data.metalType === "gold") {
+        await tx.execute(sql`UPDATE karigars SET pending_gold_weight = pending_gold_weight + ${weight}::numeric WHERE id = ${karigarId} AND user_id = ${userId}`);
+      } else {
+        await tx.execute(sql`UPDATE karigars SET pending_silver_weight = pending_silver_weight + ${weight}::numeric WHERE id = ${karigarId} AND user_id = ${userId}`);
+      }
+
+      return newIssue;
+    });
 
     res.status(201).json(mapIssue(issue));
   } catch (err) {
@@ -190,22 +202,27 @@ router.post("/:id/return-metal", async (req, res) => {
       .where(and(eq(karigarsTable.id, karigarId), eq(karigarsTable.userId, userId)));
     if (!karigar) return res.status(404).json({ error: "Karigar not found" });
 
-    const [ret] = await db.insert(metalReturnsTable).values({
-      userId,
-      karigarId,
-      metalType: data.metalType,
-      issuedWeight: issuedWeight.toString(),
-      returnedWeight: returnedWeight.toString(),
-      wastagePercent: (isFinite(wastagePercent) ? wastagePercent : 0).toString(),
-      notes: data.notes ? String(data.notes).trim() || null : null,
-    }).returning();
+    const ret = await db.transaction(async (tx) => {
+      const [newReturn] = await tx.insert(metalReturnsTable).values({
+        userId,
+        karigarId,
+        metalType: data.metalType,
+        issuedWeight: issuedWeight.toString(),
+        returnedWeight: returnedWeight.toString(),
+        wastagePercent: (isFinite(wastagePercent) ? wastagePercent : 0).toString(),
+        notes: data.notes ? String(data.notes).trim() || null : null,
+      }).returning();
 
-    // Atomically decrement pending weight by the full issued amount (job fully settled: returned + wastage)
-    if (data.metalType === "gold") {
-      await db.execute(sql`UPDATE karigars SET pending_gold_weight = GREATEST(0, pending_gold_weight - ${issuedWeight}::numeric) WHERE id = ${karigarId} AND user_id = ${userId}`);
-    } else {
-      await db.execute(sql`UPDATE karigars SET pending_silver_weight = GREATEST(0, pending_silver_weight - ${issuedWeight}::numeric) WHERE id = ${karigarId} AND user_id = ${userId}`);
-    }
+      // Atomically decrement pending weight by the full issued amount (job fully settled:
+      // returned + wastage) — wrapped with the insert so a crash can't desync the ledger.
+      if (data.metalType === "gold") {
+        await tx.execute(sql`UPDATE karigars SET pending_gold_weight = GREATEST(0, pending_gold_weight - ${issuedWeight}::numeric) WHERE id = ${karigarId} AND user_id = ${userId}`);
+      } else {
+        await tx.execute(sql`UPDATE karigars SET pending_silver_weight = GREATEST(0, pending_silver_weight - ${issuedWeight}::numeric) WHERE id = ${karigarId} AND user_id = ${userId}`);
+      }
+
+      return newReturn;
+    });
 
     res.status(201).json(mapReturn(ret));
   } catch (err) {

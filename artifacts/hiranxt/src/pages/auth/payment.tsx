@@ -5,10 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, MessageCircle, XCircle, Clock } from "lucide-react";
+import { LogOut, MessageCircle, XCircle, Clock, Check } from "lucide-react";
+import { PLANS, PLAN_ORDER, type PlanId } from "@/lib/plans";
 
 const UPI_VPA = "akshatnahata05@ibl";
-const AMOUNT = 2999;
 const WHATSAPP_SUPPORT_URL = "https://wa.me/919424575918?text=Hello+SwarnDesk+Support";
 
 interface MyPaymentRequest {
@@ -16,23 +16,32 @@ interface MyPaymentRequest {
   status: string;
   notes: string | null;
   createdAt: string;
+  planId?: PlanId | null;
 }
 
 export default function PaymentPage() {
   const { user, logout } = useAuth();
   const [, navigate] = useLocation();
   const [utrNumber, setUtrNumber] = useState("");
+  const [selectedPlan, setSelectedPlan] = useState<PlanId>("monthly");
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
   const [latestRequest, setLatestRequest] = useState<MyPaymentRequest | null>(null);
+  const plan = PLANS[selectedPlan];
 
   useEffect(() => {
     const token = localStorage.getItem("swarndesk_token");
     if (!token) return;
     fetch("/api/auth/payment-requests/mine", { headers: { Authorization: `Bearer ${token}` } })
       .then(res => (res.ok ? res.json() : []))
-      .then((rows: MyPaymentRequest[]) => { if (Array.isArray(rows) && rows.length > 0) setLatestRequest(rows[0]); })
+      .then((rows: MyPaymentRequest[]) => {
+        if (!Array.isArray(rows) || rows.length === 0) return;
+        setLatestRequest(rows[0]);
+        // Pre-select whatever plan they last tried to pay for (e.g. a rejected
+        // request being corrected and resubmitted) instead of resetting to Monthly.
+        if (rows[0].planId && rows[0].planId in PLANS) setSelectedPlan(rows[0].planId);
+      })
       .catch(() => {});
   }, []);
 
@@ -58,7 +67,7 @@ export default function PaymentPage() {
       const res = await fetch("/api/auth/payment-request", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ utrNumber: utrNumber.trim() }),
+        body: JSON.stringify({ utrNumber: utrNumber.trim(), planId: selectedPlan }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to submit");
@@ -78,7 +87,7 @@ export default function PaymentPage() {
             <div className="text-5xl">🕐</div>
             <h2 className="text-xl font-bold text-foreground">Payment Submitted!</h2>
             <p className="text-muted-foreground">
-              Your payment reference has been received. Our team will verify and activate your subscription within <strong>24 hours</strong>.
+              Your {plan.label} plan (₹{plan.amount.toLocaleString("en-IN")}) payment reference has been received. Our team will verify and activate your subscription within <strong>24 hours</strong>.
             </p>
             <p className="text-sm text-muted-foreground">
               You'll receive confirmation once your account is activated.
@@ -143,24 +152,33 @@ export default function PaymentPage() {
               </div>
             )}
 
-            {/* Price options */}
+            {/* Price options — click one to select it; the UPI amount below updates to match */}
             <div className="space-y-2">
-              {[
-                { label: "Monthly", amount: "₹2,999", sub: "/month", highlight: true },
-                { label: "Quarterly", amount: "₹7,999", sub: "/quarter · save ₹998" },
-                { label: "Annual", amount: "₹29,999", sub: "/year · save ₹5,989" },
-              ].map(opt => (
-                <div key={opt.label} className={`rounded-xl border p-3 flex items-center justify-between ${opt.highlight ? "bg-amber-50 border-amber-200" : "bg-muted/30 border-border"}`}>
-                  <span className={`text-sm font-medium ${opt.highlight ? "text-amber-800" : "text-foreground"}`}>{opt.label}</span>
-                  <div className="text-right">
-                    <span className={`font-bold ${opt.highlight ? "text-amber-800" : "text-foreground"}`}>{opt.amount}</span>
-                    <span className="text-xs text-muted-foreground ml-1">{opt.sub}</span>
-                  </div>
-                </div>
-              ))}
-              <p className="text-xs text-muted-foreground text-center">
-                This page collects payment for the Monthly plan (₹2,999). For Quarterly or Annual billing, contact WhatsApp Support first (see link below) before paying.
-              </p>
+              <div className="text-sm font-medium text-foreground">Choose a plan</div>
+              {PLAN_ORDER.map(id => {
+                const opt = PLANS[id];
+                const selected = selectedPlan === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setSelectedPlan(id)}
+                    aria-pressed={selected}
+                    className={`w-full text-left rounded-xl border p-3 flex items-center justify-between transition-colors ${selected ? "bg-amber-50 border-amber-400 ring-1 ring-amber-400" : "bg-muted/30 border-border hover:border-amber-300"}`}
+                  >
+                    <span className={`flex items-center gap-2 text-sm font-medium ${selected ? "text-amber-800" : "text-foreground"}`}>
+                      <span className={`w-4 h-4 rounded-full border flex items-center justify-center flex-shrink-0 ${selected ? "bg-amber-500 border-amber-500" : "border-muted-foreground/40"}`}>
+                        {selected && <Check className="w-3 h-3 text-white" />}
+                      </span>
+                      {opt.label}
+                    </span>
+                    <div className="text-right">
+                      <span className={`font-bold ${selected ? "text-amber-800" : "text-foreground"}`}>₹{opt.amount.toLocaleString("en-IN")}</span>
+                      <span className="text-xs text-muted-foreground ml-1">{opt.periodLabel}{opt.savingLabel ? ` · ${opt.savingLabel}` : ""}</span>
+                    </div>
+                  </button>
+                );
+              })}
               <a
                 href={WHATSAPP_SUPPORT_URL}
                 target="_blank"
@@ -172,7 +190,7 @@ export default function PaymentPage() {
               </a>
             </div>
 
-            {/* UPI Payment Details */}
+            {/* UPI Payment Details — amount tracks whichever plan is selected above */}
             <div className="rounded-xl border border-border bg-muted/40 p-4 space-y-3">
               <div className="text-sm font-semibold text-foreground">Pay via UPI</div>
               <div className="flex items-center justify-between bg-background rounded-lg px-3 py-2 border border-border">
@@ -180,8 +198,8 @@ export default function PaymentPage() {
                 <span className="font-mono font-semibold text-foreground text-sm">{UPI_VPA}</span>
               </div>
               <div className="flex items-center justify-between bg-background rounded-lg px-3 py-2 border border-border">
-                <span className="text-xs text-muted-foreground">Amount</span>
-                <span className="font-semibold text-foreground">₹{AMOUNT.toLocaleString("en-IN")}</span>
+                <span className="text-xs text-muted-foreground">Amount ({plan.label})</span>
+                <span className="font-semibold text-foreground">₹{plan.amount.toLocaleString("en-IN")}</span>
               </div>
               <p className="text-xs text-muted-foreground">
                 Open any UPI app (GPay, PhonePe, Paytm, BHIM) and pay to the VPA above. Keep the UTR / transaction reference number handy.
@@ -195,10 +213,10 @@ export default function PaymentPage() {
             <div className="space-y-2">
               <div className="text-sm font-semibold text-foreground">Steps:</div>
               <ol className="list-decimal list-inside space-y-1 text-sm text-muted-foreground">
-                <li>Open your UPI app and pay your chosen plan amount to <strong className="text-foreground font-mono">{UPI_VPA}</strong></li>
+                <li>Open your UPI app and pay <strong className="text-foreground">₹{plan.amount.toLocaleString("en-IN")}</strong> to <strong className="text-foreground font-mono">{UPI_VPA}</strong></li>
                 <li>Copy the UTR / transaction reference from your payment app</li>
                 <li>Paste it below and submit</li>
-                <li>We'll verify and activate your account within 24 hours</li>
+                <li>We'll verify and activate your {plan.label.toLowerCase()} plan within 24 hours</li>
               </ol>
             </div>
 

@@ -4,6 +4,7 @@ import {
   chartOfAccountsTable, journalVouchersTable, journalLinesTable,
   salesTable, girviLoansTable, customOrdersTable, purchasesTable, repairJobsTable,
   repairPaymentTransactionsTable, customersTable, businessSettingsTable, paymentTransactionsTable,
+  suppliersTable, karigarsTable,
 } from "@workspace/db";
 import { eq, and, gte, lte, lt, asc, sql, inArray } from "drizzle-orm";
 import { safeFloat, getOrCreateDefaultAccounts } from "./accounting-helpers";
@@ -169,7 +170,25 @@ router.get("/party-ledger", async (req, res) => {
     const fromDate = from ? new Date(from) : null;
     const toDate = to ? (() => { const d = new Date(to); d.setHours(23, 59, 59, 999); return d; })() : null;
 
+    // What this party already owed (or was owed) before the shop started using the app —
+    // set once on the customer/supplier/karigar record, never touched by any transaction.
     let opening = 0;
+    if (partyType === "customer") {
+      const [c] = await db.select({ balance: customersTable.balance }).from(customersTable)
+        .where(and(eq(customersTable.id, partyId), eq(customersTable.userId, userId)));
+      // customersTable.balance sign convention: positive = advance (shop owes customer, a
+      // credit), negative = due (customer owes shop, a debit) — opposite of this debit-normal ledger.
+      if (c) opening += -safeFloat(c.balance);
+    } else if (partyType === "supplier") {
+      const [s] = await db.select({ openingBalance: suppliersTable.openingBalance, openingBalanceType: suppliersTable.openingBalanceType })
+        .from(suppliersTable).where(and(eq(suppliersTable.id, partyId), eq(suppliersTable.userId, userId)));
+      if (s) { const mag = safeFloat(s.openingBalance); opening += s.openingBalanceType === side ? mag : -mag; }
+    } else if (partyType === "karigar") {
+      const [k] = await db.select({ openingBalance: karigarsTable.openingBalance, openingBalanceType: karigarsTable.openingBalanceType })
+        .from(karigarsTable).where(and(eq(karigarsTable.id, partyId), eq(karigarsTable.userId, userId)));
+      if (k) { const mag = safeFloat(k.openingBalance); opening += k.openingBalanceType === side ? mag : -mag; }
+    }
+
     if (fromDate) {
       const [before] = await db.select({
         debit: sql<string>`coalesce(sum(${journalLinesTable.debit}), 0)`,
@@ -404,12 +423,15 @@ router.get("/outstanding", async (req, res) => {
   try {
     const userId = req.user!.userId;
 
-    const [pendingSales, activeLoans, openCustomOrders, unpaidPurchases, unpaidRepairs] = await Promise.all([
+    const [pendingSales, activeLoans, openCustomOrders, unpaidPurchases, unpaidRepairs, allCustomers, allSuppliers, allKarigars] = await Promise.all([
       db.select().from(salesTable).where(and(eq(salesTable.userId, userId), inArray(salesTable.paymentStatus, ["partial", "pending"]))),
       db.select().from(girviLoansTable).where(and(eq(girviLoansTable.userId, userId), inArray(girviLoansTable.status, ["active", "extended"]))),
       db.select().from(customOrdersTable).where(eq(customOrdersTable.userId, userId)),
       db.select().from(purchasesTable).where(eq(purchasesTable.userId, userId)),
       db.select().from(repairJobsTable).where(and(eq(repairJobsTable.userId, userId), inArray(repairJobsTable.status, ["ready", "delivered"]))),
+      db.select({ id: customersTable.id, name: customersTable.name, balance: customersTable.balance }).from(customersTable).where(eq(customersTable.userId, userId)),
+      db.select({ id: suppliersTable.id, name: suppliersTable.name, openingBalance: suppliersTable.openingBalance, openingBalanceType: suppliersTable.openingBalanceType }).from(suppliersTable).where(eq(suppliersTable.userId, userId)),
+      db.select({ id: karigarsTable.id, name: karigarsTable.name, openingBalance: karigarsTable.openingBalance, openingBalanceType: karigarsTable.openingBalanceType }).from(karigarsTable).where(eq(karigarsTable.userId, userId)),
     ]);
 
     const debtorsSales = pendingSales.map(s => ({
@@ -451,8 +473,27 @@ router.get("/outstanding", async (req, res) => {
       return { type: "purchase" as const, id: p.id, name: p.supplierName, reference: p.invoiceNumber, amount: round2(total - paid) };
     }).filter(r => r.amount > 0.01);
 
-    const debtors = [...debtorsSales, ...debtorsGirvi, ...debtorsCustomOrders, ...debtorsRepairs];
-    const creditors = [...creditorsPurchases];
+    // Pre-software opening balances — not tied to any live sale/purchase/loan row, so they
+    // wouldn't otherwise show up here at all. A customer's positive balance is an advance
+    // (shop owes them, not a debtor); a negative balance is what they still owe (a debtor).
+    const debtorsOpeningCustomers = allCustomers.map(c => ({
+      type: "opening_balance" as const, id: c.id, name: c.name, reference: "Opening balance", amount: round2(-safeFloat(c.balance)),
+    })).filter(r => r.amount > 0.01);
+    const debtorsOpeningSuppliers = allSuppliers.filter(s => s.openingBalanceType === "debit" && safeFloat(s.openingBalance) > 0.01).map(s => ({
+      type: "opening_balance" as const, id: s.id, name: s.name, reference: "Opening balance (advance paid)", amount: round2(safeFloat(s.openingBalance)),
+    }));
+    const debtorsOpeningKarigars = allKarigars.filter(k => k.openingBalanceType === "debit" && safeFloat(k.openingBalance) > 0.01).map(k => ({
+      type: "opening_balance" as const, id: k.id, name: k.name, reference: "Opening balance (advance paid)", amount: round2(safeFloat(k.openingBalance)),
+    }));
+    const creditorsOpeningSuppliers = allSuppliers.filter(s => s.openingBalanceType === "credit" && safeFloat(s.openingBalance) > 0.01).map(s => ({
+      type: "opening_balance" as const, id: s.id, name: s.name, reference: "Opening balance", amount: round2(safeFloat(s.openingBalance)),
+    }));
+    const creditorsOpeningKarigars = allKarigars.filter(k => k.openingBalanceType === "credit" && safeFloat(k.openingBalance) > 0.01).map(k => ({
+      type: "opening_balance" as const, id: k.id, name: k.name, reference: "Opening balance (wages due)", amount: round2(safeFloat(k.openingBalance)),
+    }));
+
+    const debtors = [...debtorsSales, ...debtorsGirvi, ...debtorsCustomOrders, ...debtorsRepairs, ...debtorsOpeningCustomers, ...debtorsOpeningSuppliers, ...debtorsOpeningKarigars];
+    const creditors = [...creditorsPurchases, ...creditorsOpeningSuppliers, ...creditorsOpeningKarigars];
 
     res.json({
       debtors, creditors,

@@ -2,12 +2,22 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { purchasesTable, purchasePaymentTransactionsTable, journalVouchersTable } from "@workspace/db";
 import { eq, and, desc, isNull } from "drizzle-orm";
-import { postJournalEntry, getOrCreateDefaultAccounts, cashOrBankKey, safeFloat, reverseVoucher, type DefaultAccountKey } from "./accounting-helpers";
+import { postJournalEntry, getOrCreateDefaultAccounts, resolveMoneyAccountId, isValidBankAccount, safeFloat, reverseVoucherTx, type DefaultAccountKey } from "./accounting-helpers";
 
 const router = Router();
 
 function inventoryAccountKey(metalType: string): DefaultAccountKey {
   return metalType === "gold" ? "INVENTORY_GOLD" : metalType === "silver" ? "INVENTORY_SILVER" : "INVENTORY_OTHER";
+}
+
+// "Fine" = the supplier was settled by handing over gold/silver out of the shop's own stock
+// instead of cash/bank — books against the metal's inventory account, not a cash/bank account.
+async function paymentAccountId(
+  userId: number, paymentMode: string, metalType: string, bankAccountId: number | null,
+  accts: Record<DefaultAccountKey, number>,
+): Promise<number> {
+  if (paymentMode === "fine") return accts[inventoryAccountKey(metalType)];
+  return resolveMoneyAccountId(userId, paymentMode, bankAccountId, accts);
 }
 
 // Raw bullion HSN codes — distinct from 7113 (finished jewellery, used on the sales side).
@@ -30,10 +40,14 @@ function mapPurchase(p: typeof purchasesTable.$inferSelect) {
     netWeight: parseFloat(p.netWeight),
     fineWeight: parseFloat(p.fineWeight),
     ratePerGram: parseFloat(p.ratePerGram),
+    makingCharges: p.makingCharges !== null ? parseFloat(p.makingCharges) || 0 : 0,
     totalAmount: total,
     paidAmount: paid,
     balanceAmount: Math.max(0, total - paid),
     paymentMode: p.paymentMode,
+    bankAccountId: p.bankAccountId,
+    metalPaidWeight: p.metalPaidWeight !== null ? parseFloat(p.metalPaidWeight) : null,
+    metalPaidPurity: p.metalPaidPurity,
     taxableValue: p.taxableValue !== null ? parseFloat(p.taxableValue) : null,
     gstRate: p.gstRate !== null ? parseFloat(p.gstRate) : null,
     gstAmount: p.gstAmount !== null ? parseFloat(p.gstAmount) : null,
@@ -54,6 +68,7 @@ function mapTransaction(t: typeof purchasePaymentTransactionsTable.$inferSelect)
     supplierName: t.supplierName,
     amount: safeFloat(t.amount),
     paymentMode: t.paymentMode,
+    bankAccountId: t.bankAccountId,
     paidAt: t.paidAt.toISOString(),
     notes: t.notes,
   };
@@ -79,7 +94,7 @@ router.post("/", async (req, res) => {
     const userId = req.user!.userId;
     const data = req.body;
     const totalAmount = safeFloat(data.totalAmount, 0);
-    const allowedModes = ["cash", "bank", "upi", "credit", "partial"];
+    const allowedModes = ["cash", "bank", "upi", "fine", "credit", "partial"];
     const paymentMode = allowedModes.includes(data.paymentMode) ? data.paymentMode : "cash";
     const rawPaid = data.paidAmount;
     const paidAmount = rawPaid !== undefined && rawPaid !== null && rawPaid !== ""
@@ -99,6 +114,10 @@ router.post("/", async (req, res) => {
     const gstAmount = hasGst ? Math.max(0, totalAmount - totalAmount / (1 + gstRate! / 100)) : null;
     const taxableValue = hasGst ? totalAmount - (gstAmount ?? 0) : null;
     const hsnCode = hasGst ? (data.hsnCode ? String(data.hsnCode).trim() : bullionHsn(metalType)) : null;
+    const bankAccountId = data.bankAccountId ? parseInt(data.bankAccountId) : null;
+    if (bankAccountId && !(await isValidBankAccount(userId, bankAccountId))) {
+      return res.status(400).json({ error: "Invalid bank account" });
+    }
 
     const accts = await getOrCreateDefaultAccounts(userId);
 
@@ -113,9 +132,11 @@ router.post("/", async (req, res) => {
         netWeight: (data.netWeight ?? data.fineWeight ?? 0).toString(),
         fineWeight: (data.fineWeight ?? data.netWeight ?? 0).toString(),
         ratePerGram: (data.ratePerGram ?? 0).toString(),
+        makingCharges: safeFloat(data.makingCharges, 0).toString(),
         totalAmount: totalAmount.toString(),
         paidAmount: paidAmount.toString(),
         paymentMode,
+        bankAccountId,
         taxableValue: taxableValue !== null ? taxableValue.toFixed(2) : null,
         gstRate: gstRate !== null ? gstRate.toFixed(2) : null,
         gstAmount: gstAmount !== null ? gstAmount.toFixed(2) : null,
@@ -123,6 +144,8 @@ router.post("/", async (req, res) => {
         invoiceNumber,
         purchaseDate,
         notes: data.notes ?? null,
+        metalPaidWeight: paymentMode === "fine" && data.metalPaidWeight ? safeFloat(data.metalPaidWeight).toString() : null,
+        metalPaidPurity: paymentMode === "fine" && data.metalPaidPurity ? String(data.metalPaidPurity) : null,
       }).returning();
 
       const balance = Math.max(0, totalAmount - paidAmount);
@@ -139,7 +162,7 @@ router.post("/", async (req, res) => {
         lines: [
           { accountId: accts[inventoryAccountKey(metalType)], debit: inventoryDebit, particulars: "Metal purchased" },
           { accountId: accts.INPUT_GST_CREDIT, debit: gstAmount ?? 0, particulars: "GST paid (ITC)" },
-          { accountId: accts[cashOrBankKey(paymentMode)], credit: paidAmount, particulars: "Paid to supplier" },
+          { accountId: await paymentAccountId(userId, paymentMode, metalType, bankAccountId, accts), credit: paidAmount, particulars: paymentMode === "fine" ? "Settled in fine metal" : "Paid to supplier" },
           { accountId: accts.ACCOUNTS_PAYABLE, credit: balance, partyType: "supplier", partyId: supplierId, particulars: "Balance owed to supplier" },
         ],
       });
@@ -190,7 +213,7 @@ router.patch("/:id", async (req, res) => {
     if (data.notes !== undefined) nonFinancialUpdate.notes = data.notes ?? null;
     if (data.purchaseDate !== undefined) nonFinancialUpdate.purchaseDate = new Date(data.purchaseDate);
 
-    const financialFields = ["grossWeight", "netWeight", "fineWeight", "ratePerGram", "totalAmount", "metalType", "gstRate", "hsnCode", "paidAmount", "paymentMode"];
+    const financialFields = ["grossWeight", "netWeight", "fineWeight", "ratePerGram", "makingCharges", "totalAmount", "metalType", "gstRate", "hsnCode", "paidAmount", "paymentMode", "bankAccountId", "metalPaidWeight", "metalPaidPurity"];
     const wantsFinancialChange = financialFields.some(f => data[f] !== undefined);
 
     if (!wantsFinancialChange) {
@@ -211,12 +234,9 @@ router.patch("/:id", async (req, res) => {
     const [currentVoucher] = await db.select().from(journalVouchersTable)
       .where(and(eq(journalVouchersTable.userId, userId), eq(journalVouchersTable.sourceModule, "purchases"), eq(journalVouchersTable.sourceId, id), eq(journalVouchersTable.voucherType, "purchase"), isNull(journalVouchersTable.reversedByVoucherId)))
       .orderBy(desc(journalVouchersTable.id)).limit(1);
-    if (currentVoucher) {
-      await reverseVoucher(userId, currentVoucher.id, `Superseded by edit to purchase ${purchase.invoiceNumber}`);
-    }
 
     const totalAmount = data.totalAmount !== undefined ? safeFloat(data.totalAmount, safeFloat(purchase.totalAmount)) : safeFloat(purchase.totalAmount);
-    const allowedModes = ["cash", "bank", "upi", "credit", "partial"];
+    const allowedModes = ["cash", "bank", "upi", "fine", "credit", "partial"];
     const paymentMode = data.paymentMode !== undefined && allowedModes.includes(data.paymentMode) ? data.paymentMode : purchase.paymentMode;
     const paidAmount = data.paidAmount !== undefined ? Math.max(0, Math.min(totalAmount, safeFloat(data.paidAmount, totalAmount))) : Math.min(totalAmount, purchase.paidAmount === null ? totalAmount : safeFloat(purchase.paidAmount));
     const metalType = data.metalType !== undefined ? data.metalType : purchase.metalType;
@@ -228,23 +248,39 @@ router.patch("/:id", async (req, res) => {
     const supplierId = nonFinancialUpdate.supplierId !== undefined ? nonFinancialUpdate.supplierId as number | null : purchase.supplierId;
     const supplierName = (nonFinancialUpdate.supplierName as string | undefined) ?? purchase.supplierName;
     const purchaseDate = (nonFinancialUpdate.purchaseDate as Date | undefined) ?? purchase.purchaseDate;
+    const bankAccountId = data.bankAccountId !== undefined ? (data.bankAccountId ? parseInt(data.bankAccountId) : null) : purchase.bankAccountId;
+    if (bankAccountId && !(await isValidBankAccount(userId, bankAccountId))) {
+      return res.status(400).json({ error: "Invalid bank account" });
+    }
 
     const accts = await getOrCreateDefaultAccounts(userId);
     const updated = await db.transaction(async (tx) => {
+      // Reversal of the old voucher and posting of the corrected one now happen in the same
+      // transaction as the row update — a crash partway through can no longer leave the old
+      // voucher reversed with no replacement, or the purchase row updated with a stale voucher.
+      if (currentVoucher) {
+        await reverseVoucherTx(tx, userId, currentVoucher.id, `Superseded by edit to purchase ${purchase.invoiceNumber}`);
+      }
+
       const [u] = await tx.update(purchasesTable).set({
         ...nonFinancialUpdate,
         grossWeight: (data.grossWeight ?? purchase.grossWeight).toString(),
         netWeight: (data.netWeight ?? purchase.netWeight).toString(),
         fineWeight: (data.fineWeight ?? purchase.fineWeight).toString(),
         ratePerGram: (data.ratePerGram ?? purchase.ratePerGram).toString(),
+        makingCharges: (data.makingCharges !== undefined ? safeFloat(data.makingCharges, 0) : safeFloat(purchase.makingCharges, 0)).toString(),
         metalType,
         totalAmount: totalAmount.toString(),
         paidAmount: paidAmount.toString(),
         paymentMode,
+        bankAccountId,
         taxableValue: taxableValue !== null ? taxableValue.toFixed(2) : null,
         gstRate: gstRate !== null ? gstRate.toFixed(2) : null,
         gstAmount: gstAmount !== null ? gstAmount.toFixed(2) : null,
         hsnCode,
+        metalPaidWeight: paymentMode === "fine" && (data.metalPaidWeight ?? purchase.metalPaidWeight)
+          ? safeFloat(data.metalPaidWeight ?? purchase.metalPaidWeight).toString() : null,
+        metalPaidPurity: paymentMode === "fine" ? String(data.metalPaidPurity ?? purchase.metalPaidPurity ?? "") || null : null,
       }).where(and(eq(purchasesTable.id, id), eq(purchasesTable.userId, userId))).returning();
 
       const balance = Math.max(0, totalAmount - paidAmount);
@@ -259,7 +295,7 @@ router.patch("/:id", async (req, res) => {
         lines: [
           { accountId: accts[inventoryAccountKey(metalType)], debit: inventoryDebit, particulars: "Metal purchased" },
           { accountId: accts.INPUT_GST_CREDIT, debit: gstAmount ?? 0, particulars: "GST paid (ITC)" },
-          { accountId: accts[cashOrBankKey(paymentMode)], credit: paidAmount, particulars: "Paid to supplier" },
+          { accountId: await paymentAccountId(userId, paymentMode, metalType, bankAccountId, accts), credit: paidAmount, particulars: paymentMode === "fine" ? "Settled in fine metal" : "Paid to supplier" },
           { accountId: accts.ACCOUNTS_PAYABLE, credit: balance, partyType: "supplier", partyId: supplierId, particulars: "Balance owed to supplier" },
         ],
       });
@@ -296,13 +332,18 @@ router.post("/:id/cancel", async (req, res) => {
     const [currentVoucher] = await db.select().from(journalVouchersTable)
       .where(and(eq(journalVouchersTable.userId, userId), eq(journalVouchersTable.sourceModule, "purchases"), eq(journalVouchersTable.sourceId, id), eq(journalVouchersTable.voucherType, "purchase"), isNull(journalVouchersTable.reversedByVoucherId)))
       .orderBy(desc(journalVouchersTable.id)).limit(1);
-    if (currentVoucher) {
-      await reverseVoucher(userId, currentVoucher.id, `Purchase ${purchase.invoiceNumber} cancelled`);
-    }
 
-    const [updated] = await db.update(purchasesTable).set({ cancelledAt: new Date() })
-      .where(and(eq(purchasesTable.id, id), eq(purchasesTable.userId, userId)))
-      .returning();
+    const updated = await db.transaction(async (tx) => {
+      // Reversal and the cancelledAt flag are set together — a crash between them used to be
+      // able to leave the voucher reversed while the purchase still looked active/uncancelled.
+      if (currentVoucher) {
+        await reverseVoucherTx(tx, userId, currentVoucher.id, `Purchase ${purchase.invoiceNumber} cancelled`);
+      }
+      const [u] = await tx.update(purchasesTable).set({ cancelledAt: new Date() })
+        .where(and(eq(purchasesTable.id, id), eq(purchasesTable.userId, userId)))
+        .returning();
+      return u;
+    });
 
     res.json(mapPurchase(updated));
   } catch (err) {
@@ -336,9 +377,13 @@ router.post("/:id/payments", async (req, res) => {
 
     const amount = safeFloat(req.body.amount);
     if (!isFinite(amount) || amount <= 0) return res.status(400).json({ error: "Invalid payment amount" });
-    const allowedModes = ["cash", "bank", "upi", "credit", "partial"];
+    const allowedModes = ["cash", "bank", "upi", "fine", "credit", "partial"];
     const paymentMode = allowedModes.includes(req.body.paymentMode) ? req.body.paymentMode : "cash";
     const notes = req.body.notes ? String(req.body.notes).slice(0, 500) : null;
+    const bankAccountId = req.body.bankAccountId ? parseInt(req.body.bankAccountId) : null;
+    if (bankAccountId && !(await isValidBankAccount(userId, bankAccountId))) {
+      return res.status(400).json({ error: "Invalid bank account" });
+    }
 
     const accts = await getOrCreateDefaultAccounts(userId);
 
@@ -358,6 +403,7 @@ router.post("/:id/payments", async (req, res) => {
         supplierName: purchase.supplierName,
         amount: amount.toString(),
         paymentMode,
+        bankAccountId,
         notes,
       });
 
@@ -374,7 +420,7 @@ router.post("/:id/payments", async (req, res) => {
         sourceId: id,
         lines: [
           { accountId: accts.ACCOUNTS_PAYABLE, debit: amount, partyType: "supplier", partyId: purchase.supplierId, particulars: "Balance settled" },
-          { accountId: accts[cashOrBankKey(paymentMode)], credit: amount, particulars: "Payment made" },
+          { accountId: await paymentAccountId(userId, paymentMode, purchase.metalType, bankAccountId, accts), credit: amount, particulars: paymentMode === "fine" ? "Settled in fine metal" : "Payment made" },
         ],
       });
 

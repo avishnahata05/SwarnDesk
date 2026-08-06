@@ -12,6 +12,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useForm } from "react-hook-form";
 import {
@@ -25,6 +27,7 @@ import { InfoTooltip } from "@/components/InfoTooltip";
 interface CustomerForm {
   name: string; mobile: string; email: string; address: string;
   birthday: string; anniversary: string; gstin: string; stateCode: string; notes: string;
+  openingBalance: string; openingBalanceType: "debit" | "credit";
 }
 
 const DEFAULT_TEMPLATE = "Dear {name}, thank you for being a valued customer at our jewellery store! We'd love to see you again. Visit us for our latest collection and exclusive offers.";
@@ -468,9 +471,13 @@ export default function Customers() {
   const createCustomer = useCreateCustomer();
   const loyaltyEnabled = (settings as unknown as { loyaltyPointsEnabled?: boolean } | undefined)?.loyaltyPointsEnabled ?? true;
 
-  const { register, handleSubmit, reset } = useForm<CustomerForm>();
+  const { register, handleSubmit, reset, watch, setValue } = useForm<CustomerForm>({
+    defaultValues: { openingBalance: "0", openingBalanceType: "debit" },
+  });
+  const openingBalanceTypeWatch = watch("openingBalanceType") ?? "debit";
 
   const onSubmit = (data: CustomerForm) => {
+    const mag = parseFloat(data.openingBalance) || 0;
     createCustomer.mutate({
       data: {
         name: data.name,
@@ -482,6 +489,9 @@ export default function Customers() {
         gstin: data.gstin || null,
         stateCode: data.stateCode || null,
         notes: data.notes || null,
+        // balance sign convention (see mapCustomer on the backend): positive = credit
+        // (advance, shop owes them), negative = debit (due, they owe the shop).
+        balance: data.openingBalanceType === "credit" ? mag : -mag,
       }
     }, {
       onSuccess: () => {
@@ -864,6 +874,23 @@ export default function Customers() {
                 <label className="text-xs text-muted-foreground mb-1 block">GST State Code</label>
                 <Input {...register("stateCode")} placeholder="27" maxLength={2} data-testid="input-customer-state-code" />
                 <p className="text-[10px] text-muted-foreground mt-1">For B2B invoices — decides CGST+SGST vs IGST</p>
+              </div>
+              <div>
+                <Label className="flex items-center gap-1">
+                  Opening Balance
+                  <InfoTooltip text="What this customer already owed you (or had already paid in advance) before you started using this software — not touched by future sales/payments recorded here." />
+                </Label>
+                <Input type="number" {...register("openingBalance")} placeholder="0" />
+              </div>
+              <div>
+                <Label>Balance Side</Label>
+                <Select value={openingBalanceTypeWatch} onValueChange={v => setValue("openingBalanceType", v as "debit" | "credit")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="debit">Due (they owe you)</SelectItem>
+                    <SelectItem value="credit">Advance (you owe them)</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <DialogFooter>

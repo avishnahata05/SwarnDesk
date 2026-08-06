@@ -12,4 +12,6 @@ export interface KarigarUpdate {
   specialization?: string;
   /** @nullable */
   address?: string | null;
+  openingBalance?: number;
+  openingBalanceType?: string;
 }

@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { formatCurrency, formatDate, formatWeight } from "@/lib/utils";
 import {
   useListPurchases, useCreatePurchase, useUpdatePurchase, useCancelPurchase,
   useListSuppliers, useCreateSupplier, useUpdateSupplier, useDeleteSupplier,
   getListPurchasesQueryKey, getListSuppliersQueryKey,
 } from "@workspace/api-client-react";
+import type { PurchaseInput, PurchaseUpdate } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,24 +19,44 @@ import { Plus, Pencil, Ban, Users2, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
 import { InfoTooltip } from "@/components/InfoTooltip";
+import { BankAccountSelect } from "@/components/BankAccountSelect";
 
 interface PurchaseForm {
   supplierId: string; supplierName: string; metalType: string; purity: string;
   grossWeight: number; netWeight: number; fineWeight: number;
-  ratePerGram: number; totalAmount: number; paidAmount: number; paymentMode: string;
+  ratePerGram: number; makingCharges: number; totalAmount: number; paidAmount: number; paymentMode: string;
+  metalPaidWeight: number; metalPaidPurity: string;
   gstRate: string; purchaseDate: string; notes: string;
 }
 
 // Same fixed purity options as inventory.tsx / billing.tsx, for consistency across the app.
 const PURITIES = ["24K", "22K", "18K", "14K", "925", "999", "Unspecified"];
 
+// Fine gold/silver content as a % of gross weight, by purity/touch — used to auto-derive
+// Fine Weight from Net Weight instead of asking the shop owner to work it out by hand.
+const PURITY_PERCENT: Record<string, number> = {
+  "24K": 100, "22K": 91.6, "18K": 75, "14K": 58.3, "925": 92.5, "999": 99.9, "Unspecified": 100,
+};
+
+// A plain number Input with a fixed, non-editable unit suffix ("gm", "%") shown inline at
+// the right edge — so the shop owner sees "20 gm" without the unit ever entering the value.
+function UnitInput({ suffix, className, ...props }: JSX.IntrinsicElements["input"] & { suffix: string }) {
+  return (
+    <div className="relative">
+      <Input type="number" className={`pr-10 ${className ?? ""}`} {...props} />
+      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">{suffix}</span>
+    </div>
+  );
+}
+
 export default function Purchases() {
   const [addOpen, setAddOpen] = useState(false);
   const [editPurchase, setEditPurchase] = useState<any | null>(null);
   const [suppliersOpen, setSuppliersOpen] = useState(false);
-  const [supplierForm, setSupplierForm] = useState({ id: 0, name: "", mobile: "", address: "", gstin: "", email: "" });
+  const [supplierForm, setSupplierForm] = useState({ id: 0, name: "", mobile: "", address: "", gstin: "", email: "", openingBalance: "0", openingBalanceType: "credit" as "debit" | "credit" });
   const [supplierDialogOpen, setSupplierDialogOpen] = useState(false);
   const [pageHelpOpen, setPageHelpOpen] = useState(false);
+  const [bankAccountId, setBankAccountId] = useState<number | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -54,11 +75,22 @@ export default function Purchases() {
 
   const netWeight = watch("netWeight");
   const ratePerGram = watch("ratePerGram");
+  const makingChargesWatch = watch("makingCharges");
   const totalAmountWatch = watch("totalAmount");
   const metalTypeWatch = watch("metalType") ?? "gold";
   const purityWatch = watch("purity") ?? "22K";
   const paymentModeWatch = watch("paymentMode") ?? "cash";
   const supplierIdWatch = watch("supplierId") ?? "";
+
+  // Fine weight = pure-metal-equivalent weight = Net Weight × purity%. Auto-derived so the
+  // owner doesn't have to work out the touch conversion by hand; still editable afterward.
+  useEffect(() => {
+    const nw = parseFloat(String(netWeight));
+    if (!isFinite(nw) || nw <= 0) return;
+    const pct = PURITY_PERCENT[purityWatch] ?? 100;
+    setValue("fineWeight", Math.round(nw * (pct / 100) * 1000) / 1000);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [netWeight, purityWatch]);
 
   const invalidatePurchases = () => queryClient.invalidateQueries({ queryKey: getListPurchasesQueryKey() });
   const invalidateSuppliers = () => queryClient.invalidateQueries({ queryKey: getListSuppliersQueryKey() });
@@ -70,29 +102,38 @@ export default function Purchases() {
   };
 
   const onSubmit = (data: PurchaseForm) => {
-    const total = data.totalAmount > 0 ? parseFloat(String(data.totalAmount)) : parseFloat(String(netWeight)) * parseFloat(String(ratePerGram)) || 0;
-    createPurchase.mutate({
-      data: {
-        supplierName: data.supplierName,
-        supplierId: data.supplierId ? parseInt(data.supplierId) : null,
-        metalType: data.metalType,
-        purity: data.purity,
-        grossWeight: parseFloat(String(data.grossWeight)),
-        netWeight: parseFloat(String(data.netWeight)),
-        fineWeight: parseFloat(String(data.fineWeight || data.netWeight)),
-        ratePerGram: parseFloat(String(data.ratePerGram)),
-        totalAmount: total,
-        paidAmount: data.paidAmount !== undefined && String(data.paidAmount) !== "" ? parseFloat(String(data.paidAmount)) : total,
-        paymentMode: data.paymentMode,
-        gstRate: data.gstRate ? parseFloat(data.gstRate) : undefined,
-        purchaseDate: new Date(data.purchaseDate).toISOString(),
-        notes: data.notes || null,
-      }
-    }, {
+    const makingCharges = parseFloat(String(makingChargesWatch)) || 0;
+    const total = data.totalAmount > 0
+      ? parseFloat(String(data.totalAmount))
+      : (parseFloat(String(netWeight)) * parseFloat(String(ratePerGram)) || 0) + makingCharges;
+    const payload: PurchaseInput & { makingCharges: number; metalPaidWeight?: number; metalPaidPurity?: string } = {
+      supplierName: data.supplierName,
+      supplierId: data.supplierId ? parseInt(data.supplierId) : null,
+      metalType: data.metalType,
+      purity: data.purity,
+      grossWeight: parseFloat(String(data.grossWeight)),
+      netWeight: parseFloat(String(data.netWeight)),
+      fineWeight: parseFloat(String(data.fineWeight || data.netWeight)),
+      ratePerGram: parseFloat(String(data.ratePerGram)),
+      makingCharges,
+      totalAmount: total,
+      paidAmount: data.paidAmount !== undefined && String(data.paidAmount) !== "" ? parseFloat(String(data.paidAmount)) : total,
+      paymentMode: data.paymentMode,
+      bankAccountId,
+      gstRate: data.gstRate ? parseFloat(data.gstRate) : undefined,
+      purchaseDate: new Date(data.purchaseDate).toISOString(),
+      notes: data.notes || null,
+      ...(data.paymentMode === "fine" ? {
+        metalPaidWeight: data.metalPaidWeight ? parseFloat(String(data.metalPaidWeight)) : undefined,
+        metalPaidPurity: data.metalPaidPurity || undefined,
+      } : {}),
+    };
+    createPurchase.mutate({ data: payload }, {
       onSuccess: () => {
         invalidatePurchases();
         toast({ title: "Purchase recorded" });
         setAddOpen(false);
+        setBankAccountId(null);
         reset();
       },
       onError: () => toast({ title: "Failed to record purchase", variant: "destructive" }),
@@ -101,6 +142,7 @@ export default function Purchases() {
 
   const openEdit = (p: any) => {
     setEditPurchase(p);
+    setBankAccountId(p.bankAccountId ?? null);
     reset({
       supplierId: p.supplierId ? String(p.supplierId) : "",
       supplierName: p.supplierName,
@@ -110,9 +152,12 @@ export default function Purchases() {
       netWeight: p.netWeight,
       fineWeight: p.fineWeight,
       ratePerGram: p.ratePerGram,
+      makingCharges: p.makingCharges ?? 0,
       totalAmount: p.totalAmount,
       paidAmount: p.paidAmount,
       paymentMode: p.paymentMode,
+      metalPaidWeight: p.metalPaidWeight ?? undefined,
+      metalPaidPurity: p.metalPaidPurity ?? "",
       gstRate: p.gstRate != null ? String(p.gstRate) : "",
       purchaseDate: p.purchaseDate.split("T")[0],
       notes: p.notes ?? "",
@@ -121,29 +166,37 @@ export default function Purchases() {
 
   const onEditSubmit = (data: PurchaseForm) => {
     if (!editPurchase) return;
+    const payload: PurchaseUpdate & { makingCharges: number; metalPaidWeight?: number; metalPaidPurity?: string } = {
+      supplierName: data.supplierName,
+      supplierId: data.supplierId ? parseInt(data.supplierId) : null,
+      metalType: data.metalType,
+      purity: data.purity,
+      grossWeight: parseFloat(String(data.grossWeight)),
+      netWeight: parseFloat(String(data.netWeight)),
+      fineWeight: parseFloat(String(data.fineWeight || data.netWeight)),
+      ratePerGram: parseFloat(String(data.ratePerGram)),
+      makingCharges: parseFloat(String(data.makingCharges)) || 0,
+      totalAmount: parseFloat(String(data.totalAmount)),
+      paidAmount: parseFloat(String(data.paidAmount)),
+      paymentMode: data.paymentMode,
+      bankAccountId,
+      gstRate: data.gstRate ? parseFloat(data.gstRate) : null,
+      purchaseDate: new Date(data.purchaseDate).toISOString(),
+      notes: data.notes || null,
+      ...(data.paymentMode === "fine" ? {
+        metalPaidWeight: data.metalPaidWeight ? parseFloat(String(data.metalPaidWeight)) : undefined,
+        metalPaidPurity: data.metalPaidPurity || undefined,
+      } : {}),
+    };
     updatePurchase.mutate({
       id: editPurchase.id,
-      data: {
-        supplierName: data.supplierName,
-        supplierId: data.supplierId ? parseInt(data.supplierId) : null,
-        metalType: data.metalType,
-        purity: data.purity,
-        grossWeight: parseFloat(String(data.grossWeight)),
-        netWeight: parseFloat(String(data.netWeight)),
-        fineWeight: parseFloat(String(data.fineWeight || data.netWeight)),
-        ratePerGram: parseFloat(String(data.ratePerGram)),
-        totalAmount: parseFloat(String(data.totalAmount)),
-        paidAmount: parseFloat(String(data.paidAmount)),
-        paymentMode: data.paymentMode,
-        gstRate: data.gstRate ? parseFloat(data.gstRate) : null,
-        purchaseDate: new Date(data.purchaseDate).toISOString(),
-        notes: data.notes || null,
-      }
+      data: payload
     }, {
       onSuccess: () => {
         invalidatePurchases();
         toast({ title: "Purchase updated" });
         setEditPurchase(null);
+        setBankAccountId(null);
         reset();
       },
       onError: (err: any) => toast({ title: err?.error ?? "Failed to update — payments may already be collected", variant: "destructive" }),
@@ -158,14 +211,17 @@ export default function Purchases() {
     });
   };
 
-  const openNewSupplier = () => { setSupplierForm({ id: 0, name: "", mobile: "", address: "", gstin: "", email: "" }); setSupplierDialogOpen(true); };
-  const openEditSupplier = (s: any) => { setSupplierForm({ id: s.id, name: s.name, mobile: s.mobile, address: s.address ?? "", gstin: s.gstin ?? "", email: s.email ?? "" }); setSupplierDialogOpen(true); };
+  const openNewSupplier = () => { setSupplierForm({ id: 0, name: "", mobile: "", address: "", gstin: "", email: "", openingBalance: "0", openingBalanceType: "credit" }); setSupplierDialogOpen(true); };
+  const openEditSupplier = (s: any) => { setSupplierForm({ id: s.id, name: s.name, mobile: s.mobile, address: s.address ?? "", gstin: s.gstin ?? "", email: s.email ?? "", openingBalance: String(s.openingBalance ?? 0), openingBalanceType: s.openingBalanceType ?? "credit" }); setSupplierDialogOpen(true); };
 
   const saveSupplier = () => {
     if (!supplierForm.name.trim() || !supplierForm.mobile.trim()) {
       toast({ title: "Name and mobile are required", variant: "destructive" }); return;
     }
-    const payload = { name: supplierForm.name.trim(), mobile: supplierForm.mobile.trim(), address: supplierForm.address || null, gstin: supplierForm.gstin || null, email: supplierForm.email || null };
+    const payload = {
+      name: supplierForm.name.trim(), mobile: supplierForm.mobile.trim(), address: supplierForm.address || null, gstin: supplierForm.gstin || null, email: supplierForm.email || null,
+      openingBalance: parseFloat(supplierForm.openingBalance) || 0, openingBalanceType: supplierForm.openingBalanceType,
+    };
     if (supplierForm.id > 0) {
       updateSupplier.mutate({ id: supplierForm.id, data: payload }, {
         onSuccess: () => { invalidateSuppliers(); toast({ title: "Supplier updated" }); setSupplierDialogOpen(false); },
@@ -225,48 +281,76 @@ export default function Purchases() {
         </div>
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Gross Weight (g) *</label>
-          <Input type="number" step="0.001" {...register("grossWeight", { required: true })} data-testid="input-purchase-gross" />
+          <UnitInput suffix="gm" step="0.001" {...register("grossWeight", { required: true })} data-testid="input-purchase-gross" />
         </div>
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Net Weight (g) *</label>
-          <Input type="number" step="0.001" {...register("netWeight", { required: true })} data-testid="input-purchase-net" />
+          <UnitInput suffix="gm" step="0.001" {...register("netWeight", { required: true })} data-testid="input-purchase-net" />
         </div>
         <div>
           <label className="text-xs text-muted-foreground flex items-center gap-1 mb-1">
-            Fine Weight (g)
-            <InfoTooltip text="Fine weight = pure metal equivalent after adjusting for purity — e.g. 100g of 22K gold (91.6% pure) is about 91.6g fine weight." />
+            Fine Weight (g) — auto
+            <InfoTooltip text="Fine weight = pure metal equivalent after adjusting for purity — e.g. 100g of 22K gold (91.6% pure) is about 91.6g fine weight. Auto-calculated from Net Weight × purity; edit to override." />
           </label>
-          <Input type="number" step="0.001" {...register("fineWeight")} placeholder="Same as net if pure" data-testid="input-purchase-fine" />
+          <UnitInput suffix="gm" step="0.001" {...register("fineWeight")} placeholder="Auto-calculated from Net Weight × purity" data-testid="input-purchase-fine" />
         </div>
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Rate per gram (₹) *</label>
           <Input type="number" {...register("ratePerGram", { required: true })} data-testid="input-purchase-rate" />
         </div>
         <div>
+          <label className="text-xs text-muted-foreground mb-1 block">Making Charges (₹, optional)</label>
+          <Input type="number" {...register("makingCharges")} placeholder="0" data-testid="input-purchase-making-charges" />
+        </div>
+        <div>
           <label className="text-xs text-muted-foreground mb-1 block">Total Amount (₹, optional)</label>
           <Input type="number" {...register("totalAmount")} placeholder="Auto-calculated if blank" data-testid="input-purchase-total" />
         </div>
         <div>
-          <label className="text-xs text-muted-foreground mb-1 block">GST Rate (%, optional)</label>
-          <Input type="number" step="0.1" {...register("gstRate")} placeholder="Leave blank if no GST" data-testid="input-purchase-gst-rate" />
+          <label className="text-xs text-muted-foreground mb-1 block">GST Rate (optional)</label>
+          <UnitInput suffix="%" step="0.1" {...register("gstRate")} placeholder="Leave blank if no GST" data-testid="input-purchase-gst-rate" />
         </div>
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Payment Mode</label>
-          <Select value={paymentModeWatch} onValueChange={v => setValue("paymentMode", v)}>
+          <Select value={paymentModeWatch} onValueChange={v => { setValue("paymentMode", v); setBankAccountId(null); }}>
             <SelectTrigger data-testid="select-purchase-payment-mode"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="cash">Cash</SelectItem>
               <SelectItem value="bank">Bank</SelectItem>
               <SelectItem value="upi">UPI</SelectItem>
+              <SelectItem value="fine">Fine (Metal Exchange)</SelectItem>
               <SelectItem value="credit">Credit (unpaid)</SelectItem>
               <SelectItem value="partial">Partial</SelectItem>
             </SelectContent>
           </Select>
+          <BankAccountSelect paymentMode={paymentModeWatch} bankAccountId={bankAccountId} onChange={setBankAccountId} className="mt-2" />
         </div>
         <div>
-          <label className="text-xs text-muted-foreground mb-1 block">Paid Amount (₹)</label>
+          <label className="text-xs text-muted-foreground mb-1 block">
+            {paymentModeWatch === "fine" ? "Value Settled in Metal (₹)" : "Paid Amount (₹)"}
+          </label>
           <Input type="number" {...register("paidAmount")} placeholder={`Default: full ${totalAmountWatch ? formatCurrency(totalAmountWatch) : "amount"}`} data-testid="input-purchase-paid" />
+          {paymentModeWatch === "fine" && (
+            <p className="text-xs text-muted-foreground mt-1">Rupee value of the gold/silver handed to the supplier instead of cash — booked against your metal stock, not Cash/Bank.</p>
+          )}
         </div>
+        {paymentModeWatch === "fine" && (
+          <>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Metal Paid Weight</label>
+              <UnitInput suffix="gm" step="0.001" {...register("metalPaidWeight")} placeholder="Weight of gold/silver handed over" data-testid="input-purchase-metal-paid-weight" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Metal Paid Touch / Purity</label>
+              <Select value={watch("metalPaidPurity") || purityWatch} onValueChange={v => setValue("metalPaidPurity", v)}>
+                <SelectTrigger data-testid="select-purchase-metal-paid-purity"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </>
+        )}
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Purchase Date</label>
           <Input type="date" {...register("purchaseDate")} data-testid="input-purchase-date" />
@@ -387,6 +471,9 @@ export default function Purchases() {
                 <div>
                   <div className="font-medium">{s.name}</div>
                   <div className="text-xs text-muted-foreground">{s.mobile}{s.gstin ? ` · ${s.gstin}` : ""}</div>
+                  {!!s.openingBalance && s.openingBalance > 0 && (
+                    <div className="text-[11px] text-muted-foreground">Opening: {formatCurrency(s.openingBalance)} {s.openingBalanceType === "debit" ? "Dr" : "Cr"}</div>
+                  )}
                 </div>
                 <div className="flex gap-1">
                   <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEditSupplier(s)}><Pencil className="w-3.5 h-3.5" /></Button>
@@ -407,6 +494,22 @@ export default function Purchases() {
             <div><Label>GSTIN</Label><Input value={supplierForm.gstin} onChange={e => setSupplierForm(f => ({ ...f, gstin: e.target.value }))} /></div>
             <div><Label>Address</Label><Input value={supplierForm.address} onChange={e => setSupplierForm(f => ({ ...f, address: e.target.value }))} /></div>
             <div><Label>Email</Label><Input value={supplierForm.email} onChange={e => setSupplierForm(f => ({ ...f, email: e.target.value }))} /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Opening Balance</Label><Input type="number" value={supplierForm.openingBalance} onChange={e => setSupplierForm(f => ({ ...f, openingBalance: e.target.value }))} /></div>
+              <div>
+                <Label className="flex items-center gap-1">
+                  Balance Side
+                  <InfoTooltip text="What this supplier was already owed (or had already been paid in advance) before you started using this software. Credit = you owe them; Debit = you paid in advance." />
+                </Label>
+                <Select value={supplierForm.openingBalanceType} onValueChange={v => setSupplierForm(f => ({ ...f, openingBalanceType: v as "debit" | "credit" }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="credit">Credit (you owe them)</SelectItem>
+                    <SelectItem value="debit">Debit (you paid in advance)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button onClick={saveSupplier} disabled={createSupplier.isPending || updateSupplier.isPending}>Save</Button>

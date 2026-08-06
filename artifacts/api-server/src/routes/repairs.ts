@@ -26,8 +26,10 @@ function isActiveWithKarigar(karigarId: number | null, status: string): boolean 
   return !!karigarId && (status === "received" || status === "in_progress");
 }
 
-async function adjustPendingOrders(userId: number, karigarId: number, delta: number) {
-  await db.execute(sql`UPDATE karigars SET pending_orders = GREATEST(0, pending_orders + ${delta}) WHERE id = ${karigarId} AND user_id = ${userId}`);
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function adjustPendingOrders(tx: Tx, userId: number, karigarId: number, delta: number) {
+  await tx.execute(sql`UPDATE karigars SET pending_orders = GREATEST(0, pending_orders + ${delta}) WHERE id = ${karigarId} AND user_id = ${userId}`);
 }
 
 function mapRepair(r: typeof repairJobsTable.$inferSelect) {
@@ -78,6 +80,13 @@ router.post("/", async (req, res) => {
     if (!isFinite(estimatedCost) || estimatedCost < 0) return res.status(400).json({ error: "Valid estimated cost is required" });
     const promisedDate = new Date(data.promisedDate);
     if (isNaN(promisedDate.getTime())) return res.status(400).json({ error: "Valid promised date is required" });
+    // Optional — defaults to now (item logged as received today) if not given, same as
+    // before this was settable; lets a shop backdate a job entered a day or two late.
+    let receivedDate: Date | undefined;
+    if (data.receivedDate !== undefined && data.receivedDate !== null && data.receivedDate !== "") {
+      receivedDate = new Date(data.receivedDate);
+      if (isNaN(receivedDate.getTime())) return res.status(400).json({ error: "Invalid received date" });
+    }
 
     let karigarId: number | null = null;
     let karigarName: string | null = null;
@@ -90,23 +99,27 @@ router.post("/", async (req, res) => {
       karigarName = karigar.name;
     }
 
-    const [repair] = await db.insert(repairJobsTable).values({
-      userId,
-      customerId: data.customerId ?? null,
-      customerName: data.customerName.trim(),
-      customerMobile: data.customerMobile.trim(),
-      itemDescription: data.itemDescription.trim(),
-      issue: data.issue.trim(),
-      estimatedCost: estimatedCost.toString(),
-      promisedDate,
-      notes: data.notes ? String(data.notes).slice(0, 500) || null : null,
-      karigarId,
-      karigarName,
-    }).returning();
+    const repair = await db.transaction(async (tx) => {
+      const [r] = await tx.insert(repairJobsTable).values({
+        userId,
+        customerId: data.customerId ?? null,
+        customerName: data.customerName.trim(),
+        customerMobile: data.customerMobile.trim(),
+        itemDescription: data.itemDescription.trim(),
+        issue: data.issue.trim(),
+        estimatedCost: estimatedCost.toString(),
+        promisedDate,
+        ...(receivedDate ? { receivedDate } : {}),
+        notes: data.notes ? String(data.notes).slice(0, 500) || null : null,
+        karigarId,
+        karigarName,
+      }).returning();
 
-    if (isActiveWithKarigar(repair.karigarId, repair.status)) {
-      await adjustPendingOrders(userId, repair.karigarId!, 1);
-    }
+      if (isActiveWithKarigar(r.karigarId, r.status)) {
+        await adjustPendingOrders(tx, userId, r.karigarId!, 1);
+      }
+      return r;
+    });
 
     res.status(201).json(mapRepair(repair));
   } catch (err) {
@@ -134,9 +147,6 @@ router.patch("/:id", async (req, res) => {
     const data = req.body;
     const VALID_STATUSES = ["received", "in_progress", "ready", "delivered"];
 
-    const [existing] = await db.select().from(repairJobsTable).where(and(eq(repairJobsTable.id, id), eq(repairJobsTable.userId, userId)));
-    if (!existing) return res.status(404).json({ error: "Not found" });
-
     const updateData: Record<string, unknown> = {};
     if (data.status !== undefined) {
       if (!VALID_STATUSES.includes(data.status)) return res.status(400).json({ error: "Invalid status value" });
@@ -151,6 +161,7 @@ router.patch("/:id", async (req, res) => {
     if (data.issue !== undefined) updateData.issue = String(data.issue).trim();
     if (data.estimatedCost !== undefined) updateData.estimatedCost = parseFloat(String(data.estimatedCost)).toString();
     if (data.promisedDate !== undefined) updateData.promisedDate = new Date(data.promisedDate);
+    if (data.receivedDate !== undefined) updateData.receivedDate = new Date(data.receivedDate);
 
     if (data.karigarId !== undefined) {
       if (data.karigarId === null) {
@@ -166,22 +177,34 @@ router.patch("/:id", async (req, res) => {
       }
     }
 
-    const newKarigarId = (data.karigarId !== undefined ? updateData.karigarId : existing.karigarId) as number | null;
-    const newStatus = (updateData.status as string | undefined) ?? existing.status;
-    const wasActive = isActiveWithKarigar(existing.karigarId, existing.status);
-    const isActive = isActiveWithKarigar(newKarigarId, newStatus);
+    const repair = await db.transaction(async (tx) => {
+      // Locks the row for the duration of this transaction so two concurrent PATCHes to the
+      // same repair can't both read the same pre-update status/karigar and double- or
+      // under-count the karigar's pending-order balance.
+      const [existing] = await tx.select().from(repairJobsTable)
+        .where(and(eq(repairJobsTable.id, id), eq(repairJobsTable.userId, userId)))
+        .for("update");
+      if (!existing) return null;
 
-    const [repair] = await db.update(repairJobsTable).set(updateData).where(and(eq(repairJobsTable.id, id), eq(repairJobsTable.userId, userId))).returning();
+      const newKarigarId = (data.karigarId !== undefined ? updateData.karigarId : existing.karigarId) as number | null;
+      const newStatus = (updateData.status as string | undefined) ?? existing.status;
+      const wasActive = isActiveWithKarigar(existing.karigarId, existing.status);
+      const isActive = isActiveWithKarigar(newKarigarId, newStatus);
+
+      const [r] = await tx.update(repairJobsTable).set(updateData).where(and(eq(repairJobsTable.id, id), eq(repairJobsTable.userId, userId))).returning();
+
+      // Keep each karigar's pending-order count in sync with reassignment/status changes
+      if (existing.karigarId === newKarigarId) {
+        if (wasActive && !isActive) await adjustPendingOrders(tx, userId, existing.karigarId!, -1);
+        else if (!wasActive && isActive) await adjustPendingOrders(tx, userId, newKarigarId!, 1);
+      } else {
+        if (wasActive) await adjustPendingOrders(tx, userId, existing.karigarId!, -1);
+        if (isActive) await adjustPendingOrders(tx, userId, newKarigarId!, 1);
+      }
+
+      return r;
+    });
     if (!repair) return res.status(404).json({ error: "Not found" });
-
-    // Keep each karigar's pending-order count in sync with reassignment/status changes
-    if (existing.karigarId === newKarigarId) {
-      if (wasActive && !isActive) await adjustPendingOrders(userId, existing.karigarId!, -1);
-      else if (!wasActive && isActive) await adjustPendingOrders(userId, newKarigarId!, 1);
-    } else {
-      if (wasActive) await adjustPendingOrders(userId, existing.karigarId!, -1);
-      if (isActive) await adjustPendingOrders(userId, newKarigarId!, 1);
-    }
 
     res.json(mapRepair(repair));
   } catch (err) {
@@ -263,13 +286,16 @@ router.post("/:id/payments", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const userId = req.user!.userId;
-    const [deleted] = await db.delete(repairJobsTable)
-      .where(and(eq(repairJobsTable.id, parseInt(req.params.id)), eq(repairJobsTable.userId, userId)))
-      .returning();
+    const deleted = await db.transaction(async (tx) => {
+      const [d] = await tx.delete(repairJobsTable)
+        .where(and(eq(repairJobsTable.id, parseInt(req.params.id)), eq(repairJobsTable.userId, userId)))
+        .returning();
+      if (d && isActiveWithKarigar(d.karigarId, d.status)) {
+        await adjustPendingOrders(tx, userId, d.karigarId!, -1);
+      }
+      return d;
+    });
     if (!deleted) return res.status(404).json({ error: "Not found" });
-    if (isActiveWithKarigar(deleted.karigarId, deleted.status)) {
-      await adjustPendingOrders(userId, deleted.karigarId!, -1);
-    }
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "Failed to delete repair");

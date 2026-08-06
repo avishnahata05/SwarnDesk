@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { db, usersTable, paymentRequestsTable } from "@workspace/db";
 import { eq, desc } from "drizzle-orm";
 import { signToken, verifyToken, authMiddleware } from "../middleware/auth.js";
+import { PLANS, isValidPlanId } from "../lib/plans.js";
 
 const router = Router();
 
@@ -176,8 +177,13 @@ router.get("/me", async (req, res) => {
 // payment requests against another user's account.
 router.post("/payment-request", authMiddleware, async (req, res) => {
   try {
-    const { utrNumber } = req.body;
+    const { utrNumber, planId } = req.body;
     if (!utrNumber || !String(utrNumber).trim()) return res.status(400).json({ error: "utrNumber required" });
+    // planId picks which row of PLANS to charge — amount/duration are always
+    // resolved from that table server-side, never taken from the client, so a
+    // tampered request body can't claim a cheaper plan than what was selected.
+    if (!isValidPlanId(planId)) return res.status(400).json({ error: "A valid plan must be selected" });
+    const plan = PLANS[planId];
     const userId = req.user!.userId;
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
     if (!user) return res.status(404).json({ error: "User not found" });
@@ -187,7 +193,9 @@ router.post("/payment-request", authMiddleware, async (req, res) => {
       userEmailSnapshot: user.email,
       shopNameSnapshot: user.shopName,
       utrNumber: String(utrNumber).trim(),
-      amount: 2999,
+      amount: plan.amount,
+      planId: plan.id,
+      durationDays: plan.durationDays,
       status: "pending",
     }).returning();
     res.status(201).json(pr);
@@ -204,6 +212,7 @@ router.get("/payment-requests/mine", authMiddleware, async (req, res) => {
     const rows = await db.select({
       id: paymentRequestsTable.id,
       amount: paymentRequestsTable.amount,
+      planId: paymentRequestsTable.planId,
       utrNumber: paymentRequestsTable.utrNumber,
       status: paymentRequestsTable.status,
       notes: paymentRequestsTable.notes,

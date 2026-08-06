@@ -30,6 +30,8 @@ interface PaymentRequest {
   id: number;
   userId: number;
   amount: number;
+  planId: string | null;
+  durationDays: number | null;
   utrNumber: string | null;
   status: string;
   notes: string | null;
@@ -39,6 +41,8 @@ interface PaymentRequest {
   userEmail: string;
   shopName: string;
 }
+
+const PLAN_LABELS: Record<string, string> = { monthly: "Monthly", quarterly: "Quarterly", annual: "Annual" };
 
 interface AdminStats {
   totalUsers: number;
@@ -432,8 +436,8 @@ export default function AdminPage() {
   };
 
   const exportPaymentsCsv = () => {
-    const header = ["User", "Shop", "Email", "UTR", "Amount", "Status", "Notes", "Requested", "Processed"];
-    const rows = payments.map(p => [p.userName, p.shopName, p.userEmail, p.utrNumber ?? "", p.amount, p.status, p.notes ?? "", fmt(p.createdAt), p.processedAt ? fmt(p.processedAt) : ""]);
+    const header = ["User", "Shop", "Email", "UTR", "Plan", "Amount", "Status", "Notes", "Requested", "Processed"];
+    const rows = payments.map(p => [p.userName, p.shopName, p.userEmail, p.utrNumber ?? "", p.planId ? (PLAN_LABELS[p.planId] ?? p.planId) : "", p.amount, p.status, p.notes ?? "", fmt(p.createdAt), p.processedAt ? fmt(p.processedAt) : ""]);
     downloadCsv(`swarndesk-payments-${new Date().toISOString().slice(0, 10)}.csv`, [header, ...rows]);
   };
 
@@ -635,13 +639,16 @@ export default function AdminPage() {
                         <tr className="border-b border-border text-left">
                           <th className="pb-2 font-medium text-muted-foreground">User / Shop</th>
                           <th className="pb-2 font-medium text-muted-foreground">UTR</th>
+                          <th className="pb-2 font-medium text-muted-foreground">Plan</th>
                           <th className="pb-2 font-medium text-muted-foreground">Amount</th>
                           <th className="pb-2 font-medium text-muted-foreground">Date</th>
                           <th className="pb-2 font-medium text-muted-foreground">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
-                        {pendingPayments.map(pr => (
+                        {pendingPayments.map(pr => {
+                          const days = pr.durationDays ?? 30;
+                          return (
                           <tr key={pr.id}>
                             <td className="py-3 pr-4">
                               <div className="font-medium text-foreground">{pr.userName}</div>
@@ -650,6 +657,9 @@ export default function AdminPage() {
                             </td>
                             <td className="py-3 pr-4">
                               <span className="font-mono text-xs bg-muted px-2 py-1 rounded">{pr.utrNumber ?? "—"}</span>
+                            </td>
+                            <td className="py-3 pr-4">
+                              {pr.planId ? <Badge variant="outline" className="text-xs">{PLAN_LABELS[pr.planId] ?? pr.planId}</Badge> : <span className="text-xs text-muted-foreground">—</span>}
                             </td>
                             <td className="py-3 pr-4 font-semibold">{fmtMoney(pr.amount)}</td>
                             <td className="py-3 pr-4 text-muted-foreground text-xs">{fmt(pr.createdAt)}</td>
@@ -660,15 +670,15 @@ export default function AdminPage() {
                                   className="bg-green-600 hover:bg-green-700 text-white h-7 text-xs"
                                   onClick={() => handleApproveQuick(pr.id)}
                                   disabled={actionLoading === `pay-${pr.id}`}
-                                  title="Approve for 30 days"
+                                  title={`Approve for ${days} days`}
                                 >
-                                  {actionLoading === `pay-${pr.id}` ? "..." : "Quick Approve (30 days)"}
+                                  {actionLoading === `pay-${pr.id}` ? "..." : `Quick Approve (${days} days)`}
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   className="h-7 text-xs border-green-500/50 text-green-700 hover:bg-green-50"
-                                  onClick={() => { setApproveTarget(pr); setApproveDays("30"); setApproveNotes(""); setActionError(""); }}
+                                  onClick={() => { setApproveTarget(pr); setApproveDays(String(days)); setApproveNotes(""); setActionError(""); }}
                                   disabled={actionLoading === `pay-${pr.id}`}
                                   title="Approve with custom duration"
                                 >
@@ -686,7 +696,8 @@ export default function AdminPage() {
                               </div>
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -713,6 +724,7 @@ export default function AdminPage() {
                         <tr className="border-b border-border text-left">
                           <th className="pb-2 font-medium text-muted-foreground">User / Shop</th>
                           <th className="pb-2 font-medium text-muted-foreground">UTR</th>
+                          <th className="pb-2 font-medium text-muted-foreground">Plan</th>
                           <th className="pb-2 font-medium text-muted-foreground">Amount</th>
                           <th className="pb-2 font-medium text-muted-foreground">Status</th>
                           <th className="pb-2 font-medium text-muted-foreground">Notes</th>
@@ -729,6 +741,7 @@ export default function AdminPage() {
                             <td className="py-2 pr-4">
                               <span className="font-mono text-xs">{pr.utrNumber ?? "—"}</span>
                             </td>
+                            <td className="py-2 pr-4 text-xs text-muted-foreground">{pr.planId ? (PLAN_LABELS[pr.planId] ?? pr.planId) : "—"}</td>
                             <td className="py-2 pr-4">{fmtMoney(pr.amount)}</td>
                             <td className="py-2 pr-4">{statusBadge(pr.status)}</td>
                             <td className="py-2 pr-4 text-xs text-muted-foreground max-w-[160px] truncate">{pr.notes ?? "—"}</td>
@@ -929,6 +942,7 @@ export default function AdminPage() {
               <div className="p-3 rounded-lg bg-muted/30 border border-border text-sm space-y-1">
                 <div><span className="text-muted-foreground">User:</span> <strong>{approveTarget.userName}</strong></div>
                 <div><span className="text-muted-foreground">UTR:</span> <span className="font-mono">{approveTarget.utrNumber ?? "—"}</span></div>
+                <div><span className="text-muted-foreground">Plan:</span> <strong>{approveTarget.planId ? (PLAN_LABELS[approveTarget.planId] ?? approveTarget.planId) : "—"}</strong></div>
                 <div><span className="text-muted-foreground">Amount:</span> <strong>{fmtMoney(approveTarget.amount)}</strong></div>
               </div>
               <div>

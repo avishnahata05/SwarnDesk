@@ -20,6 +20,8 @@ export interface PurchaseUpdate {
   paidAmount?: number;
   paymentMode?: string;
   /** @nullable */
+  bankAccountId?: number | null;
+  /** @nullable */
   gstRate?: number | null;
   hsnCode?: string;
   purchaseDate?: string;

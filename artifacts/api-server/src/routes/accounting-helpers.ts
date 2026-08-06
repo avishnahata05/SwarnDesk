@@ -107,6 +107,39 @@ export function cashOrBankKey(paymentMode: string | null | undefined): "CASH" | 
   return paymentMode === "upi" || paymentMode === "card" || paymentMode === "bank" || paymentMode === "cheque" ? "BANK" : "CASH";
 }
 
+// True if `bankAccountId` is a real, active, bank-subtype account belonging to this user —
+// call this from the route (before opening its own db.transaction) to turn a bad id into a
+// clean 400 instead of a foreign-key-shaped 500 once posted.
+export async function isValidBankAccount(userId: number, bankAccountId: number): Promise<boolean> {
+  const [row] = await db.select({ id: chartOfAccountsTable.id }).from(chartOfAccountsTable)
+    .where(and(
+      eq(chartOfAccountsTable.id, bankAccountId), eq(chartOfAccountsTable.userId, userId),
+      eq(chartOfAccountsTable.accountSubType, "bank"), eq(chartOfAccountsTable.isActive, true),
+    ));
+  return !!row;
+}
+
+// Resolves which chart-of-accounts row a cash/bank/upi/card/cheque payment should post
+// against: Cash-in-Hand for cash-like modes; for bank-like modes, the caller's explicit
+// bankAccountId (already validated via isValidBankAccount) if given, else the shop's
+// designated default bank account, else the single seeded system "Bank Account" so shops
+// that never set up multiple banks keep working exactly as before.
+export async function resolveMoneyAccountId(
+  userId: number,
+  paymentMode: string | null | undefined,
+  bankAccountId: number | null | undefined,
+  defaults: Record<DefaultAccountKey, number>,
+): Promise<number> {
+  if (cashOrBankKey(paymentMode) === "CASH") return defaults.CASH;
+  if (bankAccountId) return bankAccountId;
+  const [defaultBank] = await db.select({ id: chartOfAccountsTable.id }).from(chartOfAccountsTable)
+    .where(and(
+      eq(chartOfAccountsTable.userId, userId), eq(chartOfAccountsTable.accountSubType, "bank"),
+      eq(chartOfAccountsTable.isActive, true), eq(chartOfAccountsTable.isDefaultBank, true),
+    ));
+  return defaultBank?.id ?? defaults.BANK;
+}
+
 export type PartyType = "none" | "customer" | "supplier" | "karigar" | "girvi_customer";
 
 export interface JournalLineInput {

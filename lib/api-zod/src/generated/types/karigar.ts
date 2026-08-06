@@ -17,5 +17,8 @@ export interface Karigar {
   pendingSilverWeight: number;
   pendingOrders: number;
   totalWagesPaid: number;
+  openingBalance?: number;
+  /** debit or credit — debit means the karigar owes the shop (e.g. an advance), credit means the shop owes wages */
+  openingBalanceType?: string;
   createdAt: string;
 }

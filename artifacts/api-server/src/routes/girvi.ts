@@ -9,7 +9,7 @@ import {
   VALID_METAL_TYPES, VALID_STATUSES, VALID_PERIODS, VALID_PAYMENT_MODES, VALID_PAYMENT_TYPES,
   MAX_NOTES_LEN, MAX_ADDRESS_LEN,
 } from "./girvi-helpers";
-import { postJournalEntry, getOrCreateDefaultAccounts, cashOrBankKey, reverseVoucherTx } from "./accounting-helpers";
+import { postJournalEntry, getOrCreateDefaultAccounts, resolveMoneyAccountId, isValidBankAccount, reverseVoucherTx } from "./accounting-helpers";
 
 const router = Router();
 
@@ -211,6 +211,12 @@ router.post("/", async (req, res) => {
     const loanNumber = await nextGirviNumber(userId, "loan", settings.receiptPrefix, startDate);
     const accts = await getOrCreateDefaultAccounts(userId);
 
+    const disbursementMode = VALID_PAYMENT_MODES.has(data.disbursementMode) ? data.disbursementMode : "cash";
+    const disbursementBankAccountId = data.disbursementBankAccountId ? parseInt(data.disbursementBankAccountId) : null;
+    if (disbursementBankAccountId && !(await isValidBankAccount(userId, disbursementBankAccountId))) {
+      return res.status(400).json({ error: "Invalid bank account" });
+    }
+
     const loan = await db.transaction(async tx => {
       const [newLoan] = await tx.insert(girviLoansTable).values({
         userId,
@@ -239,6 +245,8 @@ router.post("/", async (req, res) => {
         dueDate,
         status: "active",
         totalInterestCollected: "0",
+        disbursementMode,
+        disbursementBankAccountId,
         notes,
       }).returning();
 
@@ -258,9 +266,10 @@ router.post("/", async (req, res) => {
         currentBranchId: branchId,
       })));
 
-      // Dr Girvi Loans Receivable (loanAmount) / Cr Cash (loanAmount - processingFee) +
-      // Cr Processing Fee Income (processingFee) — cash disbursed net of the upfront fee.
+      // Dr Girvi Loans Receivable (loanAmount) / Cr Cash-or-Bank (loanAmount - processingFee) +
+      // Cr Processing Fee Income (processingFee) — money disbursed net of the upfront fee.
       const disbursed = loanAmount - processingFee;
+      const disbursementAccountId = await resolveMoneyAccountId(userId, disbursementMode, disbursementBankAccountId, accts);
       const voucher = await postJournalEntry(tx, {
         userId,
         voucherDate: startDate,
@@ -270,7 +279,7 @@ router.post("/", async (req, res) => {
         sourceId: newLoan.id,
         lines: [
           { accountId: accts.GIRVI_LOANS_RECEIVABLE, debit: loanAmount, partyType: "girvi_customer", partyId: customer!.id, particulars: "Loan disbursed" },
-          { accountId: accts.CASH, credit: disbursed, particulars: "Cash disbursed" },
+          { accountId: disbursementAccountId, credit: disbursed, particulars: "Disbursed to customer" },
           { accountId: accts.PROCESSING_FEE_INCOME, credit: processingFee, particulars: "Processing fee" },
         ],
       });
@@ -598,9 +607,13 @@ router.post("/:id/partial-release", async (req, res) => {
       return res.status(400).json({ error: "Can only release items from active or extended loans" });
     }
 
-    const { itemIds, amount, paymentMode, notes } = req.body;
+    const { itemIds, amount, paymentMode, notes, bankAccountId: rawBankAccountId } = req.body;
     const requestedIds: number[] = Array.isArray(itemIds) ? itemIds.map((n: unknown) => parseInt(String(n))).filter((n: number) => !isNaN(n)) : [];
     if (requestedIds.length === 0) return res.status(400).json({ error: "Select at least one item to release" });
+    const bankAccountId = rawBankAccountId ? parseInt(rawBankAccountId) : null;
+    if (bankAccountId && !(await isValidBankAccount(userId, bankAccountId))) {
+      return res.status(400).json({ error: "Invalid bank account" });
+    }
 
     const allItems = await db.select().from(girviLoanItemsTable).where(and(eq(girviLoanItemsTable.loanId, id), eq(girviLoanItemsTable.userId, userId)));
     const pledgedItems = allItems.filter(it => it.status === "pledged");
@@ -680,14 +693,14 @@ router.post("/:id/partial-release", async (req, res) => {
         if (interestPortion > 0) {
           await tx.insert(girviPaymentsTable).values({
             userId, loanId: id, loanNumber: loan.loanNumber, customerName: loan.customerName,
-            amount: interestPortion.toFixed(2), paymentType: "interest", paymentMode: resolvedMode, paymentDate: now,
+            amount: interestPortion.toFixed(2), paymentType: "interest", paymentMode: resolvedMode, bankAccountId, paymentDate: now,
             notes: resolvedNotes ? `${resolvedNotes} [partial release ${releaseNumber}]` : `Partial release ${releaseNumber}: interest portion`,
           });
         }
         if (principalPortion > 0) {
           await tx.insert(girviPaymentsTable).values({
             userId, loanId: id, loanNumber: loan.loanNumber, customerName: loan.customerName,
-            amount: principalPortion.toFixed(2), paymentType: "principal", paymentMode: resolvedMode, paymentDate: now,
+            amount: principalPortion.toFixed(2), paymentType: "principal", paymentMode: resolvedMode, bankAccountId, paymentDate: now,
             notes: resolvedNotes ? `${resolvedNotes} [partial release ${releaseNumber}]` : `Partial release ${releaseNumber}: principal portion`,
           });
         }
@@ -707,7 +720,7 @@ router.post("/:id/partial-release", async (req, res) => {
           sourceModule: "girvi",
           sourceId: id,
           lines: [
-            { accountId: accts[cashOrBankKey(resolvedMode)], debit: amt, particulars: "Payment received" },
+            { accountId: await resolveMoneyAccountId(userId, resolvedMode, bankAccountId, accts), debit: amt, particulars: "Payment received" },
             ...(interestPortion > 0 ? [{ accountId: accts.INTEREST_INCOME, credit: interestPortion, particulars: "Interest portion" }] : []),
             ...(principalPortion > 0 ? [{ accountId: accts.GIRVI_LOANS_RECEIVABLE, credit: principalPortion, partyType: "girvi_customer" as const, partyId: loan.customerId ?? undefined, particulars: "Principal portion" }] : []),
           ],
@@ -832,11 +845,15 @@ router.post("/:id/topup", async (req, res) => {
       return res.status(400).json({ error: "Can only top up active or extended loans" });
     }
 
-    const { additionalAmount, interestPaid, newDueDate, notes, paymentMode, referenceNumber, items } = req.body;
+    const { additionalAmount, interestPaid, newDueDate, notes, paymentMode, referenceNumber, items, bankAccountId: rawBankAccountId } = req.body;
     const addAmt = safeFloat(additionalAmount);
     if (addAmt <= 0 || !isFinite(addAmt)) return res.status(400).json({ error: "Top-up amount must be a positive number" });
     const paid = safeFloat(interestPaid, 0);
     if (paid < 0 || !isFinite(paid)) return res.status(400).json({ error: "Interest amount must be zero or positive" });
+    const bankAccountId = rawBankAccountId ? parseInt(rawBankAccountId) : null;
+    if (bankAccountId && !(await isValidBankAccount(userId, bankAccountId))) {
+      return res.status(400).json({ error: "Invalid bank account" });
+    }
 
     const now = new Date();
     const topupDueDate = newDueDate ? new Date(newDueDate) : new Date(loan.dueDate);
@@ -892,7 +909,7 @@ router.post("/:id/topup", async (req, res) => {
       if (paid > 0) {
         await tx.insert(girviPaymentsTable).values({
           userId, loanId: id, loanNumber: loan.loanNumber, customerName: loan.customerName,
-          amount: paid.toFixed(2), paymentType: "interest", paymentMode: resolvedMode, referenceNumber: resolvedRef,
+          amount: paid.toFixed(2), paymentType: "interest", paymentMode: resolvedMode, bankAccountId, referenceNumber: resolvedRef,
           paymentDate: now, notes: resolvedNotes ? `${resolvedNotes} [top-up]` : "Interest collected at top-up",
         });
       }
@@ -926,14 +943,14 @@ router.post("/:id/topup", async (req, res) => {
         .where(and(eq(girviLoansTable.id, id), eq(girviLoansTable.userId, userId)))
         .returning();
 
-      // Dr Girvi Loans Receivable (addAmt) / Cr Cash (addAmt) — additional principal disbursed.
+      // Dr Girvi Loans Receivable (addAmt) / Cr Cash-or-Bank (addAmt) — additional principal disbursed.
       await postJournalEntry(tx, {
         userId, voucherDate: now, voucherType: "payment",
         narration: `Girvi loan ${loan.loanNumber} top-up disbursed`,
         sourceModule: "girvi", sourceId: id,
         lines: [
           { accountId: accts.GIRVI_LOANS_RECEIVABLE, debit: addAmt, partyType: "girvi_customer", partyId: loan.customerId ?? undefined, particulars: "Top-up principal disbursed" },
-          { accountId: accts.CASH, credit: addAmt, particulars: "Cash disbursed (top-up)" },
+          { accountId: await resolveMoneyAccountId(userId, resolvedMode, bankAccountId, accts), credit: addAmt, particulars: "Disbursed to customer (top-up)" },
         ],
       });
 
@@ -943,7 +960,7 @@ router.post("/:id/topup", async (req, res) => {
           narration: `Interest collected at top-up on girvi loan ${loan.loanNumber}`,
           sourceModule: "girvi", sourceId: id,
           lines: [
-            { accountId: accts[cashOrBankKey(resolvedMode)], debit: paid, particulars: "Interest received" },
+            { accountId: await resolveMoneyAccountId(userId, resolvedMode, bankAccountId, accts), debit: paid, particulars: "Interest received" },
             { accountId: accts.INTEREST_INCOME, credit: paid, particulars: "Interest" },
           ],
         });
@@ -992,13 +1009,17 @@ router.post("/:id/collect-interest", async (req, res) => {
       return res.status(400).json({ error: "Can only collect payments on active or extended loans" });
     }
 
-    const { amount, paymentType = "auto", notes, paymentMode, referenceNumber } = req.body;
+    const { amount, paymentType = "auto", notes, paymentMode, referenceNumber, bankAccountId: rawBankAccountId } = req.body;
     if (!VALID_PAYMENT_TYPES.has(paymentType)) return res.status(400).json({ error: "Invalid payment type" });
     const amt = safeFloat(amount);
     if (amt <= 0 || !isFinite(amt)) return res.status(400).json({ error: "Amount must be a positive number" });
     const resolvedNotes = notes ? String(notes).slice(0, MAX_NOTES_LEN) : null;
     const resolvedMode = VALID_PAYMENT_MODES.has(paymentMode) ? paymentMode : "cash";
     const resolvedRef = referenceNumber ? String(referenceNumber).trim().slice(0, 100) || null : null;
+    const bankAccountId = rawBankAccountId ? parseInt(rawBankAccountId) : null;
+    if (bankAccountId && !(await isValidBankAccount(userId, bankAccountId))) {
+      return res.status(400).json({ error: "Invalid bank account" });
+    }
     const now = new Date();
 
     const settings = await getOrCreateGirviSettings(userId);
@@ -1053,6 +1074,7 @@ router.post("/:id/collect-interest", async (req, res) => {
             amount: interestPortion.toFixed(2),
             paymentType: "interest",
             paymentMode: resolvedMode,
+            bankAccountId,
             referenceNumber: resolvedRef,
             paymentDate: now,
             notes: resolvedNotes ? `${resolvedNotes} [auto: interest portion]` : "Auto: interest portion",
@@ -1064,6 +1086,7 @@ router.post("/:id/collect-interest", async (req, res) => {
           amount: principalPortion.toFixed(2),
           paymentType: "principal",
           paymentMode: resolvedMode,
+          bankAccountId,
           referenceNumber: resolvedRef,
           paymentDate: now,
           notes: resolvedNotes ? `${resolvedNotes} [auto: principal portion]` : "Auto: principal portion",
@@ -1084,7 +1107,7 @@ router.post("/:id/collect-interest", async (req, res) => {
           sourceModule: "girvi",
           sourceId: id,
           lines: [
-            { accountId: accts[cashOrBankKey(resolvedMode)], debit: amt, particulars: "Payment received" },
+            { accountId: await resolveMoneyAccountId(userId, resolvedMode, bankAccountId, accts), debit: amt, particulars: "Payment received" },
             { accountId: accts.INTEREST_INCOME, credit: interestPortion, particulars: "Interest portion" },
             { accountId: accts.GIRVI_LOANS_RECEIVABLE, credit: principalPortion, partyType: "girvi_customer", partyId: loan.customerId ?? undefined, particulars: "Principal portion" },
           ],
@@ -1106,6 +1129,7 @@ router.post("/:id/collect-interest", async (req, res) => {
           amount: amt.toFixed(2),
           paymentType: resolvedType,
           paymentMode: resolvedMode,
+          bankAccountId,
           referenceNumber: resolvedRef,
           paymentDate: now,
           notes: resolvedNotes,
@@ -1129,7 +1153,7 @@ router.post("/:id/collect-interest", async (req, res) => {
             sourceModule: "girvi",
             sourceId: id,
             lines: [
-              { accountId: accts[cashOrBankKey(resolvedMode)], debit: amt, particulars: "Payment received" },
+              { accountId: await resolveMoneyAccountId(userId, resolvedMode, bankAccountId, accts), debit: amt, particulars: "Payment received" },
               { accountId: accts.INTEREST_INCOME, credit: amt, particulars: resolvedType === "penalty" ? "Penalty interest" : "Interest" },
             ],
           });
@@ -1159,9 +1183,13 @@ router.post("/:id/renew", async (req, res) => {
       return res.status(400).json({ error: "Can only renew active or extended loans" });
     }
 
-    const { interestPaid, newDueDate, notes, paymentMode, referenceNumber } = req.body;
+    const { interestPaid, newDueDate, notes, paymentMode, referenceNumber, bankAccountId: rawBankAccountId } = req.body;
     const paid = safeFloat(interestPaid, 0);
     if (paid < 0 || !isFinite(paid)) return res.status(400).json({ error: "Interest amount must be zero or positive" });
+    const bankAccountId = rawBankAccountId ? parseInt(rawBankAccountId) : null;
+    if (bankAccountId && !(await isValidBankAccount(userId, bankAccountId))) {
+      return res.status(400).json({ error: "Invalid bank account" });
+    }
 
     const renewedDueDate = newDueDate ? new Date(newDueDate) : new Date(Date.now() + 90 * 86400000);
     if (isNaN(renewedDueDate.getTime())) return res.status(400).json({ error: "Invalid new due date" });
@@ -1198,6 +1226,7 @@ router.post("/:id/renew", async (req, res) => {
           amount: paid.toString(),
           paymentType: "renewal",
           paymentMode: resolvedMode,
+          bankAccountId,
           referenceNumber: resolvedRef,
           paymentDate: now,
           notes: resolvedNotes,
@@ -1225,7 +1254,7 @@ router.post("/:id/renew", async (req, res) => {
           sourceModule: "girvi",
           sourceId: id,
           lines: [
-            { accountId: accts[cashOrBankKey(resolvedMode)], debit: paid, particulars: "Renewal interest received" },
+            { accountId: await resolveMoneyAccountId(userId, resolvedMode, bankAccountId, accts), debit: paid, particulars: "Renewal interest received" },
             { accountId: accts.INTEREST_INCOME, credit: paid, particulars: "Interest" },
           ],
         });
@@ -1283,6 +1312,10 @@ router.patch("/:id", async (req, res) => {
       const principalPaid = safeFloat((loan as any).principalPaid ?? "0");
       const currentPrincipal = Math.max(0, safeFloat(loan.loanAmount) - principalPaid);
       const resolvedMode = VALID_PAYMENT_MODES.has(data.paymentMode) ? data.paymentMode : "cash";
+      const redeemBankAccountId = data.bankAccountId ? parseInt(data.bankAccountId) : null;
+      if (redeemBankAccountId && !(await isValidBankAccount(userId, redeemBankAccountId))) {
+        return res.status(400).json({ error: "Invalid bank account" });
+      }
 
       // Optional lender discretion: forgive some/all of the outstanding interest
       // instead of collecting it (e.g. the customer is well past the grace
@@ -1304,21 +1337,21 @@ router.patch("/:id", async (req, res) => {
         if (interestToCollect > 0) {
           await tx.insert(girviPaymentsTable).values({
             userId, loanId: id, loanNumber: loan.loanNumber, customerName: loan.customerName,
-            amount: interestToCollect.toFixed(2), paymentType: "interest", paymentMode: resolvedMode, paymentDate: now,
+            amount: interestToCollect.toFixed(2), paymentType: "interest", paymentMode: resolvedMode, bankAccountId: redeemBankAccountId, paymentDate: now,
             notes: "Redemption: final interest settlement",
           });
         }
         if (waiveInterest > 0) {
           await tx.insert(girviPaymentsTable).values({
             userId, loanId: id, loanNumber: loan.loanNumber, customerName: loan.customerName,
-            amount: waiveInterest.toFixed(2), paymentType: "waiver", paymentMode: resolvedMode, paymentDate: now,
+            amount: waiveInterest.toFixed(2), paymentType: "waiver", paymentMode: resolvedMode, bankAccountId: redeemBankAccountId, paymentDate: now,
             notes: "Redemption: interest waived by lender",
           });
         }
         if (currentPrincipal > 0) {
           await tx.insert(girviPaymentsTable).values({
             userId, loanId: id, loanNumber: loan.loanNumber, customerName: loan.customerName,
-            amount: currentPrincipal.toFixed(2), paymentType: "principal", paymentMode: resolvedMode, paymentDate: now,
+            amount: currentPrincipal.toFixed(2), paymentType: "principal", paymentMode: resolvedMode, bankAccountId: redeemBankAccountId, paymentDate: now,
             notes: "Redemption: final principal settlement",
           });
         }
@@ -1351,7 +1384,7 @@ router.patch("/:id", async (req, res) => {
           sourceModule: "girvi",
           sourceId: id,
           lines: [
-            { accountId: accts[cashOrBankKey(resolvedMode)], debit: cashCollected, particulars: "Redemption payment received" },
+            { accountId: await resolveMoneyAccountId(userId, resolvedMode, redeemBankAccountId, accts), debit: cashCollected, particulars: "Redemption payment received" },
             { accountId: accts.GIRVI_LOANS_RECEIVABLE, credit: currentPrincipal, partyType: "girvi_customer", partyId: loan.customerId ?? undefined, particulars: "Principal settled" },
             { accountId: accts.INTEREST_INCOME, credit: interestToCollect, particulars: "Interest settled" },
           ],
@@ -1446,6 +1479,18 @@ router.patch("/:id", async (req, res) => {
       // General field updates — always safe, no accounting/interest impact.
       if (data.notes !== undefined) updates.notes = String(data.notes).slice(0, MAX_NOTES_LEN) || null;
       if (data.itemDescription !== undefined) updates.itemDescription = String(data.itemDescription).slice(0, 500) || null;
+      if (data.customerName !== undefined) {
+        const cn = String(data.customerName).trim();
+        if (!cn) return res.status(400).json({ error: "Customer name cannot be blank" });
+        updates.customerName = cn;
+      }
+      if (data.customerMobile !== undefined) {
+        const cm = String(data.customerMobile).trim();
+        if (!cm) return res.status(400).json({ error: "Customer mobile cannot be blank" });
+        updates.customerMobile = cm;
+      }
+      if (data.kycDocType !== undefined) updates.kycDocType = String(data.kycDocType).trim() || null;
+      if (data.kycDocNumber !== undefined) updates.kycDocNumber = String(data.kycDocNumber).trim() || null;
       if (data.fatherName !== undefined) updates.fatherName = String(data.fatherName).trim() || null;
       if (data.address !== undefined) updates.address = String(data.address).slice(0, MAX_ADDRESS_LEN) || null;
       if (data.pan !== undefined) updates.pan = String(data.pan).trim().toUpperCase() || null;
@@ -1542,7 +1587,9 @@ router.patch("/:id", async (req, res) => {
               sourceId: loan.id,
               lines: [
                 { accountId: accts.GIRVI_LOANS_RECEIVABLE, debit: newLoanAmount, partyType: "girvi_customer", partyId: loan.customerId ?? undefined, particulars: "Loan disbursed (corrected)" },
-                { accountId: accts.CASH, credit: disbursed, particulars: "Cash disbursed" },
+                // Re-post against whichever account the loan was originally disbursed from —
+                // this correction only fixes amount/rate/dates, not how the money moved.
+                { accountId: await resolveMoneyAccountId(userId, loan.disbursementMode, loan.disbursementBankAccountId, accts), credit: disbursed, particulars: "Disbursed to customer (corrected)" },
                 { accountId: accts.PROCESSING_FEE_INCOME, credit: newProcessingFee, particulars: "Processing fee" },
               ],
             });

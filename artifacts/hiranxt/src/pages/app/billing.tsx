@@ -23,6 +23,7 @@ import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { ShortcutsHelpDialog, ShortcutsHelpButton } from "@/components/ShortcutsHelp";
 import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
 import { InfoTooltip } from "@/components/InfoTooltip";
+import { BankAccountSelect } from "@/components/BankAccountSelect";
 
 interface CartItem {
   inventoryItemId: number;
@@ -178,8 +179,9 @@ function openPrintWindow(params: {
   ${isEstimate ? `
   .watermark {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%) rotate(-30deg);
-    font-size: 72px; font-weight: 900; color: rgba(217,119,6,0.08);
-    pointer-events: none; user-select: none; z-index: 0; white-space: nowrap;
+    font-size: 40px; font-weight: 900; color: rgba(217,119,6,0.10);
+    pointer-events: none; user-select: none; z-index: 0;
+    width: 90vw; text-align: center; line-height: 1.2;
   }` : ""}
 
   @media print {
@@ -189,7 +191,7 @@ function openPrintWindow(params: {
 </style>
 </head>
 <body>
-${isEstimate ? '<div class="watermark">ESTIMATE</div>' : ""}
+${isEstimate ? `<div class="watermark">${escapeHtml(shop.name)}</div>` : ""}
 <div class="page">
 
   <!-- Print button (hidden on print) -->
@@ -337,6 +339,7 @@ export default function Billing() {
   const [showHistory, setShowHistory] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMode, setPaymentMode] = useState("cash");
+  const [bankAccountId, setBankAccountId] = useState<number | null>(null);
   const [paymentStatus, setPaymentStatus] = useState("paid");
   const [paidNow, setPaidNow] = useState<string>("");
   const [discount, setDiscount] = useState(0);
@@ -694,7 +697,7 @@ export default function Billing() {
         customerId: selectedCustomer?.id && selectedCustomer.id > 0 ? selectedCustomer.id : null,
         customerName: selectedCustomer?.name ?? "Walk-in Customer",
         totalAmount, gstAmount, discountAmount: discount,
-        exchangeGoldWeight, exchangeGoldValue, paymentMode, paymentStatus,
+        exchangeGoldWeight, exchangeGoldValue, paymentMode, bankAccountId, paymentStatus,
         paidAmount,
         notes: null,
         items: cart.map(c => ({
@@ -1378,14 +1381,15 @@ export default function Billing() {
               <div className="space-y-3">
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">Payment Mode</label>
-                  <Select value={paymentMode} onValueChange={v => { setPaymentMode(v); if (v === "partial") { setPaidNow(""); } }}>
+                  <Select value={paymentMode} onValueChange={v => { setPaymentMode(v); setBankAccountId(null); if (v === "partial") { setPaidNow(""); } }}>
                     <SelectTrigger data-testid="select-payment-mode"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {["cash", "upi", "card", "credit", "partial"].map(m => (
+                      {["cash", "upi", "card", "bank", "credit", "partial"].map(m => (
                         <SelectItem key={m} value={m} className="capitalize">{m.charAt(0).toUpperCase() + m.slice(1)}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  <BankAccountSelect paymentMode={paymentMode} bankAccountId={bankAccountId} onChange={setBankAccountId} className="mt-2" />
                 </div>
 
                 {(paymentMode === "partial" || paymentStatus === "partial" || paymentStatus === "pending") && (

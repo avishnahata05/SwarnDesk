@@ -27,3 +27,10 @@ export async function apiSend<T>(path: string, method: "POST" | "PATCH" | "DELET
   if (!r.ok) throw new Error((await r.json().catch(() => ({ error: "Request failed" }))).error ?? "Request failed");
   return r.json();
 }
+
+// For writing to party records (customers/suppliers/karigars) that live outside /api/accounting.
+export async function apiSendOther<T>(path: string, method: "POST" | "PATCH" | "DELETE", body?: unknown): Promise<T> {
+  const r = await fetch(`/api${path}`, { method, headers: getAuthHeaders(), body: body !== undefined ? JSON.stringify(body) : undefined });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({ error: "Request failed" }))).error ?? "Request failed");
+  return r.json();
+}

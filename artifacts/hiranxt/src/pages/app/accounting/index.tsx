@@ -1,5 +1,6 @@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import OverviewTab from "./OverviewTab";
+import OpeningBalancesTab from "./OpeningBalancesTab";
 import ChartOfAccountsTab from "./ChartOfAccountsTab";
 import VouchersTab from "./VouchersTab";
 import LedgersTab from "./LedgersTab";
@@ -12,6 +13,7 @@ export default function Accounting() {
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="opening-balances">Opening Balances</TabsTrigger>
           <TabsTrigger value="accounts">Chart of Accounts</TabsTrigger>
           <TabsTrigger value="vouchers">Journal Vouchers</TabsTrigger>
           <TabsTrigger value="ledgers">Ledgers &amp; Books</TabsTrigger>
@@ -20,6 +22,9 @@ export default function Accounting() {
         </TabsList>
         <TabsContent value="overview">
           <OverviewTab />
+        </TabsContent>
+        <TabsContent value="opening-balances">
+          <OpeningBalancesTab />
         </TabsContent>
         <TabsContent value="accounts">
           <ChartOfAccountsTab />

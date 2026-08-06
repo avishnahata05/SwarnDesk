@@ -22,6 +22,8 @@ export interface Purchase {
   balanceAmount: number;
   paymentMode: string;
   /** @nullable */
+  bankAccountId?: number | null;
+  /** @nullable */
   taxableValue: number | null;
   /** @nullable */
   gstRate: number | null;

@@ -26,6 +26,12 @@ export const paymentRequestsTable = pgTable("payment_requests", {
   userEmailSnapshot: text("user_email_snapshot"),
   shopNameSnapshot: text("shop_name_snapshot"),
   amount: integer("amount").notNull().default(2500),
+  // Which pricing tier the user claims to have paid for (see PLANS in
+  // artifacts/api-server/src/plans.ts) — nullable because rows created before
+  // this column existed never recorded one. `amount` above is always
+  // server-derived from this at submission time, never taken from the client.
+  planId: text("plan_id"),
+  durationDays: integer("duration_days"),
   utrNumber: text("utr_number"),
   status: text("status").notNull().default("pending"), // 'pending' | 'approved' | 'rejected'
   notes: text("notes"),

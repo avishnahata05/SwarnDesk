@@ -4,6 +4,7 @@ import {
   useListRepairs, useCreateRepair, useUpdateRepair, useDeleteRepair, useGetSettings, useListKarigars,
   getListRepairsQueryKey,
 } from "@workspace/api-client-react";
+import type { RepairJobInput, RepairJobUpdate } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -72,6 +73,7 @@ type RepairForm = {
   itemDescription: string;
   issue: string;
   estimatedCost: string;
+  receivedDate: string;
   promisedDate: string;
   notes: string;
   karigarId: string;
@@ -79,7 +81,7 @@ type RepairForm = {
 
 const EMPTY_FORM: RepairForm = {
   customerName: "", customerMobile: "", itemDescription: "",
-  issue: "", estimatedCost: "", promisedDate: "", notes: "", karigarId: "",
+  issue: "", estimatedCost: "", receivedDate: new Date().toISOString().split("T")[0], promisedDate: "", notes: "", karigarId: "",
 };
 
 // ─── Print job card ────────────────────────────────────────────────────────────
@@ -195,19 +197,21 @@ export default function Repairs() {
     if (!form.promisedDate) { toast({ title: "Promised date required", variant: "destructive" }); return; }
 
     setSubmitting(true);
-    createRepair.mutate({
-      data: {
-        customerName: form.customerName,
-        customerMobile: form.customerMobile,
-        itemDescription: form.itemDescription,
-        issue: form.issue,
-        estimatedCost: cost,
-        promisedDate: new Date(form.promisedDate).toISOString(),
-        notes: form.notes.trim() || null,
-        customerId: null,
-        karigarId: form.karigarId ? parseInt(form.karigarId) : null,
-      }
-    }, {
+    // receivedDate isn't in the generated RepairJobInput type (it used to always default
+    // to "now" server-side) — extend it locally now that it's settable.
+    const createPayload: RepairJobInput & { receivedDate?: string } = {
+      customerName: form.customerName,
+      customerMobile: form.customerMobile,
+      itemDescription: form.itemDescription,
+      issue: form.issue,
+      estimatedCost: cost,
+      receivedDate: form.receivedDate ? new Date(form.receivedDate).toISOString() : undefined,
+      promisedDate: new Date(form.promisedDate).toISOString(),
+      notes: form.notes.trim() || null,
+      customerId: null,
+      karigarId: form.karigarId ? parseInt(form.karigarId) : null,
+    };
+    createRepair.mutate({ data: createPayload }, {
       onSuccess: () => {
         invalidate();
         toast({ title: "Repair job logged" });
@@ -227,6 +231,7 @@ export default function Repairs() {
       itemDescription: r.itemDescription,
       issue: r.issue,
       estimatedCost: String(r.estimatedCost),
+      receivedDate: r.receivedDate.split("T")[0],
       promisedDate: r.promisedDate.split("T")[0],
       notes: r.notes ?? "",
       karigarId: r.karigarId != null ? String(r.karigarId) : "",
@@ -240,18 +245,20 @@ export default function Repairs() {
       toast({ title: "Fill all required fields", variant: "destructive" }); return;
     }
     if (!isFinite(cost) || cost < 0) { toast({ title: "Valid estimated cost required", variant: "destructive" }); return; }
+    const editPayload: RepairJobUpdate & { receivedDate?: string } = {
+      customerName: editForm.customerName,
+      customerMobile: editForm.customerMobile,
+      itemDescription: editForm.itemDescription,
+      issue: editForm.issue,
+      estimatedCost: cost,
+      receivedDate: editForm.receivedDate ? new Date(editForm.receivedDate).toISOString() : undefined,
+      promisedDate: new Date(editForm.promisedDate).toISOString(),
+      notes: editForm.notes.trim() || null,
+      karigarId: editForm.karigarId ? parseInt(editForm.karigarId) : null,
+    };
     updateRepair.mutate({
       id: editRepair.id,
-      data: {
-        customerName: editForm.customerName,
-        customerMobile: editForm.customerMobile,
-        itemDescription: editForm.itemDescription,
-        issue: editForm.issue,
-        estimatedCost: cost,
-        promisedDate: new Date(editForm.promisedDate).toISOString(),
-        notes: editForm.notes.trim() || null,
-        karigarId: editForm.karigarId ? parseInt(editForm.karigarId) : null,
-      }
+      data: editPayload
     }, {
       onSuccess: () => {
         invalidate();
@@ -500,6 +507,10 @@ export default function Repairs() {
                 <input className={inp} type="number" min="0" value={form.estimatedCost} onChange={e => setF("estimatedCost", e.target.value)} placeholder="e.g. 500" />
               </div>
               <div>
+                <label className={lbl}>Received Date *</label>
+                <input className={inp} type="date" value={form.receivedDate} onChange={e => setF("receivedDate", e.target.value)} />
+              </div>
+              <div>
                 <label className={lbl}>Promised Date *</label>
                 <input className={inp} type="date" value={form.promisedDate} min={new Date().toISOString().split("T")[0]} onChange={e => setF("promisedDate", e.target.value)} />
               </div>
@@ -555,6 +566,10 @@ export default function Repairs() {
               <div>
                 <label className={lbl}>Estimated Cost (₹) *</label>
                 <input className={inp} type="number" min="0" value={editForm.estimatedCost} onChange={e => setEF("estimatedCost", e.target.value)} />
+              </div>
+              <div>
+                <label className={lbl}>Received Date *</label>
+                <input className={inp} type="date" value={editForm.receivedDate} onChange={e => setEF("receivedDate", e.target.value)} />
               </div>
               <div>
                 <label className={lbl}>Promised Date *</label>

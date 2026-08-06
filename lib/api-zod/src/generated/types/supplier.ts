@@ -16,5 +16,8 @@ export interface Supplier {
   gstin: string | null;
   /** @nullable */
   email?: string | null;
+  openingBalance?: number;
+  /** debit or credit — debit means you paid the supplier in advance, credit means you still owe them */
+  openingBalanceType?: string;
   createdAt: string;
 }

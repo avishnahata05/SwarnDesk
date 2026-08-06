@@ -216,6 +216,8 @@ export function mapLoan(l: typeof girviLoansTable.$inferSelect, asOf = new Date(
     isEditable: isLoanEditable(l),
     noticeSentAt: l.noticeSentAt?.toISOString() ?? null,
     noticeNumber: l.noticeNumber,
+    disbursementMode: l.disbursementMode,
+    disbursementBankAccountId: l.disbursementBankAccountId,
   };
 }
 
@@ -271,6 +273,7 @@ export function mapPayment(p: typeof girviPaymentsTable.$inferSelect) {
     amount: safeFloat(p.amount),
     paymentType: p.paymentType,
     paymentMode: p.paymentMode,
+    bankAccountId: p.bankAccountId,
     referenceNumber: p.referenceNumber,
     paymentDate: p.paymentDate.toISOString(),
     notes: p.notes,

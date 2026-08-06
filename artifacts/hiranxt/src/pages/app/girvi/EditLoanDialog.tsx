@@ -30,6 +30,7 @@ export default function EditLoanDialog({ open, loan, onClose, onUpdated, onDelet
   const [form, setForm] = useState({
     loanAmount: "", interestRate: "", interestPeriod: "monthly", penaltyRate: "", processingFee: "",
     startDate: "", dueDate: "", notes: "", fatherName: "", address: "",
+    customerName: "", customerMobile: "", kycDocType: "none", kycDocNumber: "",
   });
   const [savingTerms, setSavingTerms] = useState(false);
   const [savingItemKey, setSavingItemKey] = useState<number | null>(null);
@@ -65,6 +66,10 @@ export default function EditLoanDialog({ open, loan, onClose, onUpdated, onDelet
         notes: loan.notes ?? "",
         fatherName: loan.fatherName ?? "",
         address: loan.address ?? "",
+        customerName: loan.customerName,
+        customerMobile: loan.customerMobile,
+        kycDocType: loan.kycDocType ?? "none",
+        kycDocNumber: loan.kycDocNumber ?? "",
       });
       setConfirmDelete(false);
       setNewItem(n => ({ ...n, show: false }));
@@ -86,6 +91,8 @@ export default function EditLoanDialog({ open, loan, onClose, onUpdated, onDelet
     const dueD = new Date(form.dueDate);
     if (isNaN(startD.getTime()) || isNaN(dueD.getTime())) { toast({ title: "Invalid date", variant: "destructive" }); return; }
     if (dueD <= startD) { toast({ title: "Due date must be after the loan date", variant: "destructive" }); return; }
+    if (!form.customerName.trim()) { toast({ title: "Customer name cannot be blank", variant: "destructive" }); return; }
+    if (!form.customerMobile.trim()) { toast({ title: "Customer mobile cannot be blank", variant: "destructive" }); return; }
 
     setSavingTerms(true);
     try {
@@ -100,6 +107,10 @@ export default function EditLoanDialog({ open, loan, onClose, onUpdated, onDelet
         notes: form.notes.trim() || null,
         fatherName: form.fatherName.trim() || null,
         address: form.address.trim() || null,
+        customerName: form.customerName.trim(),
+        customerMobile: form.customerMobile.trim(),
+        kycDocType: form.kycDocType !== "none" ? form.kycDocType : null,
+        kycDocNumber: form.kycDocNumber.trim() || null,
       });
       toast({ title: "Loan terms updated" });
       onUpdated(updated);
@@ -197,6 +208,32 @@ export default function EditLoanDialog({ open, loan, onClose, onUpdated, onDelet
           )}
 
           <div className="p-3 rounded-xl bg-muted/20 border border-border space-y-3">
+            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Customer Details</div>
+            <p className="text-[11px] text-muted-foreground -mt-2">
+              This is a snapshot taken at pledge time — editing it here only fixes this loan's record, it does not change the customer's own profile.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div><label className={lbl}>Customer Name *</label><input className={inp} value={form.customerName} onChange={e => setForm(f => ({ ...f, customerName: e.target.value }))} /></div>
+              <div><label className={lbl}>Mobile *</label><input className={inp} value={form.customerMobile} onChange={e => setForm(f => ({ ...f, customerMobile: e.target.value }))} /></div>
+              <div>
+                <label className={lbl}>ID Proof Type</label>
+                <Select value={form.kycDocType} onValueChange={v => setForm(f => ({ ...f, kycDocType: v }))}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not on file</SelectItem>
+                    <SelectItem value="aadhaar">Aadhaar Card</SelectItem>
+                    <SelectItem value="pan">PAN Card</SelectItem>
+                    <SelectItem value="voter_id">Voter ID</SelectItem>
+                    <SelectItem value="passport">Passport</SelectItem>
+                    <SelectItem value="driving_license">Driving License</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div><label className={lbl}>ID Proof Number</label><input className={inp} value={form.kycDocNumber} onChange={e => setForm(f => ({ ...f, kycDocNumber: e.target.value }))} /></div>
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl bg-muted/20 border border-border space-y-3">
             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Loan Terms</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><label className={lbl}>Loan Amount (₹) *</label><input className={inp} type="number" disabled={!loan.isEditable} value={form.loanAmount} onChange={e => setForm(f => ({ ...f, loanAmount: e.target.value }))} /></div>
@@ -240,7 +277,7 @@ export default function EditLoanDialog({ open, loan, onClose, onUpdated, onDelet
             )}
             <div className="flex justify-end">
               <Button size="sm" className="gap-1.5" onClick={saveTerms} disabled={savingTerms}>
-                <Save className="w-3.5 h-3.5" />{savingTerms ? "Saving..." : "Save Loan Terms"}
+                <Save className="w-3.5 h-3.5" />{savingTerms ? "Saving..." : "Save Changes"}
               </Button>
             </div>
           </div>

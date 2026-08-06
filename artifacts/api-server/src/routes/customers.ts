@@ -261,6 +261,9 @@ router.patch("/:id", async (req, res) => {
     if (data.gstin !== undefined) updateData.gstin = String(data.gstin).trim() || null;
     if (data.stateCode !== undefined) updateData.stateCode = String(data.stateCode).trim().slice(0, 2) || null;
     if (data.notes !== undefined) updateData.notes = String(data.notes).slice(0, 500) || null;
+    // Opening balance — not touched by any transaction, so it's always safe to edit directly.
+    // Sign convention matches mapCustomer: positive = advance (shop owes customer), negative = due (customer owes shop).
+    if (data.balance !== undefined) updateData.balance = safeFloat(data.balance).toString();
     const [customer] = await db.update(customersTable).set(updateData).where(and(eq(customersTable.id, id), eq(customersTable.userId, userId))).returning();
     if (!customer) return res.status(404).json({ error: "Not found" });
     res.json(mapCustomer(customer));

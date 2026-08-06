@@ -13,7 +13,10 @@ export const salesTable = pgTable("sales", {
   discountAmount: numeric("discount_amount", { precision: 10, scale: 2 }).notNull().default("0"),
   exchangeGoldWeight: numeric("exchange_gold_weight", { precision: 10, scale: 3 }).notNull().default("0"),
   exchangeGoldValue: numeric("exchange_gold_value", { precision: 10, scale: 2 }).notNull().default("0"),
-  paymentMode: text("payment_mode").notNull().default("cash"), // cash, upi, card, credit, partial
+  paymentMode: text("payment_mode").notNull().default("cash"), // cash, upi, card, bank, cheque, credit, partial
+  // Which bank account (chart_of_accounts row) the money landed in — only set when
+  // paymentMode is a bank-like mode and the shop has more than one bank account.
+  bankAccountId: integer("bank_account_id"),
   paymentStatus: text("payment_status").notNull().default("paid"), // paid, partial, pending
   // Fulfillment state — distinct from paymentStatus, which tracks money, not whether the
   // sale itself still stands. A returned sale keeps its paymentStatus as a historical
@@ -56,6 +59,7 @@ export const paymentTransactionsTable = pgTable("payment_transactions", {
   customerName: text("customer_name").notNull(),
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   paymentMode: text("payment_mode").notNull().default("cash"),
+  bankAccountId: integer("bank_account_id"),
   paidAt: timestamp("paid_at").defaultNow().notNull(),
   notes: text("notes"),
 }, (t) => [

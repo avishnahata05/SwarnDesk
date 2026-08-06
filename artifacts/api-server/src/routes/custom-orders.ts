@@ -27,8 +27,10 @@ function isActiveWithKarigar(karigarId: number | null, status: string): boolean 
   return !!karigarId && (status === "karigar_assigned" || status === "in_progress");
 }
 
-async function adjustPendingOrders(userId: number, karigarId: number, delta: number) {
-  await db.execute(sql`UPDATE karigars SET pending_orders = GREATEST(0, pending_orders + ${delta}) WHERE id = ${karigarId} AND user_id = ${userId}`);
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function adjustPendingOrders(tx: Tx, userId: number, karigarId: number, delta: number) {
+  await tx.execute(sql`UPDATE karigars SET pending_orders = GREATEST(0, pending_orders + ${delta}) WHERE id = ${karigarId} AND user_id = ${userId}`);
 }
 
 function mapOrder(r: typeof customOrdersTable.$inferSelect) {
@@ -94,6 +96,14 @@ router.post("/", async (req, res) => {
     const dueDate = new Date(d.dueDate);
     if (isNaN(dueDate.getTime())) return res.status(400).json({ error: "Invalid due date" });
 
+    let advancePaid = 0;
+    if (d.advancePaid != null) {
+      advancePaid = safeFloat(d.advancePaid);
+      if (!isFinite(advancePaid) || advancePaid < 0) return res.status(400).json({ error: "Advance paid cannot be negative" });
+      const priceCap = d.agreedPrice != null ? safeFloat(d.agreedPrice) : d.estimatedPrice != null ? safeFloat(d.estimatedPrice) : null;
+      if (priceCap != null && advancePaid > priceCap) return res.status(400).json({ error: "Advance paid cannot exceed the agreed/estimated price" });
+    }
+
     const orderNumber = await nextVoucherNumber(userId, "custom_order", "CO");
     const [order] = await db.insert(customOrdersTable).values({
       userId,
@@ -108,7 +118,7 @@ router.post("/", async (req, res) => {
       targetWeight: d.targetWeight != null ? String(d.targetWeight) : null,
       estimatedPrice: d.estimatedPrice != null ? String(d.estimatedPrice) : null,
       agreedPrice: d.agreedPrice != null ? String(d.agreedPrice) : null,
-      advancePaid: d.advancePaid != null ? String(d.advancePaid) : "0",
+      advancePaid: advancePaid.toString(),
       dueDate,
       notes: d.notes?.trim() || null,
     }).returning();
@@ -150,7 +160,6 @@ router.patch("/:id", async (req, res) => {
     if (d.targetWeight !== undefined) update.targetWeight = d.targetWeight != null ? String(d.targetWeight) : null;
     if (d.estimatedPrice !== undefined) update.estimatedPrice = d.estimatedPrice != null ? String(d.estimatedPrice) : null;
     if (d.agreedPrice !== undefined) update.agreedPrice = d.agreedPrice != null ? String(d.agreedPrice) : null;
-    if (d.advancePaid !== undefined) update.advancePaid = String(d.advancePaid ?? 0);
     if (d.dueDate !== undefined) update.dueDate = new Date(d.dueDate);
     if (d.notes !== undefined) update.notes = d.notes?.trim() || null;
 
@@ -179,31 +188,52 @@ router.patch("/:id", async (req, res) => {
     if (d.deliveryDate !== undefined) update.deliveryDate = d.deliveryDate ? new Date(d.deliveryDate) : null;
     if (d.finalPrice !== undefined) update.finalPrice = d.finalPrice != null ? String(d.finalPrice) : null;
 
-    const [existing] = await db.select().from(customOrdersTable)
-      .where(and(eq(customOrdersTable.id, parseInt(req.params.id)), eq(customOrdersTable.userId, userId)));
-    if (!existing) return res.status(404).json({ error: "Not found" });
+    const orderId = parseInt(req.params.id);
+    const updated = await db.transaction(async (tx) => {
+      // Locks the row for the duration of this transaction so two concurrent PATCHes to the
+      // same order can't both read the same pre-update status/karigar and double- or
+      // under-count the karigar's pending-order balance.
+      const [existing] = await tx.select().from(customOrdersTable)
+        .where(and(eq(customOrdersTable.id, orderId), eq(customOrdersTable.userId, userId)))
+        .for("update");
+      if (!existing) return null;
 
-    const newKarigarId = (update.karigarId !== undefined ? update.karigarId : existing.karigarId) as number | null;
-    const newStatus = (update.status as string | undefined) ?? existing.status;
-    const wasActive = isActiveWithKarigar(existing.karigarId, existing.status);
-    const isActive = isActiveWithKarigar(newKarigarId, newStatus);
+      if (d.advancePaid !== undefined) {
+        const advancePaid = safeFloat(d.advancePaid, 0);
+        if (!isFinite(advancePaid) || advancePaid < 0) throw Object.assign(new Error("Advance paid cannot be negative"), { statusCode: 400 });
+        const agreedPrice = d.agreedPrice !== undefined ? d.agreedPrice : existing.agreedPrice;
+        const estimatedPrice = d.estimatedPrice !== undefined ? d.estimatedPrice : existing.estimatedPrice;
+        const priceCap = agreedPrice != null ? safeFloat(agreedPrice) : estimatedPrice != null ? safeFloat(estimatedPrice) : null;
+        if (priceCap != null && advancePaid > priceCap) throw Object.assign(new Error("Advance paid cannot exceed the agreed/estimated price"), { statusCode: 400 });
+        update.advancePaid = advancePaid.toString();
+      }
 
-    const [updated] = await db.update(customOrdersTable).set(update)
-      .where(and(eq(customOrdersTable.id, parseInt(req.params.id)), eq(customOrdersTable.userId, userId)))
-      .returning();
+      const newKarigarId = (update.karigarId !== undefined ? update.karigarId : existing.karigarId) as number | null;
+      const newStatus = (update.status as string | undefined) ?? existing.status;
+      const wasActive = isActiveWithKarigar(existing.karigarId, existing.status);
+      const isActive = isActiveWithKarigar(newKarigarId, newStatus);
+
+      const [u] = await tx.update(customOrdersTable).set(update)
+        .where(and(eq(customOrdersTable.id, orderId), eq(customOrdersTable.userId, userId)))
+        .returning();
+
+      // Keep each karigar's pending-order count in sync with reassignment/status changes
+      if (existing.karigarId === newKarigarId) {
+        if (wasActive && !isActive) await adjustPendingOrders(tx, userId, existing.karigarId!, -1);
+        else if (!wasActive && isActive) await adjustPendingOrders(tx, userId, newKarigarId!, 1);
+      } else {
+        if (wasActive) await adjustPendingOrders(tx, userId, existing.karigarId!, -1);
+        if (isActive) await adjustPendingOrders(tx, userId, newKarigarId!, 1);
+      }
+
+      return u;
+    });
     if (!updated) return res.status(404).json({ error: "Not found" });
 
-    // Keep each karigar's pending-order count in sync with reassignment/status changes
-    if (existing.karigarId === newKarigarId) {
-      if (wasActive && !isActive) await adjustPendingOrders(userId, existing.karigarId!, -1);
-      else if (!wasActive && isActive) await adjustPendingOrders(userId, newKarigarId!, 1);
-    } else {
-      if (wasActive) await adjustPendingOrders(userId, existing.karigarId!, -1);
-      if (isActive) await adjustPendingOrders(userId, newKarigarId!, 1);
-    }
-
     res.json(mapOrder(updated));
-  } catch (err) {
+  } catch (err: unknown) {
+    const e = err as { statusCode?: number; message?: string };
+    if (e.statusCode === 400) return res.status(400).json({ error: e.message });
     req.log.error({ err }, "Failed to update custom order");
     res.status(500).json({ error: "Internal server error" });
   }
@@ -289,13 +319,16 @@ router.post("/:id/payments", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const userId = req.user!.userId;
-    const [deleted] = await db.delete(customOrdersTable)
-      .where(and(eq(customOrdersTable.id, parseInt(req.params.id)), eq(customOrdersTable.userId, userId)))
-      .returning();
+    const deleted = await db.transaction(async (tx) => {
+      const [d] = await tx.delete(customOrdersTable)
+        .where(and(eq(customOrdersTable.id, parseInt(req.params.id)), eq(customOrdersTable.userId, userId)))
+        .returning();
+      if (d && isActiveWithKarigar(d.karigarId, d.status)) {
+        await adjustPendingOrders(tx, userId, d.karigarId!, -1);
+      }
+      return d;
+    });
     if (!deleted) return res.status(404).json({ error: "Not found" });
-    if (isActiveWithKarigar(deleted.karigarId, deleted.status)) {
-      await adjustPendingOrders(userId, deleted.karigarId!, -1);
-    }
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "Failed to delete custom order");

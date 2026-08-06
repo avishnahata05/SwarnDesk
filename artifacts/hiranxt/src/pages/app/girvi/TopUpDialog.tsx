@@ -9,6 +9,7 @@ import { Plus, XCircle, PlusCircle } from "lucide-react";
 import { API, getAuthHeaders } from "./api";
 import type { Loan, Rates } from "./types";
 import DueDatePresets from "./DueDatePresets";
+import { BankAccountSelect } from "@/components/BankAccountSelect";
 
 type ItemRow = {
   key: string;
@@ -56,6 +57,7 @@ export default function TopUpDialog({ open, loan, onClose, onToppedUp, rates }: 
   const [interestPaid, setInterestPaid] = useState("0");
   const [newDueDate, setNewDueDate] = useState("");
   const [paymentMode, setPaymentMode] = useState("cash");
+  const [bankAccountId, setBankAccountId] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [addingItems, setAddingItems] = useState(false);
   const [items, setItems] = useState<ItemRow[]>([makeItem()]);
@@ -68,6 +70,7 @@ export default function TopUpDialog({ open, loan, onClose, onToppedUp, rates }: 
       const d = new Date(loan.dueDate);
       setNewDueDate(d.toISOString().split("T")[0]);
       setPaymentMode("cash");
+      setBankAccountId(null);
       setNotes("");
       setAddingItems(false);
       setItems([makeItem()]);
@@ -137,6 +140,7 @@ export default function TopUpDialog({ open, loan, onClose, onToppedUp, rates }: 
           interestPaid: paid,
           newDueDate: dueD.toISOString(),
           paymentMode,
+          bankAccountId,
           notes: notes.trim() || null,
           items: itemsPayload,
         }),
@@ -175,20 +179,19 @@ export default function TopUpDialog({ open, loan, onClose, onToppedUp, rates }: 
               <label className={lbl}>Interest collected now (₹) <span className="text-muted-foreground/60">optional</span></label>
               <input className={inp} type="number" value={interestPaid} onChange={e => setInterestPaid(e.target.value)} placeholder="0 if nothing collected now" />
             </div>
-            {parseFloat(interestPaid) > 0 && (
-              <div>
-                <label className={lbl}>Payment mode</label>
-                <Select value={paymentMode} onValueChange={setPaymentMode}>
-                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cash">Cash</SelectItem>
-                    <SelectItem value="bank">Bank Transfer</SelectItem>
-                    <SelectItem value="upi">UPI</SelectItem>
-                    <SelectItem value="cheque">Cheque</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            <div>
+              <label className={lbl}>Payment mode <span className="text-muted-foreground/60">for the top-up disbursed and any interest collected now</span></label>
+              <Select value={paymentMode} onValueChange={v => { setPaymentMode(v); setBankAccountId(null); }}>
+                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="bank">Bank Transfer</SelectItem>
+                  <SelectItem value="upi">UPI</SelectItem>
+                  <SelectItem value="cheque">Cheque</SelectItem>
+                </SelectContent>
+              </Select>
+              <BankAccountSelect paymentMode={paymentMode} bankAccountId={bankAccountId} onChange={setBankAccountId} className="mt-2" />
+            </div>
             <div>
               <label className={lbl}>New Due Date *</label>
               <input className={inp} type="date" value={newDueDate} min={new Date().toISOString().split("T")[0]} onChange={e => setNewDueDate(e.target.value)} />

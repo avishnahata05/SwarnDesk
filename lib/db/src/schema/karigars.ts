@@ -13,6 +13,10 @@ export const karigarsTable = pgTable("karigars", {
   pendingSilverWeight: numeric("pending_silver_weight", { precision: 10, scale: 3 }).notNull().default("0"),
   pendingOrders: integer("pending_orders").notNull().default(0),
   totalWagesPaid: numeric("total_wages_paid", { precision: 12, scale: 2 }).notNull().default("0"),
+  // Wages already owed to this karigar before adopting the software — not touched by any
+  // transaction, folded into Party Ledger / Outstanding alongside live wage dues.
+  openingBalance: numeric("opening_balance", { precision: 12, scale: 2 }).notNull().default("0"),
+  openingBalanceType: text("opening_balance_type").notNull().default("credit"), // debit | credit — karigars are normally credit (you owe them wages)
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
   index("karigars_user_idx").on(t.userId),

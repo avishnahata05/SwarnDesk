@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { formatCurrency, formatWeight } from "@/lib/utils";
+import { formatCurrency, formatWeight, formatDate } from "@/lib/utils";
 import {
-  useListKarigars, useCreateKarigar, useIssueMetalToKarigar, useReturnMetalFromKarigar, useGetKarigar, useDeleteKarigar,
+  useListKarigars, useCreateKarigar, useUpdateKarigar, useIssueMetalToKarigar, useReturnMetalFromKarigar, useGetKarigar, useDeleteKarigar,
   getListKarigarsQueryKey
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -12,12 +12,12 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useForm } from "react-hook-form";
-import { Plus, Hammer, TrendingDown, TrendingUp, Trash2 } from "lucide-react";
+import { Plus, Hammer, TrendingDown, TrendingUp, Trash2, Pencil } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
 import { InfoTooltip } from "@/components/InfoTooltip";
 
-interface KarigarForm { name: string; mobile: string; specialization: string; address: string; }
+interface KarigarForm { name: string; mobile: string; specialization: string; address: string; openingBalance: string; openingBalanceType: "debit" | "credit"; }
 interface MetalIssueForm { metalType: string; weight: number; purity: string; notes: string; }
 interface MetalReturnForm { metalType: string; issuedWeight: number; returnedWeight: number; wastagePercent: number; notes: string; }
 
@@ -27,6 +27,7 @@ const puritiesForMetal = (metalType: string) => metalType === "silver" ? SILVER_
 
 export default function Karigars() {
   const [addOpen, setAddOpen] = useState(false);
+  const [editKarigar, setEditKarigar] = useState<{ id: number; name: string; mobile: string; specialization: string; address?: string | null; openingBalance?: number; openingBalanceType?: string } | null>(null);
   const [issueOpen, setIssueOpen] = useState<number | null>(null);
   const [returnOpen, setReturnOpen] = useState<number | null>(null);
   const [pageHelpOpen, setPageHelpOpen] = useState(false);
@@ -35,6 +36,7 @@ export default function Karigars() {
 
   const { data: karigars, isLoading } = useListKarigars();
   const createKarigar = useCreateKarigar();
+  const updateKarigar = useUpdateKarigar();
   const issueMetal = useIssueMetalToKarigar();
   const returnMetal = useReturnMetalFromKarigar();
   const deleteKarigar = useDeleteKarigar();
@@ -47,7 +49,10 @@ export default function Karigars() {
     });
   };
 
-  const addForm = useForm<KarigarForm>();
+  const addForm = useForm<KarigarForm>({ defaultValues: { openingBalance: "0", openingBalanceType: "credit" } });
+  const editForm = useForm<KarigarForm>();
+  const addOpeningTypeWatch = addForm.watch("openingBalanceType") ?? "credit";
+  const editOpeningTypeWatch = editForm.watch("openingBalanceType") ?? "credit";
   const issueForm = useForm<MetalIssueForm>({ defaultValues: { metalType: "gold", purity: "22K" } });
   const returnForm = useForm<MetalReturnForm>({ defaultValues: { metalType: "gold" } });
 
@@ -57,7 +62,9 @@ export default function Karigars() {
   const returnKarigar = (karigars ?? []).find(k => k.id === returnOpen) ?? null;
 
   const onAdd = (data: KarigarForm) => {
-    createKarigar.mutate({ data: { ...data, address: data.address || null } }, {
+    createKarigar.mutate({
+      data: { name: data.name, mobile: data.mobile, specialization: data.specialization, address: data.address || null, openingBalance: parseFloat(data.openingBalance) || 0, openingBalanceType: data.openingBalanceType },
+    }, {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListKarigarsQueryKey() });
         toast({ title: "Karigar added" });
@@ -65,6 +72,29 @@ export default function Karigars() {
         addForm.reset();
       },
       onError: () => toast({ title: "Failed to add karigar", variant: "destructive" }),
+    });
+  };
+
+  const openEdit = (k: { id: number; name: string; mobile: string; specialization: string; address?: string | null; openingBalance?: number; openingBalanceType?: string }) => {
+    setEditKarigar(k);
+    editForm.reset({
+      name: k.name, mobile: k.mobile, specialization: k.specialization, address: k.address ?? "",
+      openingBalance: String(k.openingBalance ?? 0), openingBalanceType: (k.openingBalanceType as "debit" | "credit") ?? "credit",
+    });
+  };
+
+  const onEditSubmit = (data: KarigarForm) => {
+    if (!editKarigar) return;
+    updateKarigar.mutate({
+      id: editKarigar.id,
+      data: { name: data.name, mobile: data.mobile, specialization: data.specialization, address: data.address || null, openingBalance: parseFloat(data.openingBalance) || 0, openingBalanceType: data.openingBalanceType },
+    }, {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListKarigarsQueryKey() });
+        toast({ title: "Karigar updated" });
+        setEditKarigar(null);
+      },
+      onError: () => toast({ title: "Failed to update karigar", variant: "destructive" }),
     });
   };
 
@@ -145,9 +175,13 @@ export default function Karigars() {
                 <div>
                   <div className="font-semibold">{k.name}</div>
                   <div className="text-xs text-muted-foreground">{k.specialization} • {k.mobile}</div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5">Added on {formatDate(k.createdAt)}</div>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Badge variant="outline">{k.pendingOrders} pending orders</Badge>
+                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(k)} data-testid={`button-edit-karigar-${k.id}`}>
+                    <Pencil className="w-3.5 h-3.5" />
+                  </Button>
                   <Button size="icon" variant="ghost" className="h-7 w-7 text-red-600" onClick={() => handleDelete(k.id)} data-testid={`button-delete-karigar-${k.id}`}>
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
@@ -167,6 +201,9 @@ export default function Karigars() {
 
               <div className="text-xs text-muted-foreground">
                 Total wages paid: <span className="text-foreground font-medium">{formatCurrency(k.totalWagesPaid)}</span>
+                {!!k.openingBalance && (
+                  <div>Opening: {formatCurrency(k.openingBalance)} {k.openingBalanceType === "debit" ? "Dr" : "Cr"}</div>
+                )}
               </div>
 
               <div className="flex gap-2">
@@ -219,11 +256,75 @@ export default function Karigars() {
                 <label className="text-xs text-muted-foreground mb-1 block">Address</label>
                 <Input {...addForm.register("address")} data-testid="input-karigar-address" />
               </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                  Opening Balance
+                  <InfoTooltip text="Wages already owed to this karigar (or an advance they owe you) from before you started using this software." />
+                </label>
+                <Input type="number" {...addForm.register("openingBalance")} placeholder="0" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Balance Side</label>
+                <Select value={addOpeningTypeWatch} onValueChange={v => addForm.setValue("openingBalanceType", v as "debit" | "credit")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="credit">Wages due (you owe them)</SelectItem>
+                    <SelectItem value="debit">Advance (they owe you)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
               <Button type="submit" disabled={createKarigar.isPending} data-testid="button-submit-karigar">
                 {createKarigar.isPending ? "Adding..." : "Add Karigar"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit karigar */}
+      <Dialog open={!!editKarigar} onOpenChange={o => !o && setEditKarigar(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Edit Karigar</DialogTitle></DialogHeader>
+          <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className="text-xs text-muted-foreground mb-1 block">Full Name *</label>
+                <Input {...editForm.register("name", { required: true })} data-testid="input-edit-karigar-name" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Mobile *</label>
+                <Input {...editForm.register("mobile", { required: true })} data-testid="input-edit-karigar-mobile" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Specialization *</label>
+                <Input {...editForm.register("specialization", { required: true })} placeholder="Bangles, Chains, Rings" data-testid="input-edit-karigar-spec" />
+              </div>
+              <div className="col-span-2">
+                <label className="text-xs text-muted-foreground mb-1 block">Address</label>
+                <Input {...editForm.register("address")} data-testid="input-edit-karigar-address" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Opening Balance</label>
+                <Input type="number" {...editForm.register("openingBalance")} placeholder="0" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Balance Side</label>
+                <Select value={editOpeningTypeWatch} onValueChange={v => editForm.setValue("openingBalanceType", v as "debit" | "credit")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="credit">Wages due (you owe them)</SelectItem>
+                    <SelectItem value="debit">Advance (they owe you)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditKarigar(null)}>Cancel</Button>
+              <Button type="submit" disabled={updateKarigar.isPending} data-testid="button-submit-edit-karigar">
+                {updateKarigar.isPending ? "Saving..." : "Save Changes"}
               </Button>
             </DialogFooter>
           </form>

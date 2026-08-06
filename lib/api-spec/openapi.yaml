@@ -1250,6 +1250,9 @@ components:
           type: ["string", "null"]
         notes:
           type: ["string", "null"]
+        balance:
+          type: number
+          description: opening balance — positive = credit (advance), negative = debit (due)
 
     CustomerUpdate:
       type: object
@@ -1272,6 +1275,9 @@ components:
           type: ["string", "null"]
         notes:
           type: ["string", "null"]
+        balance:
+          type: number
+          description: opening balance, not touched by transactions — positive = credit (advance), negative = debit (due)
 
     CustomerDetail:
       type: object
@@ -1331,7 +1337,9 @@ components:
           type: number
         paymentMode:
           type: string
-          description: cash, upi, card, credit, partial
+          description: cash, upi, card, bank, credit, partial
+        bankAccountId:
+          type: ["integer", "null"]
         paymentStatus:
           type: string
           description: paid, partial, pending
@@ -1366,6 +1374,8 @@ components:
           type: number
         paymentMode:
           type: string
+        bankAccountId:
+          type: ["integer", "null"]
         paymentStatus:
           type: string
         notes:
@@ -1477,6 +1487,11 @@ components:
           type: integer
         totalWagesPaid:
           type: number
+        openingBalance:
+          type: number
+        openingBalanceType:
+          type: string
+          description: debit or credit — debit means the karigar owes the shop (e.g. an advance), credit means the shop owes wages
         createdAt:
           type: string
 
@@ -1492,6 +1507,10 @@ components:
           type: string
         address:
           type: ["string", "null"]
+        openingBalance:
+          type: number
+        openingBalanceType:
+          type: string
 
     KarigarUpdate:
       type: object
@@ -1504,6 +1523,10 @@ components:
           type: string
         address:
           type: ["string", "null"]
+        openingBalance:
+          type: number
+        openingBalanceType:
+          type: string
 
     KarigarDetail:
       type: object
@@ -1850,6 +1873,8 @@ components:
           type: number
         paymentMode:
           type: string
+        bankAccountId:
+          type: ["integer", "null"]
         taxableValue:
           type: ["number", "null"]
         gstRate:
@@ -1895,6 +1920,8 @@ components:
           type: number
         paymentMode:
           type: string
+        bankAccountId:
+          type: ["integer", "null"]
         gstRate:
           type: number
         hsnCode:
@@ -1929,6 +1956,8 @@ components:
           type: number
         paymentMode:
           type: string
+        bankAccountId:
+          type: ["integer", "null"]
         gstRate:
           type: ["number", "null"]
         hsnCode:
@@ -1954,6 +1983,11 @@ components:
           type: ["string", "null"]
         email:
           type: ["string", "null"]
+        openingBalance:
+          type: number
+        openingBalanceType:
+          type: string
+          description: debit or credit — debit means you paid the supplier in advance, credit means you still owe them
         createdAt:
           type: string
 
@@ -1971,6 +2005,10 @@ components:
           type: ["string", "null"]
         email:
           type: ["string", "null"]
+        openingBalance:
+          type: number
+        openingBalanceType:
+          type: string
 
     BusinessSettings:
       type: object

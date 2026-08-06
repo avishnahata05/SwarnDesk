@@ -165,6 +165,8 @@ export interface CustomerInput {
   stateCode?: string | null;
   /** @nullable */
   notes?: string | null;
+  /** opening balance — positive = credit (advance), negative = debit (due) */
+  balance?: number;
 }
 
 export interface CustomerUpdate {
@@ -184,6 +186,8 @@ export interface CustomerUpdate {
   stateCode?: string | null;
   /** @nullable */
   notes?: string | null;
+  /** opening balance, not touched by transactions — positive = credit (advance), negative = debit (due) */
+  balance?: number;
 }
 
 export interface Sale {
@@ -198,8 +202,10 @@ export interface Sale {
   discountAmount: number;
   exchangeGoldWeight: number;
   exchangeGoldValue: number;
-  /** cash, upi, card, credit, partial */
+  /** cash, upi, card, bank, credit, partial */
   paymentMode: string;
+  /** @nullable */
+  bankAccountId?: number | null;
   /** paid, partial, pending */
   paymentStatus: string;
   invoiceNumber: string;
@@ -271,6 +277,8 @@ export interface SaleInput {
   exchangeGoldWeight: number;
   exchangeGoldValue: number;
   paymentMode: string;
+  /** @nullable */
+  bankAccountId?: number | null;
   paymentStatus: string;
   /** @nullable */
   notes?: string | null;
@@ -321,6 +329,9 @@ export interface Karigar {
   pendingSilverWeight: number;
   pendingOrders: number;
   totalWagesPaid: number;
+  openingBalance?: number;
+  /** debit or credit — debit means the karigar owes the shop (e.g. an advance), credit means the shop owes wages */
+  openingBalanceType?: string;
   createdAt: string;
 }
 
@@ -330,6 +341,8 @@ export interface KarigarInput {
   specialization: string;
   /** @nullable */
   address?: string | null;
+  openingBalance?: number;
+  openingBalanceType?: string;
 }
 
 export interface KarigarUpdate {
@@ -338,6 +351,8 @@ export interface KarigarUpdate {
   specialization?: string;
   /** @nullable */
   address?: string | null;
+  openingBalance?: number;
+  openingBalanceType?: string;
 }
 
 export interface MetalIssue {
@@ -549,6 +564,8 @@ export interface Purchase {
   balanceAmount: number;
   paymentMode: string;
   /** @nullable */
+  bankAccountId?: number | null;
+  /** @nullable */
   taxableValue: number | null;
   /** @nullable */
   gstRate: number | null;
@@ -578,6 +595,8 @@ export interface PurchaseInput {
   totalAmount: number;
   paidAmount?: number;
   paymentMode?: string;
+  /** @nullable */
+  bankAccountId?: number | null;
   gstRate?: number;
   hsnCode?: string;
   purchaseDate: string;
@@ -599,6 +618,8 @@ export interface PurchaseUpdate {
   paidAmount?: number;
   paymentMode?: string;
   /** @nullable */
+  bankAccountId?: number | null;
+  /** @nullable */
   gstRate?: number | null;
   hsnCode?: string;
   purchaseDate?: string;
@@ -616,6 +637,9 @@ export interface Supplier {
   gstin: string | null;
   /** @nullable */
   email?: string | null;
+  openingBalance?: number;
+  /** debit or credit — debit means you paid the supplier in advance, credit means you still owe them */
+  openingBalanceType?: string;
   createdAt: string;
 }
 
@@ -628,6 +652,8 @@ export interface SupplierInput {
   gstin?: string | null;
   /** @nullable */
   email?: string | null;
+  openingBalance?: number;
+  openingBalanceType?: string;
 }
 
 export interface BusinessSettings {

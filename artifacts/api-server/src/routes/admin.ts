@@ -76,6 +76,8 @@ router.get("/payment-requests", async (req, res) => {
       id: paymentRequestsTable.id,
       userId: paymentRequestsTable.userId,
       amount: paymentRequestsTable.amount,
+      planId: paymentRequestsTable.planId,
+      durationDays: paymentRequestsTable.durationDays,
       utrNumber: paymentRequestsTable.utrNumber,
       status: paymentRequestsTable.status,
       notes: paymentRequestsTable.notes,
@@ -95,6 +97,8 @@ router.get("/payment-requests", async (req, res) => {
       id: r.id,
       userId: r.userId,
       amount: r.amount,
+      planId: r.planId,
+      durationDays: r.durationDays,
       utrNumber: r.utrNumber,
       status: r.status,
       notes: r.notes,
@@ -118,9 +122,12 @@ router.patch("/payment-requests/:id/approve", async (req, res) => {
     if (!pr) return res.status(404).json({ error: "Not found" });
     if (pr.status !== "pending") return res.status(409).json({ error: `Payment request already ${pr.status}` });
     await db.update(paymentRequestsTable).set({ status: "approved", processedAt: new Date() }).where(eq(paymentRequestsTable.id, id));
-    const subscriptionEndsAt = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000);
+    // Duration comes from the plan the user actually selected at submission
+    // time; requests from before planId/durationDays existed fall back to 30.
+    const days = pr.durationDays ?? 30;
+    const subscriptionEndsAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
     if (pr.userId) await db.update(usersTable).set({ plan: "active", subscriptionEndsAt }).where(eq(usersTable.id, pr.userId));
-    await logAdminAction(req, "approve_payment", pr.userId, pr.userNameSnapshot ?? pr.userEmailSnapshot, `Quick-approved ₹${pr.amount} for 31 days (UTR ${pr.utrNumber ?? "—"})`);
+    await logAdminAction(req, "approve_payment", pr.userId, pr.userNameSnapshot ?? pr.userEmailSnapshot, `Quick-approved ₹${pr.amount}${pr.planId ? ` (${pr.planId})` : ""} for ${days} days (UTR ${pr.utrNumber ?? "—"})`);
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "Failed to approve payment");
@@ -148,11 +155,11 @@ router.patch("/payment-requests/:id/reject", async (req, res) => {
 router.patch("/payment-requests/:id/approve-custom", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const days = parsePositiveInt(req.body.days ?? 31);
-    if (days === null) return res.status(400).json({ error: "days must be a positive whole number" });
     const [pr] = await db.select().from(paymentRequestsTable).where(eq(paymentRequestsTable.id, id)).limit(1);
     if (!pr) return res.status(404).json({ error: "Not found" });
     if (pr.status !== "pending") return res.status(409).json({ error: `Payment request already ${pr.status}` });
+    const days = parsePositiveInt(req.body.days ?? pr.durationDays ?? 31);
+    if (days === null) return res.status(400).json({ error: "days must be a positive whole number" });
     const notes = req.body.notes ?? null;
     await db.update(paymentRequestsTable).set({ status: "approved", processedAt: new Date(), notes }).where(eq(paymentRequestsTable.id, id));
     if (pr.userId) {
@@ -162,7 +169,7 @@ router.patch("/payment-requests/:id/approve-custom", async (req, res) => {
       const subscriptionEndsAt = new Date(base.getTime() + days * 24 * 60 * 60 * 1000);
       await db.update(usersTable).set({ plan: "active", subscriptionEndsAt }).where(eq(usersTable.id, pr.userId));
     }
-    await logAdminAction(req, "approve_payment", pr.userId, pr.userNameSnapshot ?? pr.userEmailSnapshot, `Approved ₹${pr.amount} for ${days} days (UTR ${pr.utrNumber ?? "—"})${notes ? ` — ${notes}` : ""}`);
+    await logAdminAction(req, "approve_payment", pr.userId, pr.userNameSnapshot ?? pr.userEmailSnapshot, `Approved ₹${pr.amount}${pr.planId ? ` (${pr.planId})` : ""} for ${days} days (UTR ${pr.utrNumber ?? "—"})${notes ? ` — ${notes}` : ""}`);
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "Failed to approve payment");

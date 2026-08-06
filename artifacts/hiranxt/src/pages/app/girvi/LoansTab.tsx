@@ -27,6 +27,7 @@ import NewLoanDialog from "./NewLoanDialog";
 import EditLoanDialog from "./EditLoanDialog";
 import TopUpDialog from "./TopUpDialog";
 import DueDatePresets from "./DueDatePresets";
+import { BankAccountSelect } from "@/components/BankAccountSelect";
 
 function toVikramSamvat(date: Date): string {
   const day = date.getDate();
@@ -53,6 +54,8 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
   const [statusFilter, setStatusFilter] = useState("active");
   const [dueFilter, setDueFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [calendarMode, setCalendarMode] = useState<"en" | "hi">("en");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [loanPayments, setLoanPayments] = useState<Record<number, Payment[]>>({});
@@ -75,18 +78,24 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
   const [collectAmount, setCollectAmount] = useState("");
   const [collectType, setCollectType] = useState("auto");
   const [collectMode, setCollectMode] = useState("cash");
+  const [collectBankAccountId, setCollectBankAccountId] = useState<number | null>(null);
   const [collectNotes, setCollectNotes] = useState("");
   const [renewInterestPaid, setRenewInterestPaid] = useState("");
   const [renewNewDueDate, setRenewNewDueDate] = useState("");
+  const [renewMode, setRenewMode] = useState("cash");
+  const [renewBankAccountId, setRenewBankAccountId] = useState<number | null>(null);
   const [renewNotes, setRenewNotes] = useState("");
   const [redeemConfirmed, setRedeemConfirmed] = useState(false);
   const [waiveRedeemInterest, setWaiveRedeemInterest] = useState("0");
+  const [redeemMode, setRedeemMode] = useState("cash");
+  const [redeemBankAccountId, setRedeemBankAccountId] = useState<number | null>(null);
   const [transferItemIds, setTransferItemIds] = useState<number[]>([]);
   const [transferToBranchId, setTransferToBranchId] = useState("");
   const [transferReason, setTransferReason] = useState("");
   const [releaseItemIds, setReleaseItemIds] = useState<number[]>([]);
   const [releaseAmount, setReleaseAmount] = useState("0");
   const [releaseMode, setReleaseMode] = useState("cash");
+  const [releaseBankAccountId, setReleaseBankAccountId] = useState<number | null>(null);
   const [releaseNotes, setReleaseNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [lastPayment, setLastPayment] = useState<Payment | null>(null);
@@ -100,7 +109,11 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
   }, [autoOpenNew]);
 
   const closeNewLoan = useCallback(() => setShowNewLoan(false), []);
-  const closeActionDialog = useCallback(() => { setActionLoan(null); setActionType(null); setRedeemConfirmed(false); }, []);
+  const closeActionDialog = useCallback(() => {
+    setActionLoan(null); setActionType(null); setRedeemConfirmed(false);
+    setCollectBankAccountId(null); setRenewMode("cash"); setRenewBankAccountId(null);
+    setRedeemMode("cash"); setRedeemBankAccountId(null); setReleaseBankAccountId(null);
+  }, []);
   useBackClose(showNewLoan, closeNewLoan);
   useBackClose(!!actionLoan, closeActionDialog);
 
@@ -210,6 +223,8 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
     setStatusFilter("all");
     setDueFilter("all");
     setSearch(loan.loanNumber);
+    setDateFrom("");
+    setDateTo("");
     setSerialQuery("");
     setSerialResults([]);
     setExpandedId(loan.id);
@@ -217,15 +232,30 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
   };
 
   const filteredLoans = useMemo(() => {
-    if (!search.trim()) return loans;
-    const q = search.toLowerCase();
-    return loans.filter(l =>
-      l.customerName.toLowerCase().includes(q) ||
-      l.loanNumber.toLowerCase().includes(q) ||
-      l.customerMobile.includes(q) ||
-      (l.itemDescription ?? "").toLowerCase().includes(q)
-    );
-  }, [loans, search]);
+    let result = loans;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter(l =>
+        l.customerName.toLowerCase().includes(q) ||
+        l.loanNumber.toLowerCase().includes(q) ||
+        l.customerMobile.includes(q) ||
+        (l.itemDescription ?? "").toLowerCase().includes(q)
+      );
+    }
+    // Pledge-date range — compared in the shop's local date (not a raw UTC slice of the
+    // ISO string), so a loan pledged late at night still lands on the calendar day the
+    // owner actually entered it on.
+    if (dateFrom || dateTo) {
+      result = result.filter(l => {
+        const d = new Date(l.startDate);
+        const pledgeDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        if (dateFrom && pledgeDate < dateFrom) return false;
+        if (dateTo && pledgeDate > dateTo) return false;
+        return true;
+      });
+    }
+    return result;
+  }, [loans, search, dateFrom, dateTo]);
 
   const customerExposure = useMemo(() => {
     const map: Record<string, { name: string; mobile: string; loans: Loan[]; totalDue: number }> = {};
@@ -280,7 +310,7 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
         }
         const r = await fetch(`${API}/${actionLoan.id}/partial-release`, {
           method: "POST", headers: getAuthHeaders(),
-          body: JSON.stringify({ itemIds: releaseItemIds, amount: amt, paymentMode: releaseMode, notes: releaseNotes.trim() || null }),
+          body: JSON.stringify({ itemIds: releaseItemIds, amount: amt, paymentMode: releaseMode, bankAccountId: releaseBankAccountId, notes: releaseNotes.trim() || null }),
         });
         if (!r.ok) throw new Error((await r.json()).error ?? "Failed");
         const result: { loan: Loan; release: PartialRelease; releasedItems: LoanItem[] } = await r.json();
@@ -293,7 +323,7 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
         setLastRelease({ release: result.release, loan: result.loan, releasedItems: result.releasedItems, remainingItems });
         toast({ title: `${releaseItemIds.length} item${releaseItemIds.length !== 1 ? "s" : ""} released. Print voucher below.` });
         setActionLoan(null); setActionType(null);
-        setReleaseItemIds([]); setReleaseAmount("0"); setReleaseMode("cash"); setReleaseNotes("");
+        setReleaseItemIds([]); setReleaseAmount("0"); setReleaseMode("cash"); setReleaseBankAccountId(null); setReleaseNotes("");
         setSubmitting(false);
         return;
       }
@@ -315,7 +345,7 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
           toast({ title: `Cannot waive more than the outstanding interest (${formatCurrency(actionLoan.outstandingInterest)})`, variant: "destructive" });
           setSubmitting(false); return;
         }
-        body = { amount: amt, paymentType: collectType, paymentMode: collectType === "waiver" ? undefined : collectMode, notes: collectNotes.trim() || null };
+        body = { amount: amt, paymentType: collectType, paymentMode: collectType === "waiver" ? undefined : collectMode, bankAccountId: collectType === "waiver" ? undefined : collectBankAccountId, notes: collectNotes.trim() || null };
       } else if (actionType === "renew") {
         url = `${API}/${actionLoan.id}/renew`;
         method = "POST";
@@ -323,6 +353,8 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
         body = {
           interestPaid: isFinite(paid) && paid >= 0 ? paid : 0,
           newDueDate: renewNewDueDate ? new Date(renewNewDueDate).toISOString() : null,
+          paymentMode: renewMode,
+          bankAccountId: renewBankAccountId,
           notes: renewNotes.trim() || null,
         };
       } else if (actionType === "redeem") {
@@ -335,7 +367,7 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
           toast({ title: `Waived interest must be between 0 and ${formatCurrency(actionLoan.outstandingInterest)}`, variant: "destructive" });
           setSubmitting(false); return;
         }
-        body = { status: "redeemed", waiveInterest: waive };
+        body = { status: "redeemed", waiveInterest: waive, paymentMode: redeemMode, bankAccountId: redeemBankAccountId };
       } else if (actionType === "forfeit") {
         const saleVal = parseFloat(goldSaleValue);
         if (!isFinite(saleVal) || saleVal < 0) { toast({ title: "Enter a valid gold sale value (0 or more)", variant: "destructive" }); setSubmitting(false); return; }
@@ -657,10 +689,43 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
                 )}
               </div>
             </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Calendar className="w-4 h-4 text-muted-foreground shrink-0" />
+              <span className="text-xs text-muted-foreground">Pledge Date</span>
+              <Input
+                type="date"
+                value={dateFrom}
+                onChange={e => setDateFrom(e.target.value)}
+                max={dateTo || undefined}
+                className="h-8 text-xs w-auto"
+                data-testid="input-loan-date-from"
+              />
+              <span className="text-xs text-muted-foreground">to</span>
+              <Input
+                type="date"
+                value={dateTo}
+                onChange={e => setDateTo(e.target.value)}
+                min={dateFrom || undefined}
+                className="h-8 text-xs w-auto"
+                data-testid="input-loan-date-to"
+              />
+              {(dateFrom || dateTo) && (
+                <button
+                  type="button"
+                  onClick={() => { setDateFrom(""); setDateTo(""); }}
+                  className="text-xs text-primary hover:underline"
+                  data-testid="button-clear-date-filter"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
           </div>
-          {search && (
+          {(search || dateFrom || dateTo) && (
             <p className="text-xs text-muted-foreground mt-1">
-              {filteredLoans.length} result{filteredLoans.length !== 1 ? "s" : ""} for "{search}"
+              {filteredLoans.length} result{filteredLoans.length !== 1 ? "s" : ""}
+              {search ? ` for "${search}"` : ""}
+              {(dateFrom || dateTo) ? ` pledged ${dateFrom ? `from ${dateFrom}` : ""}${dateFrom && dateTo ? " " : ""}${dateTo ? `to ${dateTo}` : ""}` : ""}
             </p>
           )}
         </CardHeader>
@@ -669,7 +734,7 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
             <div className="text-center py-12 text-muted-foreground text-sm">Loading loans...</div>
           ) : filteredLoans.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground text-sm">
-              {search ? `No loans found for "${search}"` : "No loans in this category."}
+              {search || dateFrom || dateTo ? `No loans found${search ? ` for "${search}"` : ""}${(dateFrom || dateTo) ? " in that date range" : ""}.` : "No loans in this category."}
             </div>
           ) : (
             <div className="divide-y divide-border">
@@ -926,7 +991,7 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
                   {collectType !== "waiver" && (
                     <div>
                       <label className="text-xs text-muted-foreground block mb-1">Payment mode</label>
-                      <Select value={collectMode} onValueChange={setCollectMode}>
+                      <Select value={collectMode} onValueChange={v => { setCollectMode(v); setCollectBankAccountId(null); }}>
                         <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="cash">Cash</SelectItem>
@@ -935,6 +1000,7 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
                           <SelectItem value="cheque">Cheque</SelectItem>
                         </SelectContent>
                       </Select>
+                      <BankAccountSelect paymentMode={collectMode} bankAccountId={collectBankAccountId} onChange={setCollectBankAccountId} className="mt-2" />
                     </div>
                   )}
 
@@ -963,6 +1029,21 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
                       ⚠ Any interest you don't collect now stays outstanding on this loan — it does NOT reset to zero.
                     </p>
                   </div>
+                  {parseFloat(renewInterestPaid) > 0 && (
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Payment mode</label>
+                      <Select value={renewMode} onValueChange={v => { setRenewMode(v); setRenewBankAccountId(null); }}>
+                        <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="cash">Cash</SelectItem>
+                          <SelectItem value="bank">Bank Transfer</SelectItem>
+                          <SelectItem value="upi">UPI</SelectItem>
+                          <SelectItem value="cheque">Cheque</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <BankAccountSelect paymentMode={renewMode} bankAccountId={renewBankAccountId} onChange={setRenewBankAccountId} className="mt-2" />
+                    </div>
+                  )}
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">New due date</label>
                     <Input type="date" value={renewNewDueDate} onChange={e => setRenewNewDueDate(e.target.value)} min={new Date().toISOString().split("T")[0]} className="h-9" />
@@ -1001,6 +1082,21 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
                         placeholder="0"
                         className="h-9"
                       />
+                    </div>
+                  )}
+                  {cashDue > 0 && (
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Payment mode</label>
+                      <Select value={redeemMode} onValueChange={v => { setRedeemMode(v); setRedeemBankAccountId(null); }}>
+                        <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="cash">Cash</SelectItem>
+                          <SelectItem value="bank">Bank Transfer</SelectItem>
+                          <SelectItem value="upi">UPI</SelectItem>
+                          <SelectItem value="cheque">Cheque</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <BankAccountSelect paymentMode={redeemMode} bankAccountId={redeemBankAccountId} onChange={setRedeemBankAccountId} className="mt-2" />
                     </div>
                   )}
                   <label className="flex items-start gap-2 p-2.5 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-900 cursor-pointer">
@@ -1136,7 +1232,7 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
                   {amt > 0 && (
                     <div>
                       <label className="text-xs text-muted-foreground block mb-1">Payment mode</label>
-                      <Select value={releaseMode} onValueChange={setReleaseMode}>
+                      <Select value={releaseMode} onValueChange={v => { setReleaseMode(v); setReleaseBankAccountId(null); }}>
                         <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="cash">Cash</SelectItem>
@@ -1145,6 +1241,7 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
                           <SelectItem value="cheque">Cheque</SelectItem>
                         </SelectContent>
                       </Select>
+                      <BankAccountSelect paymentMode={releaseMode} bankAccountId={releaseBankAccountId} onChange={setReleaseBankAccountId} className="mt-2" />
                     </div>
                   )}
                   <div>

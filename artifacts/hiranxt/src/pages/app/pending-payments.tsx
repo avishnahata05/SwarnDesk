@@ -10,6 +10,7 @@ import { Search, ChevronDown, ChevronUp, CheckCircle2, Clock, IndianRupee, Histo
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
+import { BankAccountSelect } from "@/components/BankAccountSelect";
 
 function getAuthHeaders(): HeadersInit {
   const token = localStorage.getItem("swarndesk_token");
@@ -82,11 +83,11 @@ function usePaymentHistory(saleId: number | null) {
 
 function useRecordPayment() {
   return useMutation({
-    mutationFn: async ({ saleId, amount, paymentMode, notes }: { saleId: number; amount: number; paymentMode: string; notes: string }) => {
+    mutationFn: async ({ saleId, amount, paymentMode, bankAccountId, notes }: { saleId: number; amount: number; paymentMode: string; bankAccountId: number | null; notes: string }) => {
       const r = await fetch(`/api/sales/${saleId}/payments`, {
         method: "POST",
         headers: getAuthHeaders(),
-        body: JSON.stringify({ amount, paymentMode, notes }),
+        body: JSON.stringify({ amount, paymentMode, bankAccountId, notes }),
       });
       if (!r.ok) {
         const err = await r.json().catch(() => ({}));
@@ -106,6 +107,7 @@ export default function PendingPayments() {
   const [payDialogSale, setPayDialogSale] = useState<PendingSale | null>(null);
   const [payAmount, setPayAmount] = useState("");
   const [payMode, setPayMode] = useState("cash");
+  const [payBankAccountId, setPayBankAccountId] = useState<number | null>(null);
   const [payNotes, setPayNotes] = useState("");
   const [returnSale, setReturnSale] = useState<PendingSale | null>(null);
   const [returnNotes, setReturnNotes] = useState("");
@@ -137,6 +139,7 @@ export default function PendingPayments() {
     setPayDialogSale(sale);
     setPayAmount(String(Math.round(sale.balanceAmount)));
     setPayMode("cash");
+    setPayBankAccountId(null);
     setPayNotes("");
   };
 
@@ -150,7 +153,7 @@ export default function PendingPayments() {
       toast({ title: `Amount exceeds balance of ${formatCurrency(payDialogSale.balanceAmount)}`, variant: "destructive" }); return;
     }
 
-    recordPayment.mutate({ saleId: payDialogSale.id, amount, paymentMode: payMode, notes: payNotes }, {
+    recordPayment.mutate({ saleId: payDialogSale.id, amount, paymentMode: payMode, bankAccountId: payBankAccountId, notes: payNotes }, {
       onSuccess: (updated) => {
         queryClient.invalidateQueries({ queryKey: ["pending-sales"] });
         queryClient.invalidateQueries({ queryKey: ["payment-history", payDialogSale.id] });
@@ -381,14 +384,15 @@ export default function PendingPayments() {
 
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1 block">Payment Mode</label>
-                <Select value={payMode} onValueChange={setPayMode}>
+                <Select value={payMode} onValueChange={v => { setPayMode(v); setPayBankAccountId(null); }}>
                   <SelectTrigger data-testid="select-collect-mode"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {["cash", "upi", "card"].map(m => (
+                    {["cash", "upi", "card", "bank"].map(m => (
                       <SelectItem key={m} value={m} className="capitalize">{m.toUpperCase()}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                <BankAccountSelect paymentMode={payMode} bankAccountId={payBankAccountId} onChange={setPayBankAccountId} className="mt-2" />
               </div>
 
               <div>

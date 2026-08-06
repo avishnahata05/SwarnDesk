@@ -25,6 +25,7 @@ export default function LedgersTab() {
   const [view, setView] = useState<ViewKey>("cash");
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [accountId, setAccountId] = useState("");
+  const [bankAccountId, setBankAccountId] = useState("");
   const [partyType, setPartyType] = useState<"customer" | "supplier" | "karigar">("customer");
   const [partyId, setPartyId] = useState("");
   const [parties, setParties] = useState<Party[]>([]);
@@ -63,7 +64,12 @@ export default function LedgersTab() {
         const r = await apiGet<Ledger>(`/reports/cash-book?from=${from}&to=${to}`);
         if (requestIdRef.current === myId) setLedger(r);
       } else if (view === "bank") {
-        const r = await apiGet<Ledger>(`/reports/bank-book?from=${from}&to=${to}`);
+        // A shop with only the one default system bank account keeps using /bank-book
+        // unchanged; picking a specific bank account (once more than one exists) switches
+        // to the generic account ledger so each bank's own opening balance is used.
+        const r = bankAccountId
+          ? await apiGet<Ledger>(`/reports/ledger?accountId=${bankAccountId}&from=${from}&to=${to}`)
+          : await apiGet<Ledger>(`/reports/bank-book?from=${from}&to=${to}`);
         if (requestIdRef.current === myId) setLedger(r);
       } else if (view === "day") {
         const r = await apiGet<DayBookEntry[]>(`/reports/day-book?date=${date}`);
@@ -74,7 +80,7 @@ export default function LedgersTab() {
     } finally {
       if (requestIdRef.current === myId) setLoading(false);
     }
-  }, [view, accountId, partyType, partyId, from, to, date]);
+  }, [view, accountId, bankAccountId, partyType, partyId, from, to, date]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -128,6 +134,17 @@ export default function LedgersTab() {
                 </SelectContent>
               </Select>
             </>
+          )}
+          {view === "bank" && accounts.filter(a => a.accountSubType === "bank" && a.isActive).length > 1 && (
+            <Select value={bankAccountId} onValueChange={setBankAccountId}>
+              <SelectTrigger className="h-8 text-xs w-56"><SelectValue placeholder="All banks (default account)" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Default Bank Account</SelectItem>
+                {accounts.filter(a => a.accountSubType === "bank" && a.isActive).map(a => (
+                  <SelectItem key={a.id} value={String(a.id)}>{a.name}{a.bankName ? ` (${a.bankName})` : ""}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
           {(view === "account" || view === "party" || view === "cash" || view === "bank") && (
             <>

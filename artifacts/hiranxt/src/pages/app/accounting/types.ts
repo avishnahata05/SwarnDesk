@@ -8,6 +8,10 @@ export type Account = {
   openingBalance: number;
   openingBalanceType: "debit" | "credit";
   isActive: boolean;
+  bankName: string | null;
+  bankAccountNumber: string | null;
+  bankIfsc: string | null;
+  isDefaultBank: boolean;
   createdAt: string;
 };
 

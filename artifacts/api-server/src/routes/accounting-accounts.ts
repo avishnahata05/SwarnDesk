@@ -23,6 +23,10 @@ function mapAccount(a: typeof chartOfAccountsTable.$inferSelect) {
     openingBalance: safeFloat(a.openingBalance),
     openingBalanceType: a.openingBalanceType,
     isActive: a.isActive,
+    bankName: a.bankName,
+    bankAccountNumber: a.bankAccountNumber,
+    bankIfsc: a.bankIfsc,
+    isDefaultBank: a.isDefaultBank,
     createdAt: a.createdAt.toISOString(),
   };
 }
@@ -38,6 +42,21 @@ router.get("/", async (req, res) => {
     res.json(accounts.map(mapAccount));
   } catch (err) {
     req.log.error({ err }, "Failed to list accounts");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /banks — active bank-subtype accounts only, for payment-mode pickers across the app
+router.get("/banks", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    await getOrCreateDefaultAccounts(userId);
+    const accounts = await db.select().from(chartOfAccountsTable)
+      .where(and(eq(chartOfAccountsTable.userId, userId), eq(chartOfAccountsTable.accountSubType, "bank"), eq(chartOfAccountsTable.isActive, true)))
+      .orderBy(chartOfAccountsTable.name);
+    res.json(accounts.map(mapAccount));
+  } catch (err) {
+    req.log.error({ err }, "Failed to list bank accounts");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -59,6 +78,12 @@ router.post("/", async (req, res) => {
       .where(and(eq(chartOfAccountsTable.userId, userId), eq(chartOfAccountsTable.code, code)));
     if (existing) return res.status(409).json({ error: `Account code "${code}" already exists` });
 
+    const isDefaultBank = accountSubType === "bank" && !!data.isDefaultBank;
+    if (isDefaultBank) {
+      await db.update(chartOfAccountsTable).set({ isDefaultBank: false })
+        .where(and(eq(chartOfAccountsTable.userId, userId), eq(chartOfAccountsTable.accountSubType, "bank")));
+    }
+
     const [created] = await db.insert(chartOfAccountsTable).values({
       userId,
       code,
@@ -68,6 +93,10 @@ router.post("/", async (req, res) => {
       isSystemAccount: false,
       openingBalance: safeFloat(data.openingBalance, 0).toFixed(2),
       openingBalanceType,
+      bankName: accountSubType === "bank" && data.bankName ? String(data.bankName).trim() || null : null,
+      bankAccountNumber: accountSubType === "bank" && data.bankAccountNumber ? String(data.bankAccountNumber).trim() || null : null,
+      bankIfsc: accountSubType === "bank" && data.bankIfsc ? String(data.bankIfsc).trim().toUpperCase() || null : null,
+      isDefaultBank,
     }).returning();
     res.status(201).json(mapAccount(created));
   } catch (err) {
@@ -76,8 +105,11 @@ router.post("/", async (req, res) => {
   }
 });
 
-// PATCH /:id — rename or (de)activate. System accounts can be renamed but
-// never deactivated/deleted — other modules post to them by id.
+// PATCH /:id — edit an account. System accounts can be renamed and have their
+// opening balance adjusted, but never have their code/type changed (other
+// modules match system accounts by `code` — see getOrCreateDefaultAccounts in
+// accounting-helpers.ts — so re-coding one would make it look "missing" and
+// get silently re-seeded as a duplicate) and never deactivated/deleted.
 router.patch("/:id", async (req, res) => {
   try {
     const userId = req.user!.userId;
@@ -103,6 +135,39 @@ router.patch("/:id", async (req, res) => {
     }
     if (data.openingBalance !== undefined) updates.openingBalance = safeFloat(data.openingBalance, 0).toFixed(2);
     if (data.openingBalanceType !== undefined) updates.openingBalanceType = data.openingBalanceType === "credit" ? "credit" : "debit";
+
+    if (data.code !== undefined) {
+      if (account.isSystemAccount) return res.status(400).json({ error: "System account codes cannot be changed" });
+      const code = String(data.code).trim();
+      if (!code) return res.status(400).json({ error: "Account code cannot be empty" });
+      if (code !== account.code) {
+        const [dupe] = await db.select().from(chartOfAccountsTable)
+          .where(and(eq(chartOfAccountsTable.userId, userId), eq(chartOfAccountsTable.code, code)));
+        if (dupe) return res.status(409).json({ error: `Account code "${code}" already exists` });
+      }
+      updates.code = code;
+    }
+    if (data.accountType !== undefined) {
+      if (account.isSystemAccount) return res.status(400).json({ error: "System account types cannot be changed" });
+      if (!VALID_ACCOUNT_TYPES.has(data.accountType)) return res.status(400).json({ error: "Invalid account type" });
+      updates.accountType = data.accountType;
+    }
+    if (data.accountSubType !== undefined) {
+      if (account.isSystemAccount) return res.status(400).json({ error: "System account types cannot be changed" });
+      updates.accountSubType = VALID_SUB_TYPES.has(data.accountSubType) ? data.accountSubType : "other";
+    }
+    const effectiveSubType = (updates.accountSubType as string | undefined) ?? account.accountSubType;
+    if (data.bankName !== undefined) updates.bankName = data.bankName ? String(data.bankName).trim() || null : null;
+    if (data.bankAccountNumber !== undefined) updates.bankAccountNumber = data.bankAccountNumber ? String(data.bankAccountNumber).trim() || null : null;
+    if (data.bankIfsc !== undefined) updates.bankIfsc = data.bankIfsc ? String(data.bankIfsc).trim().toUpperCase() || null : null;
+    if (data.isDefaultBank !== undefined) {
+      const wantsDefault = !!data.isDefaultBank && effectiveSubType === "bank";
+      if (wantsDefault) {
+        await db.update(chartOfAccountsTable).set({ isDefaultBank: false })
+          .where(and(eq(chartOfAccountsTable.userId, userId), eq(chartOfAccountsTable.accountSubType, "bank")));
+      }
+      updates.isDefaultBank = wantsDefault;
+    }
 
     const [updated] = await db.update(chartOfAccountsTable).set(updates)
       .where(and(eq(chartOfAccountsTable.id, id), eq(chartOfAccountsTable.userId, userId)))

@@ -15,4 +15,6 @@ export interface SupplierInput {
   gstin?: string | null;
   /** @nullable */
   email?: string | null;
+  openingBalance?: number;
+  openingBalanceType?: string;
 }

@@ -23,4 +23,6 @@ export interface CustomerUpdate {
   stateCode?: string | null;
   /** @nullable */
   notes?: string | null;
+  /** opening balance, not touched by transactions — positive = credit (advance), negative = debit (due) */
+  balance?: number;
 }

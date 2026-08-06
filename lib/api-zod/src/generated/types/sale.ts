@@ -18,8 +18,10 @@ export interface Sale {
   discountAmount: number;
   exchangeGoldWeight: number;
   exchangeGoldValue: number;
-  /** cash, upi, card, credit, partial */
+  /** cash, upi, card, bank, credit, partial */
   paymentMode: string;
+  /** @nullable */
+  bankAccountId?: number | null;
   /** paid, partial, pending */
   paymentStatus: string;
   invoiceNumber: string;

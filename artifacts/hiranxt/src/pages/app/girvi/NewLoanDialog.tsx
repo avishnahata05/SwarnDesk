@@ -9,6 +9,7 @@ import { Plus, XCircle, AlertTriangle, Search, UserCheck, UserPlus } from "lucid
 import { API, getAuthHeaders, authHeader } from "./api";
 import type { Rates, Branch, Customer } from "./types";
 import DueDatePresets from "./DueDatePresets";
+import { BankAccountSelect } from "@/components/BankAccountSelect";
 
 type ItemRow = {
   key: string;
@@ -72,6 +73,8 @@ export default function NewLoanDialog({ open, onClose, onCreated, rates, branche
     notes: "",
   });
   const [items, setItems] = useState<ItemRow[]>([makeItem()]);
+  const [disbursementMode, setDisbursementMode] = useState("cash");
+  const [disbursementBankAccountId, setDisbursementBankAccountId] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -170,6 +173,8 @@ export default function NewLoanDialog({ open, onClose, onCreated, rates, branche
       notes: "",
     });
     setItems([makeItem()]);
+    setDisbursementMode("cash");
+    setDisbursementBankAccountId(null);
   };
 
   const handleSubmit = async () => {
@@ -217,6 +222,8 @@ export default function NewLoanDialog({ open, onClose, onCreated, rates, branche
           interestPeriod: form.interestPeriod,
           startDate: startD.toISOString(),
           dueDate: dueD.toISOString(),
+          disbursementMode,
+          disbursementBankAccountId,
           notes: form.notes.trim() || null,
           items: items.map(it => ({
             itemType: it.itemType === "Other" ? it.customItemType.trim() : it.itemType,
@@ -481,6 +488,19 @@ export default function NewLoanDialog({ open, onClose, onCreated, rates, branche
                 <input className={inp} type="number" step="0.1" value={form.penaltyRate} onChange={e => set("penaltyRate", e.target.value)} placeholder="e.g. 1" />
               </div>
               <div><label className={lbl}>Processing Fee (₹) <span className="text-muted-foreground/60">one-time, taxable</span></label><input className={inp} type="number" value={form.processingFee} onChange={e => set("processingFee", e.target.value)} /></div>
+              <div>
+                <label className={lbl}>Disbursed via</label>
+                <Select value={disbursementMode} onValueChange={v => { setDisbursementMode(v); setDisbursementBankAccountId(null); }}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">Cash</SelectItem>
+                    <SelectItem value="bank">Bank Transfer</SelectItem>
+                    <SelectItem value="upi">UPI</SelectItem>
+                    <SelectItem value="cheque">Cheque</SelectItem>
+                  </SelectContent>
+                </Select>
+                <BankAccountSelect paymentMode={disbursementMode} bankAccountId={disbursementBankAccountId} onChange={setDisbursementBankAccountId} className="mt-2" />
+              </div>
               <div>
                 <label className={lbl}>Loan Date * <span className="text-muted-foreground/60">defaults to today — back-date for entries done later</span></label>
                 <input className={inp} type="date" value={form.startDate} max={new Date().toISOString().split("T")[0]} onChange={e => set("startDate", e.target.value)} />
