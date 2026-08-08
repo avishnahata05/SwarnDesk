@@ -539,6 +539,10 @@ export interface CustomOrderInput {
   /** @nullable */
   bookingMetalRate?: number | null;
   advancePaid?: number;
+  /** cash, upi, card, or bank — only relevant when advancePaid is greater than zero */
+  paymentMode?: string;
+  /** @nullable */
+  bankAccountId?: number | null;
   dueDate: string;
   /** @nullable */
   notes?: string | null;
@@ -561,6 +565,10 @@ export interface CustomOrderUpdate {
   /** @nullable */
   bookingMetalRate?: number | null;
   advancePaid?: number;
+  /** cash, upi, card, or bank — used only if advancePaid was raised by this edit */
+  paymentMode?: string;
+  /** @nullable */
+  bankAccountId?: number | null;
   status?: string;
   /** @nullable */
   karigarId?: number | null;

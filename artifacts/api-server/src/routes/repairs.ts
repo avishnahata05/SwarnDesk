@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { repairJobsTable, karigarsTable, repairPaymentTransactionsTable } from "@workspace/db";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { postJournalEntry, getOrCreateDefaultAccounts, cashOrBankKey, safeFloat } from "./accounting-helpers";
+import { postJournalEntry, getOrCreateDefaultAccounts, resolveMoneyAccountId, isValidBankAccount, safeFloat } from "./accounting-helpers";
 
 const router = Router();
 
@@ -14,6 +14,7 @@ function mapTransaction(t: typeof repairPaymentTransactionsTable.$inferSelect) {
     customerName: t.customerName,
     amount: safeFloat(t.amount),
     paymentMode: t.paymentMode,
+    bankAccountId: t.bankAccountId,
     paidAt: t.paidAt.toISOString(),
     notes: t.notes,
   };
@@ -247,6 +248,10 @@ router.post("/:id/payments", async (req, res) => {
     const allowedModes = ["cash", "upi", "card", "bank"];
     const paymentMode = allowedModes.includes(req.body.paymentMode) ? req.body.paymentMode : "cash";
     const notes = req.body.notes ? String(req.body.notes).slice(0, 500) : null;
+    const bankAccountId = req.body.bankAccountId ? parseInt(req.body.bankAccountId) : null;
+    if (bankAccountId && !(await isValidBankAccount(userId, bankAccountId))) {
+      return res.status(400).json({ error: "Invalid bank account" });
+    }
 
     const accts = await getOrCreateDefaultAccounts(userId);
 
@@ -262,6 +267,7 @@ router.post("/:id/payments", async (req, res) => {
         customerName: job.customerName,
         amount: amount.toString(),
         paymentMode,
+        bankAccountId,
         notes,
       });
 
@@ -272,7 +278,7 @@ router.post("/:id/payments", async (req, res) => {
         sourceModule: "repairs",
         sourceId: id,
         lines: [
-          { accountId: accts[cashOrBankKey(paymentMode)], debit: amount, particulars: "Payment received" },
+          { accountId: await resolveMoneyAccountId(userId, paymentMode, bankAccountId, accts), debit: amount, particulars: "Payment received" },
           { accountId: accts.REPAIR_INCOME, credit: amount, particulars: "Repair income" },
         ],
       });

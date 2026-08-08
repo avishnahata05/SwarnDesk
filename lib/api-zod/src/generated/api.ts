@@ -959,6 +959,8 @@ export const CreateCustomOrderBody = zod.object({
   "agreedPrice": zod.number().nullish(),
   "bookingMetalRate": zod.number().nullish(),
   "advancePaid": zod.number().optional(),
+  "paymentMode": zod.string().optional().describe('cash, upi, card, or bank — only relevant when advancePaid is greater than zero'),
+  "bankAccountId": zod.number().nullish(),
   "dueDate": zod.string(),
   "notes": zod.string().nullish()
 })
@@ -1023,6 +1025,8 @@ export const UpdateCustomOrderBody = zod.object({
   "agreedPrice": zod.number().nullish(),
   "bookingMetalRate": zod.number().nullish(),
   "advancePaid": zod.number().optional(),
+  "paymentMode": zod.string().optional().describe('cash, upi, card, or bank — used only if advancePaid was raised by this edit'),
+  "bankAccountId": zod.number().nullish(),
   "status": zod.string().optional(),
   "karigarId": zod.number().nullish(),
   "karigarName": zod.string().nullish(),

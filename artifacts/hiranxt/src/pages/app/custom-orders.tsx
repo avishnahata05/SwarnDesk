@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
 import { InfoTooltip } from "@/components/InfoTooltip";
+import { BankAccountSelect } from "@/components/BankAccountSelect";
 import { useToast } from "@/hooks/use-toast";
 
 // ─── Status config ─────────────────────────────────────────────────────────────
@@ -91,15 +92,17 @@ type CreateForm = {
   customerName: string; customerMobile: string;
   itemType: string; description: string;
   metalType: string; purity: string;
-  targetWeight: string; estimatedPrice: string; agreedPrice: string; bookingMetalRate: string; advancePaid: string;
+  targetWeight: string; estimatedPrice: string; agreedPrice: string; bookingMetalRate: string; advancePaid: string; paymentMode: string;
   orderDate: string; dueDate: string; notes: string;
 };
+
+const PAYMENT_MODES = ["cash", "upi", "card", "bank"];
 
 const EMPTY_CREATE: CreateForm = {
   customerName: "", customerMobile: "",
   itemType: "Ring", description: "",
   metalType: "gold", purity: "22K",
-  targetWeight: "", estimatedPrice: "", agreedPrice: "", bookingMetalRate: "", advancePaid: "",
+  targetWeight: "", estimatedPrice: "", agreedPrice: "", bookingMetalRate: "", advancePaid: "", paymentMode: "cash",
   orderDate: new Date().toISOString().split("T")[0], dueDate: "", notes: "",
 };
 
@@ -217,11 +220,13 @@ export default function CustomOrders() {
   // ── Create dialog ──
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState<CreateForm>(EMPTY_CREATE);
+  const [bankAccountId, setBankAccountId] = useState<number | null>(null);
   const setF = (k: keyof CreateForm, v: string) => setForm(f => ({ ...f, [k]: v }));
 
   // ── Edit dialog ──
   const [editOrder, setEditOrder] = useState<Order | null>(null);
   const [editForm, setEditForm] = useState<CreateForm>(EMPTY_CREATE);
+  const [editBankAccountId, setEditBankAccountId] = useState<number | null>(null);
   const setEF = (k: keyof CreateForm, v: string) => setEditForm(f => ({ ...f, [k]: v }));
 
   // ── Karigar assign dialog ──
@@ -240,6 +245,8 @@ export default function CustomOrders() {
   const [deliverOrder, setDeliverOrder] = useState<Order | null>(null);
   const [finalPrice, setFinalPrice] = useState("");
   const [advanceAtDelivery, setAdvanceAtDelivery] = useState("");
+  const [deliverPaymentMode, setDeliverPaymentMode] = useState("cash");
+  const [deliverBankAccountId, setDeliverBankAccountId] = useState<number | null>(null);
 
   // ── Delete confirmation ──
   const [deleteTarget, setDeleteTarget] = useState<Order | null>(null);
@@ -269,18 +276,21 @@ export default function CustomOrders() {
       agreedPrice: form.agreedPrice ? parseFloat(form.agreedPrice) : null,
       bookingMetalRate: form.bookingMetalRate ? parseFloat(form.bookingMetalRate) : null,
       advancePaid: form.advancePaid ? parseFloat(form.advancePaid) : 0,
+      paymentMode: form.paymentMode,
+      bankAccountId: bankAccountId ?? undefined,
       orderDate: form.orderDate ? new Date(form.orderDate).toISOString() : undefined,
       dueDate: new Date(form.dueDate).toISOString(),
       notes: form.notes.trim() || null,
     };
     createOrder.mutate({ data: createPayload }, {
-      onSuccess: () => { invalidate(); toast({ title: "Custom order created" }); setAddOpen(false); setForm(EMPTY_CREATE); },
+      onSuccess: () => { invalidate(); toast({ title: "Custom order created" }); setAddOpen(false); setForm(EMPTY_CREATE); setBankAccountId(null); },
       onError: () => toast({ title: "Failed to create order", variant: "destructive" }),
     });
   };
 
   const openEdit = (o: Order) => {
     setEditOrder(o);
+    setEditBankAccountId(null);
     setEditForm({
       customerName: o.customerName, customerMobile: o.customerMobile,
       itemType: o.itemType, description: o.description ?? "",
@@ -290,6 +300,7 @@ export default function CustomOrders() {
       agreedPrice: o.agreedPrice != null ? String(o.agreedPrice) : "",
       bookingMetalRate: o.bookingMetalRate != null ? String(o.bookingMetalRate) : "",
       advancePaid: String(o.advancePaid),
+      paymentMode: "cash",
       orderDate: o.orderDate.split("T")[0],
       dueDate: o.dueDate.split("T")[0],
       notes: o.notes ?? "",
@@ -310,6 +321,8 @@ export default function CustomOrders() {
       agreedPrice: editForm.agreedPrice ? parseFloat(editForm.agreedPrice) : null,
       bookingMetalRate: editForm.bookingMetalRate ? parseFloat(editForm.bookingMetalRate) : null,
       advancePaid: editForm.advancePaid ? parseFloat(editForm.advancePaid) : 0,
+      paymentMode: editForm.paymentMode || "cash",
+      bankAccountId: editBankAccountId ?? undefined,
       orderDate: editForm.orderDate ? new Date(editForm.orderDate).toISOString() : undefined,
       dueDate: new Date(editForm.dueDate).toISOString(),
       notes: editForm.notes.trim() || null,
@@ -318,7 +331,7 @@ export default function CustomOrders() {
       id: editOrder.id,
       data: editPayload
     }, {
-      onSuccess: () => { invalidate(); toast({ title: "Order updated" }); setEditOrder(null); },
+      onSuccess: () => { invalidate(); toast({ title: "Order updated" }); setEditOrder(null); setEditBankAccountId(null); },
       onError: () => toast({ title: "Failed to update", variant: "destructive" }),
     });
   };
@@ -393,6 +406,8 @@ export default function CustomOrders() {
     setDeliverOrder(o);
     setFinalPrice(o.agreedPrice != null ? String(o.agreedPrice) : o.estimatedPrice != null ? String(o.estimatedPrice) : "");
     setAdvanceAtDelivery("0");
+    setDeliverPaymentMode("cash");
+    setDeliverBankAccountId(null);
   };
 
   const handleDeliver = () => {
@@ -405,6 +420,8 @@ export default function CustomOrders() {
         deliveryDate: new Date().toISOString(),
         finalPrice: isFinite(fp) ? fp : null,
         advancePaid: deliverOrder.advancePaid + (parseFloat(advanceAtDelivery) || 0),
+        paymentMode: deliverPaymentMode,
+        bankAccountId: deliverBankAccountId ?? undefined,
       }
     }, {
       onSuccess: () => { invalidate(); toast({ title: "Order delivered" }); setDeliverOrder(null); },
@@ -651,6 +668,18 @@ export default function CustomOrders() {
                   <input className={inp} type="number" value={form.bookingMetalRate} onChange={e => setF("bookingMetalRate", e.target.value)} placeholder="e.g. 7250" />
                 </div>
                 <div><label className={lbl}>Advance Collected (₹)</label><input className={inp} type="number" value={form.advancePaid} onChange={e => setF("advancePaid", e.target.value)} placeholder="0" /></div>
+                <div>
+                  <label className={lbl}>Payment Mode</label>
+                  <Select value={form.paymentMode} onValueChange={v => { setF("paymentMode", v); setBankAccountId(null); }}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {PAYMENT_MODES.map(m => <SelectItem key={m} value={m} className="capitalize">{m.toUpperCase()}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="col-span-2">
+                  <BankAccountSelect paymentMode={form.paymentMode} bankAccountId={bankAccountId} onChange={setBankAccountId} />
+                </div>
                 <div><label className={lbl}>Order Date *</label><input className={inp} type="date" value={form.orderDate} onChange={e => setF("orderDate", e.target.value)} /></div>
                 <div><label className={lbl}>Due Date *</label><input className={inp} type="date" value={form.dueDate} min={new Date().toISOString().split("T")[0]} onChange={e => setF("dueDate", e.target.value)} /></div>
                 <div className="col-span-2"><label className={lbl}>Notes</label><input className={inp} value={form.notes} onChange={e => setF("notes", e.target.value)} placeholder="Remarks…" /></div>
@@ -713,7 +742,22 @@ export default function CustomOrders() {
                   <label className={lbl}>Metal Rate at Booking (₹/g)</label>
                   <input className={inp} type="number" value={editForm.bookingMetalRate} onChange={e => setEF("bookingMetalRate", e.target.value)} />
                 </div>
-                <div><label className={lbl}>Advance Paid (₹)</label><input className={inp} type="number" value={editForm.advancePaid} onChange={e => setEF("advancePaid", e.target.value)} /></div>
+                <div>
+                  <label className={lbl}>Advance Paid (₹) <span className="text-muted-foreground/60">increasing this logs a new payment</span></label>
+                  <input className={inp} type="number" value={editForm.advancePaid} onChange={e => setEF("advancePaid", e.target.value)} />
+                </div>
+                <div>
+                  <label className={lbl}>Payment Mode <span className="text-muted-foreground/60">used only if advance increased</span></label>
+                  <Select value={editForm.paymentMode} onValueChange={v => { setEF("paymentMode", v); setEditBankAccountId(null); }}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {PAYMENT_MODES.map(m => <SelectItem key={m} value={m} className="capitalize">{m.toUpperCase()}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="col-span-2">
+                  <BankAccountSelect paymentMode={editForm.paymentMode} bankAccountId={editBankAccountId} onChange={setEditBankAccountId} />
+                </div>
                 <div><label className={lbl}>Order Date *</label><input className={inp} type="date" value={editForm.orderDate} onChange={e => setEF("orderDate", e.target.value)} /></div>
                 <div><label className={lbl}>Due Date *</label><input className={inp} type="date" value={editForm.dueDate} onChange={e => setEF("dueDate", e.target.value)} /></div>
                 <div className="col-span-2"><label className={lbl}>Notes</label><input className={inp} value={editForm.notes} onChange={e => setEF("notes", e.target.value)} /></div>
@@ -837,6 +881,20 @@ export default function CustomOrders() {
               <label className={lbl}>Additional Payment at Delivery (₹)</label>
               <Input type="number" value={advanceAtDelivery} onChange={e => setAdvanceAtDelivery(e.target.value)} placeholder="0" />
             </div>
+            {!!(parseFloat(advanceAtDelivery) > 0) && (
+              <div className="space-y-2">
+                <div>
+                  <label className={lbl}>Payment Mode</label>
+                  <Select value={deliverPaymentMode} onValueChange={v => { setDeliverPaymentMode(v); setDeliverBankAccountId(null); }}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {PAYMENT_MODES.map(m => <SelectItem key={m} value={m} className="capitalize">{m.toUpperCase()}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <BankAccountSelect paymentMode={deliverPaymentMode} bankAccountId={deliverBankAccountId} onChange={setDeliverBankAccountId} />
+              </div>
+            )}
             {finalPrice && (
               <div className="text-xs p-2.5 bg-green-50 border border-green-200 rounded-lg text-green-800 space-y-0.5">
                 <div>Total: <strong>{formatCurrency(parseFloat(finalPrice) || 0)}</strong></div>

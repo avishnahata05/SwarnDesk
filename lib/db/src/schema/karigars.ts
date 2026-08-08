@@ -63,6 +63,7 @@ export const karigarPaymentTransactionsTable = pgTable("karigar_payment_transact
   karigarName: text("karigar_name").notNull(),
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   paymentMode: text("payment_mode").notNull().default("cash"),
+  bankAccountId: integer("bank_account_id"),
   paidAt: timestamp("paid_at").defaultNow().notNull(),
   notes: text("notes"),
 }, (t) => [

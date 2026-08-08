@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { customOrdersTable, customOrderPaymentTransactionsTable } from "@workspace/db";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { postJournalEntry, getOrCreateDefaultAccounts, cashOrBankKey, safeFloat, nextVoucherNumber } from "./accounting-helpers";
+import { postJournalEntry, getOrCreateDefaultAccounts, resolveMoneyAccountId, isValidBankAccount, safeFloat, nextVoucherNumber, type DefaultAccountKey } from "./accounting-helpers";
 
 const router = Router();
 
@@ -14,9 +14,42 @@ function mapTransaction(t: typeof customOrderPaymentTransactionsTable.$inferSele
     customerName: t.customerName,
     amount: safeFloat(t.amount),
     paymentMode: t.paymentMode,
+    bankAccountId: t.bankAccountId,
     paidAt: t.paidAt.toISOString(),
     notes: t.notes,
   };
+}
+
+// Records a payment transaction row and posts the matching journal entry — the single path
+// every money-collecting flow below goes through (initial advance at booking, a top-up via
+// general edit, and the extra collected at delivery), so none of them can silently skip the
+// books the way a bare `advancePaid` field update used to.
+async function postCustomOrderPayment(
+  tx: Tx, userId: number, order: { id: number; orderNumber: string; customerId: number | null; customerName: string },
+  amount: number, paymentMode: string, bankAccountId: number | null, notes: string | null,
+  accts: Record<DefaultAccountKey, number>,
+) {
+  await tx.insert(customOrderPaymentTransactionsTable).values({
+    userId,
+    customOrderId: order.id,
+    customerId: order.customerId,
+    customerName: order.customerName,
+    amount: amount.toString(),
+    paymentMode,
+    bankAccountId,
+    notes,
+  });
+  await postJournalEntry(tx, {
+    userId,
+    voucherType: "receipt",
+    narration: `Payment received for custom order ${order.orderNumber}`,
+    sourceModule: "custom_orders",
+    sourceId: order.id,
+    lines: [
+      { accountId: await resolveMoneyAccountId(userId, paymentMode, bankAccountId, accts), debit: amount, particulars: "Payment received" },
+      { accountId: accts.CUSTOM_ORDER_INCOME, credit: amount, particulars: "Custom order income" },
+    ],
+  });
 }
 
 const VALID_STATUSES = ["pending", "karigar_assigned", "in_progress", "karigar_returned", "ready", "delivered", "cancelled"];
@@ -113,27 +146,44 @@ router.post("/", async (req, res) => {
       const priceCap = d.agreedPrice != null ? safeFloat(d.agreedPrice) : d.estimatedPrice != null ? safeFloat(d.estimatedPrice) : null;
       if (priceCap != null && advancePaid > priceCap) return res.status(400).json({ error: "Advance paid cannot exceed the agreed/estimated price" });
     }
+    const allowedModes = ["cash", "upi", "card", "bank"];
+    const paymentMode = allowedModes.includes(d.paymentMode) ? d.paymentMode : "cash";
+    const bankAccountId = d.bankAccountId ? parseInt(d.bankAccountId) : null;
+    if (advancePaid > 0 && bankAccountId && !(await isValidBankAccount(userId, bankAccountId))) {
+      return res.status(400).json({ error: "Invalid bank account" });
+    }
 
     const orderNumber = await nextVoucherNumber(userId, "custom_order", "CO");
-    const [order] = await db.insert(customOrdersTable).values({
-      userId,
-      orderNumber,
-      customerId: d.customerId ?? null,
-      customerName: d.customerName.trim(),
-      customerMobile: d.customerMobile.trim(),
-      itemType: d.itemType.trim(),
-      description: d.description?.trim() || null,
-      metalType: d.metalType,
-      purity: d.purity,
-      targetWeight: d.targetWeight != null ? String(d.targetWeight) : null,
-      estimatedPrice: d.estimatedPrice != null ? String(d.estimatedPrice) : null,
-      agreedPrice: d.agreedPrice != null ? String(d.agreedPrice) : null,
-      bookingMetalRate: d.bookingMetalRate != null ? String(d.bookingMetalRate) : null,
-      advancePaid: advancePaid.toString(),
-      ...(orderDate ? { orderDate } : {}),
-      dueDate,
-      notes: d.notes?.trim() || null,
-    }).returning();
+    const order = await db.transaction(async (tx) => {
+      const [newOrder] = await tx.insert(customOrdersTable).values({
+        userId,
+        orderNumber,
+        customerId: d.customerId ?? null,
+        customerName: d.customerName.trim(),
+        customerMobile: d.customerMobile.trim(),
+        itemType: d.itemType.trim(),
+        description: d.description?.trim() || null,
+        metalType: d.metalType,
+        purity: d.purity,
+        targetWeight: d.targetWeight != null ? String(d.targetWeight) : null,
+        estimatedPrice: d.estimatedPrice != null ? String(d.estimatedPrice) : null,
+        agreedPrice: d.agreedPrice != null ? String(d.agreedPrice) : null,
+        bookingMetalRate: d.bookingMetalRate != null ? String(d.bookingMetalRate) : null,
+        advancePaid: advancePaid.toString(),
+        ...(orderDate ? { orderDate } : {}),
+        dueDate,
+        notes: d.notes?.trim() || null,
+      }).returning();
+
+      // The advance collected at booking is real money in the till — it must hit the books
+      // the same way a top-up or delivery-time collection does, not just sit in this row.
+      if (advancePaid > 0) {
+        const accts = await getOrCreateDefaultAccounts(userId);
+        await postCustomOrderPayment(tx, userId, newOrder, advancePaid, paymentMode, bankAccountId, "Advance collected at booking", accts);
+      }
+
+      return newOrder;
+    });
     res.status(201).json(mapOrder(order));
   } catch (err) {
     req.log.error({ err }, "Failed to create custom order");
@@ -202,6 +252,15 @@ router.patch("/:id", async (req, res) => {
     if (d.deliveryDate !== undefined) update.deliveryDate = d.deliveryDate ? new Date(d.deliveryDate) : null;
     if (d.finalPrice !== undefined) update.finalPrice = d.finalPrice != null ? String(d.finalPrice) : null;
 
+    // Only relevant when advancePaid is being raised (see below) — a fresh payment mode/bank
+    // account for whatever new money this edit represents.
+    const allowedModes = ["cash", "upi", "card", "bank"];
+    const paymentMode = allowedModes.includes(d.paymentMode) ? d.paymentMode : "cash";
+    const bankAccountId = d.bankAccountId ? parseInt(d.bankAccountId) : null;
+    if (bankAccountId && !(await isValidBankAccount(userId, bankAccountId))) {
+      return res.status(400).json({ error: "Invalid bank account" });
+    }
+
     const orderId = parseInt(req.params.id);
     const updated = await db.transaction(async (tx) => {
       // Locks the row for the duration of this transaction so two concurrent PATCHes to the
@@ -212,6 +271,12 @@ router.patch("/:id", async (req, res) => {
         .for("update");
       if (!existing) return null;
 
+      // A higher advancePaid than before means real new money came in and must hit the
+      // books, exactly like the booking-time advance and the dedicated /payments endpoint —
+      // this is what used to let money collected through this edit form vanish silently.
+      // A lower or unchanged value is treated as a correction (e.g. a typo), not a refund,
+      // and posts nothing — there's no reliable way to tell those two apart from this field alone.
+      let advanceDelta = 0;
       if (d.advancePaid !== undefined) {
         const advancePaid = safeFloat(d.advancePaid, 0);
         if (!isFinite(advancePaid) || advancePaid < 0) throw Object.assign(new Error("Advance paid cannot be negative"), { statusCode: 400 });
@@ -220,6 +285,7 @@ router.patch("/:id", async (req, res) => {
         const priceCap = agreedPrice != null ? safeFloat(agreedPrice) : estimatedPrice != null ? safeFloat(estimatedPrice) : null;
         if (priceCap != null && advancePaid > priceCap) throw Object.assign(new Error("Advance paid cannot exceed the agreed/estimated price"), { statusCode: 400 });
         update.advancePaid = advancePaid.toString();
+        advanceDelta = Math.round((advancePaid - safeFloat(existing.advancePaid)) * 100) / 100;
       }
 
       const newKarigarId = (update.karigarId !== undefined ? update.karigarId : existing.karigarId) as number | null;
@@ -230,6 +296,11 @@ router.patch("/:id", async (req, res) => {
       const [u] = await tx.update(customOrdersTable).set(update)
         .where(and(eq(customOrdersTable.id, orderId), eq(customOrdersTable.userId, userId)))
         .returning();
+
+      if (advanceDelta > 0) {
+        const accts = await getOrCreateDefaultAccounts(userId);
+        await postCustomOrderPayment(tx, userId, u, advanceDelta, paymentMode, bankAccountId, "Advance collected", accts);
+      }
 
       // Keep each karigar's pending-order count in sync with reassignment/status changes
       if (existing.karigarId === newKarigarId) {
@@ -281,6 +352,10 @@ router.post("/:id/payments", async (req, res) => {
     const allowedModes = ["cash", "upi", "card", "bank"];
     const paymentMode = allowedModes.includes(req.body.paymentMode) ? req.body.paymentMode : "cash";
     const notes = req.body.notes ? String(req.body.notes).slice(0, 500) : null;
+    const bankAccountId = req.body.bankAccountId ? parseInt(req.body.bankAccountId) : null;
+    if (bankAccountId && !(await isValidBankAccount(userId, bankAccountId))) {
+      return res.status(400).json({ error: "Invalid bank account" });
+    }
 
     const accts = await getOrCreateDefaultAccounts(userId);
 
@@ -289,33 +364,13 @@ router.post("/:id/payments", async (req, res) => {
         .where(and(eq(customOrdersTable.id, id), eq(customOrdersTable.userId, userId)));
       if (!order) throw Object.assign(new Error("Custom order not found"), { statusCode: 404 });
 
-      await tx.insert(customOrderPaymentTransactionsTable).values({
-        userId,
-        customOrderId: id,
-        customerId: order.customerId,
-        customerName: order.customerName,
-        amount: amount.toString(),
-        paymentMode,
-        notes,
-      });
-
       const newAdvancePaid = safeFloat(order.advancePaid) + amount;
       const [u] = await tx.update(customOrdersTable)
         .set({ advancePaid: newAdvancePaid.toString() })
         .where(and(eq(customOrdersTable.id, id), eq(customOrdersTable.userId, userId)))
         .returning();
 
-      await postJournalEntry(tx, {
-        userId,
-        voucherType: "receipt",
-        narration: `Payment received for custom order ${order.orderNumber}`,
-        sourceModule: "custom_orders",
-        sourceId: id,
-        lines: [
-          { accountId: accts[cashOrBankKey(paymentMode)], debit: amount, particulars: "Payment received" },
-          { accountId: accts.CUSTOM_ORDER_INCOME, credit: amount, particulars: "Custom order income" },
-        ],
-      });
+      await postCustomOrderPayment(tx, userId, order, amount, paymentMode, bankAccountId, notes, accts);
 
       return u;
     });

@@ -132,6 +132,12 @@ router.patch("/:id", async (req, res) => {
         return res.status(400).json({ error: "System accounts cannot be deactivated" });
       }
       updates.isActive = !!data.isActive;
+      // An inactive account being "the default" is meaningless and would leave payment
+      // pickers silently falling back to the system Bank Account with no visible reason —
+      // clear the flag so a new default has to be chosen explicitly.
+      if (data.isActive === false && account.accountSubType === "bank" && account.isDefaultBank) {
+        updates.isDefaultBank = false;
+      }
     }
     if (data.openingBalance !== undefined) updates.openingBalance = safeFloat(data.openingBalance, 0).toFixed(2);
     if (data.openingBalanceType !== undefined) updates.openingBalanceType = data.openingBalanceType === "credit" ? "credit" : "debit";

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { karigarsTable, metalIssuesTable, metalReturnsTable, karigarPaymentTransactionsTable } from "@workspace/db";
 import { eq, and, sql, desc } from "drizzle-orm";
-import { postJournalEntry, getOrCreateDefaultAccounts, cashOrBankKey, safeFloat } from "./accounting-helpers";
+import { postJournalEntry, getOrCreateDefaultAccounts, resolveMoneyAccountId, isValidBankAccount, safeFloat } from "./accounting-helpers";
 
 const router = Router();
 
@@ -13,6 +13,7 @@ function mapTransaction(t: typeof karigarPaymentTransactionsTable.$inferSelect) 
     karigarName: t.karigarName,
     amount: safeFloat(t.amount),
     paymentMode: t.paymentMode,
+    bankAccountId: t.bankAccountId,
     paidAt: t.paidAt.toISOString(),
     notes: t.notes,
   };
@@ -318,6 +319,10 @@ router.post("/:id/payments", async (req, res) => {
     const allowedModes = ["cash", "upi", "card", "bank"];
     const paymentMode = allowedModes.includes(req.body.paymentMode) ? req.body.paymentMode : "cash";
     const notes = req.body.notes ? String(req.body.notes).slice(0, 500) : null;
+    const bankAccountId = req.body.bankAccountId ? parseInt(req.body.bankAccountId) : null;
+    if (bankAccountId && !(await isValidBankAccount(userId, bankAccountId))) {
+      return res.status(400).json({ error: "Invalid bank account" });
+    }
 
     const accts = await getOrCreateDefaultAccounts(userId);
 
@@ -332,6 +337,7 @@ router.post("/:id/payments", async (req, res) => {
         karigarName: k.name,
         amount: amount.toString(),
         paymentMode,
+        bankAccountId,
         notes,
       });
 
@@ -348,7 +354,7 @@ router.post("/:id/payments", async (req, res) => {
         sourceId: id,
         lines: [
           { accountId: accts.KARIGAR_WAGES_EXPENSE, debit: amount, partyType: "karigar", partyId: id, particulars: "Wages paid" },
-          { accountId: accts[cashOrBankKey(paymentMode)], credit: amount, particulars: "Payment made" },
+          { accountId: await resolveMoneyAccountId(userId, paymentMode, bankAccountId, accts), credit: amount, particulars: "Payment made" },
         ],
       });
 
@@ -360,6 +366,33 @@ router.post("/:id/payments", async (req, res) => {
     const e = err as { statusCode?: number; message?: string };
     if (e.statusCode === 404) return res.status(404).json({ error: e.message });
     req.log.error({ err }, "Failed to record karigar payment");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// PATCH /:id/payments/:paymentId — correct notes on a logged wage payment.
+// Neither the amount nor the payment mode/bank account is editable here — they're already
+// posted to the books (amount is reflected in totalWagesPaid, mode/bank decided which
+// account the credit landed in). Changing either after the fact without reversing and
+// reposting the journal entry would leave the payment list disagreeing with the books.
+// Void and re-log the payment instead if it was recorded wrong.
+router.patch("/:id/payments/:paymentId", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const karigarId = parseInt(req.params.id);
+    const paymentId = parseInt(req.params.paymentId);
+    if (isNaN(karigarId) || isNaN(paymentId)) return res.status(400).json({ error: "Invalid id" });
+
+    const updateData: Record<string, unknown> = {};
+    if (req.body.notes !== undefined) updateData.notes = req.body.notes ? String(req.body.notes).slice(0, 500) : null;
+
+    const [updated] = await db.update(karigarPaymentTransactionsTable).set(updateData)
+      .where(and(eq(karigarPaymentTransactionsTable.id, paymentId), eq(karigarPaymentTransactionsTable.karigarId, karigarId), eq(karigarPaymentTransactionsTable.userId, userId)))
+      .returning();
+    if (!updated) return res.status(404).json({ error: "Not found" });
+    res.json(mapTransaction(updated));
+  } catch (err) {
+    req.log.error({ err }, "Failed to update karigar payment");
     res.status(500).json({ error: "Internal server error" });
   }
 });

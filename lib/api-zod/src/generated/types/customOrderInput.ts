@@ -25,6 +25,10 @@ export interface CustomOrderInput {
   /** @nullable */
   bookingMetalRate?: number | null;
   advancePaid?: number;
+  /** cash, upi, card, or bank — only relevant when advancePaid is greater than zero */
+  paymentMode?: string;
+  /** @nullable */
+  bankAccountId?: number | null;
   dueDate: string;
   /** @nullable */
   notes?: string | null;

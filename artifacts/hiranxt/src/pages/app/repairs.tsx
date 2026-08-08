@@ -14,10 +14,19 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Plus, MessageCircle, ArrowRight, Pencil, Trash2, PrinterIcon,
-  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Hammer,
+  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Hammer, Banknote, IndianRupee,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
+import { BankAccountSelect } from "@/components/BankAccountSelect";
+
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem("swarndesk_token");
+  return { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+}
+
+type RepairPayment = { id: number; repairJobId: number; amount: number; paymentMode: string; bankAccountId: number | null; paidAt: string; notes: string | null };
+const PAYMENT_MODES = ["cash", "upi", "card", "bank"];
 
 const STATUSES = ["received", "in_progress", "ready", "delivered"] as const;
 type Status = typeof STATUSES[number];
@@ -182,11 +191,56 @@ export default function Repairs() {
   const [actualCost, setActualCost] = useState("");
   const [statusNotes, setStatusNotes] = useState("");
 
+  // ── Collect payment dialog ──
+  const [paymentsRepair, setPaymentsRepair] = useState<Repair | null>(null);
+  const [payments, setPayments] = useState<RepairPayment[]>([]);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [payAmount, setPayAmount] = useState("");
+  const [payMode, setPayMode] = useState("cash");
+  const [payBankAccountId, setPayBankAccountId] = useState<number | null>(null);
+  const [payNotes, setPayNotes] = useState("");
+  const [payingSubmit, setPayingSubmit] = useState(false);
+
   // ── Collapse columns ──
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [pageHelpOpen, setPageHelpOpen] = useState(false);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: getListRepairsQueryKey() });
+
+  const loadPayments = async (repairId: number) => {
+    setPaymentsLoading(true);
+    try {
+      const r = await fetch(`/api/repairs/${repairId}/payments`, { headers: getAuthHeaders() });
+      if (r.ok) setPayments(await r.json());
+    } catch { /* ignore */ } finally { setPaymentsLoading(false); }
+  };
+
+  const openPayments = (r: Repair) => {
+    setPaymentsRepair(r);
+    setPayAmount(""); setPayMode("cash"); setPayBankAccountId(null); setPayNotes("");
+    loadPayments(r.id);
+  };
+
+  const paymentsTotal = payments.reduce((s, p) => s + p.amount, 0);
+
+  const handleLogPayment = async () => {
+    if (!paymentsRepair) return;
+    const amount = parseFloat(payAmount);
+    if (!isFinite(amount) || amount <= 0) { toast({ title: "Enter a valid amount", variant: "destructive" }); return; }
+    setPayingSubmit(true);
+    try {
+      const r = await fetch(`/api/repairs/${paymentsRepair.id}/payments`, {
+        method: "POST", headers: getAuthHeaders(),
+        body: JSON.stringify({ amount, paymentMode: payMode, bankAccountId: payBankAccountId, notes: payNotes.trim() || null }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to log payment");
+      toast({ title: "Payment logged" });
+      setPayAmount(""); setPayBankAccountId(null); setPayNotes("");
+      loadPayments(paymentsRepair.id);
+    } catch (err) {
+      toast({ title: (err as Error).message || "Failed to log payment", variant: "destructive" });
+    } finally { setPayingSubmit(false); }
+  };
 
   const setF = (k: keyof RepairForm, v: string) => setForm(f => ({ ...f, [k]: v }));
   const setEF = (k: keyof RepairForm, v: string) => setEditForm(f => ({ ...f, [k]: v }));
@@ -409,6 +463,9 @@ export default function Repairs() {
                           <div className="text-xs text-muted-foreground">{repair.customerMobile}</div>
                         </div>
                         <div className="flex items-center gap-0.5 flex-shrink-0">
+                          <button onClick={() => openPayments(repair)} className="p-2 -m-0.5 text-muted-foreground hover:text-primary hover:bg-muted/40 rounded-md transition-colors" title="Collect payment">
+                            <Banknote className="w-3.5 h-3.5" />
+                          </button>
                           <button onClick={() => openEdit(repair)} className="p-2 -m-0.5 text-muted-foreground hover:text-primary hover:bg-muted/40 rounded-md transition-colors" title="Edit">
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
@@ -691,6 +748,69 @@ export default function Repairs() {
       </Dialog>
 
       {/* ── Delete confirmation ── */}
+      {/* Collect payment dialog */}
+      <Dialog open={!!paymentsRepair} onOpenChange={o => !o && setPaymentsRepair(null)}>
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Banknote className="w-4 h-4 text-primary" />Payments — {paymentsRepair?.customerName}</DialogTitle></DialogHeader>
+          {paymentsRepair && (
+            <div className="space-y-4">
+              <div className="p-3 rounded-lg bg-muted/20 border border-border grid grid-cols-3 gap-2 text-xs text-center">
+                <div>
+                  <div className="text-muted-foreground">Cost</div>
+                  <div className="font-semibold">{formatCurrency(paymentsRepair.actualCost ?? paymentsRepair.estimatedCost)}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Collected</div>
+                  <div className="font-semibold text-green-700">{formatCurrency(paymentsTotal)}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Balance Due</div>
+                  <div className="font-semibold text-destructive">{formatCurrency(Math.max(0, (paymentsRepair.actualCost ?? paymentsRepair.estimatedCost) - paymentsTotal))}</div>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-lg border border-border bg-muted/20 space-y-2">
+                <div className="text-xs font-semibold text-muted-foreground">Log a Payment</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input type="number" placeholder="Amount (₹)" value={payAmount} onChange={e => setPayAmount(e.target.value)} data-testid="input-log-repair-payment-amount" />
+                  <Select value={payMode} onValueChange={v => { setPayMode(v); setPayBankAccountId(null); }}>
+                    <SelectTrigger data-testid="select-log-repair-payment-mode"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {PAYMENT_MODES.map(m => <SelectItem key={m} value={m} className="capitalize">{m.toUpperCase()}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <BankAccountSelect paymentMode={payMode} bankAccountId={payBankAccountId} onChange={setPayBankAccountId} />
+                <Input placeholder="Notes (optional)" value={payNotes} onChange={e => setPayNotes(e.target.value)} data-testid="input-log-repair-payment-notes" />
+                <Button size="sm" className="w-full gap-1.5" onClick={handleLogPayment} disabled={payingSubmit} data-testid="button-log-repair-payment">
+                  <IndianRupee className="w-3.5 h-3.5" />{payingSubmit ? "Logging..." : "Log Payment"}
+                </Button>
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold text-muted-foreground mb-2">Payment History</div>
+                {paymentsLoading ? (
+                  <div className="text-xs text-muted-foreground text-center py-4">Loading...</div>
+                ) : payments.length === 0 ? (
+                  <div className="text-xs text-muted-foreground text-center py-4 border border-dashed border-border rounded-lg">No payments logged yet.</div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {payments.map(p => (
+                      <div key={p.id} className="flex items-center justify-between px-3 py-2 rounded-lg border border-border text-xs">
+                        <div>
+                          <div className="font-medium">{formatCurrency(p.amount)} <span className="text-muted-foreground capitalize font-normal">· {p.paymentMode}</span></div>
+                          <div className="text-muted-foreground">{formatDate(p.paidAt)}{p.notes ? ` · ${p.notes}` : ""}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null); }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>

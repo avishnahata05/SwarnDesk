@@ -79,6 +79,7 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
   const [collectType, setCollectType] = useState("auto");
   const [collectMode, setCollectMode] = useState("cash");
   const [collectBankAccountId, setCollectBankAccountId] = useState<number | null>(null);
+  const [collectDate, setCollectDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [collectNotes, setCollectNotes] = useState("");
   const [renewInterestPaid, setRenewInterestPaid] = useState("");
   const [renewNewDueDate, setRenewNewDueDate] = useState("");
@@ -111,7 +112,8 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
   const closeNewLoan = useCallback(() => setShowNewLoan(false), []);
   const closeActionDialog = useCallback(() => {
     setActionLoan(null); setActionType(null); setRedeemConfirmed(false);
-    setCollectBankAccountId(null); setRenewMode("cash"); setRenewBankAccountId(null);
+    setCollectBankAccountId(null); setCollectDate(new Date().toISOString().split("T")[0]);
+    setRenewMode("cash"); setRenewBankAccountId(null);
     setRedeemMode("cash"); setRedeemBankAccountId(null); setReleaseBankAccountId(null);
   }, []);
   useBackClose(showNewLoan, closeNewLoan);
@@ -239,7 +241,8 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
         l.customerName.toLowerCase().includes(q) ||
         l.loanNumber.toLowerCase().includes(q) ||
         l.customerMobile.includes(q) ||
-        (l.itemDescription ?? "").toLowerCase().includes(q)
+        (l.itemDescription ?? "").toLowerCase().includes(q) ||
+        (l.address ?? "").toLowerCase().includes(q)
       );
     }
     // Pledge-date range — compared in the shop's local date (not a raw UTC slice of the
@@ -345,7 +348,13 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
           toast({ title: `Cannot waive more than the outstanding interest (${formatCurrency(actionLoan.outstandingInterest)})`, variant: "destructive" });
           setSubmitting(false); return;
         }
-        body = { amount: amt, paymentType: collectType, paymentMode: collectType === "waiver" ? undefined : collectMode, bankAccountId: collectType === "waiver" ? undefined : collectBankAccountId, notes: collectNotes.trim() || null };
+        body = {
+          amount: amt, paymentType: collectType,
+          paymentMode: collectType === "waiver" ? undefined : collectMode,
+          bankAccountId: collectType === "waiver" ? undefined : collectBankAccountId,
+          paymentDate: collectDate ? new Date(collectDate).toISOString() : undefined,
+          notes: collectNotes.trim() || null,
+        };
       } else if (actionType === "renew") {
         url = `${API}/${actionLoan.id}/renew`;
         method = "POST";
@@ -649,7 +658,7 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
                   ref={searchInputRef}
-                  placeholder="Search by customer, loan number, mobile, or item..."
+                  placeholder="Search by customer, loan number, mobile, item, or village/town/city..."
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   className="pl-9 h-8 text-sm"
@@ -1003,6 +1012,13 @@ export default function LoansTab({ branches, autoOpenNew }: { branches: Branch[]
                       <BankAccountSelect paymentMode={collectMode} bankAccountId={collectBankAccountId} onChange={setCollectBankAccountId} className="mt-2" />
                     </div>
                   )}
+
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">
+                      Date {collectType === "waiver" ? "of waiver" : "collected"} <span className="text-muted-foreground/60">defaults to today — backdate if entering this late</span>
+                    </label>
+                    <Input type="date" value={collectDate} max={new Date().toISOString().split("T")[0]} onChange={e => setCollectDate(e.target.value)} className="h-9" />
+                  </div>
 
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">Notes (optional)</label>

@@ -158,6 +158,31 @@ router.post("/", async (req, res) => {
   }
 });
 
+// PATCH /:id — correct the reason/notes recorded against a transfer. The branch/customer/
+// items moved aren't editable here (that would mean unwinding and reapplying real stock and
+// custody changes) — use the item movement itself and a fresh transfer/return for that.
+router.patch("/:id", async (req, res) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const data = req.body;
+
+    const updateData: Record<string, unknown> = {};
+    if (data.reason !== undefined) updateData.reason = data.reason ? String(data.reason).trim() || null : null;
+    if (data.notes !== undefined) updateData.notes = data.notes ? String(data.notes).trim() || null : null;
+
+    const [updated] = await db.update(girviTransfersTable).set(updateData)
+      .where(and(eq(girviTransfersTable.id, id), eq(girviTransfersTable.userId, userId)))
+      .returning();
+    if (!updated) return res.status(404).json({ error: "Not found" });
+    res.json(mapTransfer(updated));
+  } catch (err) {
+    req.log.error({ err }, "Failed to update girvi transfer");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Items included in a specific transfer (for printing the transfer voucher).
 router.get("/:id/items", async (req, res) => {
   try {

@@ -3,10 +3,11 @@ import { useSearch as useQueryString, useLocation } from "wouter";
 import { useBackClose } from "@/hooks/use-back-close";
 import { formatCurrency } from "@/lib/utils";
 import {
-  useListCustomers, useCreateCustomer, useGetUpcomingOccasions,
+  useListCustomers, useCreateCustomer, useUpdateCustomer, useGetUpcomingOccasions,
   useGetCustomer, useGetSettings,
   getListCustomersQueryKey, getGetUpcomingOccasionsQueryKey
 } from "@workspace/api-client-react";
+import type { Customer } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { useForm } from "react-hook-form";
 import {
   Plus, Search, Gift, MessageCircle, Star, Send, CheckSquare, Square, Users,
-  Eye, ShoppingBag, Wrench, X, Banknote, History,
+  Eye, ShoppingBag, Wrench, X, Banknote, History, Pencil,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
@@ -469,12 +470,63 @@ export default function Customers() {
   const { data: occasions } = useGetUpcomingOccasions();
   const { data: settings } = useGetSettings();
   const createCustomer = useCreateCustomer();
+  const updateCustomer = useUpdateCustomer();
   const loyaltyEnabled = (settings as unknown as { loyaltyPointsEnabled?: boolean } | undefined)?.loyaltyPointsEnabled ?? true;
 
   const { register, handleSubmit, reset, watch, setValue } = useForm<CustomerForm>({
     defaultValues: { openingBalance: "0", openingBalanceType: "debit" },
   });
   const openingBalanceTypeWatch = watch("openingBalanceType") ?? "debit";
+
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const { register: registerEdit, handleSubmit: handleEditSubmit, reset: resetEdit, watch: watchEdit, setValue: setEditValue } = useForm<CustomerForm>();
+  const editOpeningBalanceTypeWatch = watchEdit("openingBalanceType") ?? "debit";
+
+  const openEdit = (c: Customer) => {
+    setEditingCustomer(c);
+    resetEdit({
+      name: c.name,
+      mobile: c.mobile,
+      email: c.email ?? "",
+      address: c.address ?? "",
+      birthday: c.birthday ?? "",
+      anniversary: c.anniversary ?? "",
+      gstin: c.gstin ?? "",
+      pan: c.pan ?? "",
+      stateCode: c.stateCode ?? "",
+      notes: c.notes ?? "",
+      openingBalance: String(Math.abs(c.balance)),
+      openingBalanceType: c.balance >= 0 ? "credit" : "debit",
+    });
+  };
+
+  const onEditSubmit = (data: CustomerForm) => {
+    if (!editingCustomer) return;
+    const mag = parseFloat(data.openingBalance) || 0;
+    updateCustomer.mutate({
+      id: editingCustomer.id,
+      data: {
+        name: data.name,
+        mobile: data.mobile,
+        email: data.email || null,
+        address: data.address || null,
+        birthday: data.birthday || null,
+        anniversary: data.anniversary || null,
+        gstin: data.gstin || null,
+        pan: data.pan ? data.pan.trim().toUpperCase() || null : null,
+        stateCode: data.stateCode || null,
+        notes: data.notes || null,
+        balance: data.openingBalanceType === "credit" ? mag : -mag,
+      }
+    }, {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListCustomersQueryKey() });
+        toast({ title: "Customer updated" });
+        setEditingCustomer(null);
+      },
+      onError: () => toast({ title: "Failed to update customer", variant: "destructive" }),
+    });
+  };
 
   const onSubmit = (data: CustomerForm) => {
     const mag = parseFloat(data.openingBalance) || 0;
@@ -726,6 +778,14 @@ export default function Customers() {
                         <Eye className="w-4 h-4" />
                       </button>
                       <button
+                        onClick={() => openEdit(c)}
+                        className="text-muted-foreground hover:text-primary transition-colors"
+                        title="Edit Customer"
+                        data-testid={`button-edit-${c.id}`}
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
                         onClick={() => sendWhatsApp(c.mobile, c.name)}
                         className="text-green-600 hover:text-green-700"
                         title="Send WhatsApp"
@@ -905,6 +965,84 @@ export default function Customers() {
               <Button type="button" variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
               <Button type="submit" disabled={createCustomer.isPending} data-testid="button-submit-customer">
                 {createCustomer.isPending ? "Adding..." : "Add Customer"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit dialog */}
+      <Dialog open={!!editingCustomer} onOpenChange={v => !v && setEditingCustomer(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Edit Customer</DialogTitle></DialogHeader>
+          <form onSubmit={handleEditSubmit(onEditSubmit)} className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className="text-xs text-muted-foreground mb-1 block">Full Name *</label>
+                <Input {...registerEdit("name", { required: true })} placeholder="Ramesh Sharma" data-testid="input-edit-customer-name" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Mobile *</label>
+                <Input {...registerEdit("mobile", { required: true })} placeholder="+91 98765 43210" data-testid="input-edit-customer-mobile" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Email</label>
+                <Input {...registerEdit("email")} placeholder="email@example.com" data-testid="input-edit-customer-email" />
+              </div>
+              <div className="col-span-2">
+                <label className="text-xs text-muted-foreground mb-1 block">Address</label>
+                <Input {...registerEdit("address")} placeholder="123 Main St, Mumbai" data-testid="input-edit-customer-address" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Birthday (Month-Day, e.g. 15 June = 06-15)</label>
+                <Input {...registerEdit("birthday")} placeholder="MM-DD, e.g. 06-15" data-testid="input-edit-customer-birthday" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Anniversary (Month-Day, e.g. 20 Nov = 11-20)</label>
+                <Input {...registerEdit("anniversary")} placeholder="MM-DD, e.g. 11-20" data-testid="input-edit-customer-anniversary" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">GSTIN</label>
+                <Input {...registerEdit("gstin")} placeholder="27AAACR5055K1ZS" data-testid="input-edit-customer-gstin" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">GST State Code</label>
+                <Input {...registerEdit("stateCode")} placeholder="27" maxLength={2} data-testid="input-edit-customer-state-code" />
+                <p className="text-[10px] text-muted-foreground mt-1">For B2B invoices — decides CGST+SGST vs IGST</p>
+              </div>
+              <div>
+                <Label className="flex items-center gap-1">
+                  PAN
+                  <InfoTooltip text="Required on file for any cash sale of ₹2 lakh or more to this customer (Sec. 269ST) — collect it ahead of time so you're not scrambling at billing." />
+                </Label>
+                <Input {...registerEdit("pan")} placeholder="ABCDE1234F" maxLength={10} className="uppercase" data-testid="input-edit-customer-pan" />
+              </div>
+              <div>
+                <Label className="flex items-center gap-1">
+                  Balance
+                  <InfoTooltip text="This customer's current running balance — correct it here if it's ever out of sync (e.g. an opening-balance mistake). Not touched automatically by future sales/payments." />
+                </Label>
+                <Input type="number" {...registerEdit("openingBalance")} placeholder="0" />
+              </div>
+              <div>
+                <Label>Balance Side</Label>
+                <Select value={editOpeningBalanceTypeWatch} onValueChange={v => setEditValue("openingBalanceType", v as "debit" | "credit")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="debit">Due (they owe you)</SelectItem>
+                    <SelectItem value="credit">Advance (you owe them)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="col-span-2">
+                <label className="text-xs text-muted-foreground mb-1 block">Notes</label>
+                <Input {...registerEdit("notes")} data-testid="input-edit-customer-notes" />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditingCustomer(null)}>Cancel</Button>
+              <Button type="submit" disabled={updateCustomer.isPending} data-testid="button-submit-edit-customer">
+                {updateCustomer.isPending ? "Saving..." : "Save Changes"}
               </Button>
             </DialogFooter>
           </form>

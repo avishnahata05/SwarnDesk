@@ -215,6 +215,54 @@ router.patch("/users/:id/plan", async (req, res) => {
   }
 });
 
+// Edits a tenant's basic account details. Email is the login credential, so changes here
+// are logged with the old value in the activity log for accountability, and it's checked
+// for both valid format and uniqueness before being written.
+router.patch("/users/:id/details", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, id)).limit(1);
+    if (!user || user.role === "admin") return res.status(404).json({ error: "User not found" });
+
+    const updateData: Record<string, unknown> = {};
+    const changes: string[] = [];
+
+    if (req.body.name !== undefined) {
+      const name = String(req.body.name).trim();
+      if (!name) return res.status(400).json({ error: "Name cannot be empty" });
+      if (name !== user.name) { updateData.name = name; changes.push(`name: "${user.name}" → "${name}"`); }
+    }
+    if (req.body.shopName !== undefined) {
+      const shopName = String(req.body.shopName).trim();
+      if (!shopName) return res.status(400).json({ error: "Shop name cannot be empty" });
+      if (shopName !== user.shopName) { updateData.shopName = shopName; changes.push(`shop: "${user.shopName}" → "${shopName}"`); }
+    }
+    if (req.body.mobile !== undefined) {
+      const mobile = req.body.mobile ? String(req.body.mobile).trim() : null;
+      if (mobile !== user.mobile) { updateData.mobile = mobile; changes.push(`mobile: "${user.mobile ?? "—"}" → "${mobile ?? "—"}"`); }
+    }
+    if (req.body.email !== undefined) {
+      const email = String(req.body.email).trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: "Invalid email address" });
+      if (email !== user.email) {
+        const [existing] = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.email, email)).limit(1);
+        if (existing) return res.status(409).json({ error: "Another account already uses this email" });
+        updateData.email = email;
+        changes.push(`email: "${user.email}" → "${email}"`);
+      }
+    }
+
+    if (Object.keys(updateData).length === 0) return res.json({ success: true });
+
+    await db.update(usersTable).set(updateData).where(eq(usersTable.id, id));
+    await logAdminAction(req, "edit_details", id, `${user.name} (${user.email})`, changes.join("; "));
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "Failed to update user details");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Resets a user's password. Passwords are one-way bcrypt hashes — there is no way to
 // "view" an existing one, so this either accepts an admin-chosen password or generates a
 // random temporary one, and returns it exactly once so the admin can relay it to the user.

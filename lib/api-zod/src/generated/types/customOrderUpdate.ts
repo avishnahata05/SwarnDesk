@@ -23,6 +23,10 @@ export interface CustomOrderUpdate {
   /** @nullable */
   bookingMetalRate?: number | null;
   advancePaid?: number;
+  /** cash, upi, card, or bank — used only if advancePaid was raised by this edit */
+  paymentMode?: string;
+  /** @nullable */
+  bankAccountId?: number | null;
   status?: string;
   /** @nullable */
   karigarId?: number | null;

@@ -1021,6 +1021,13 @@ router.post("/:id/collect-interest", async (req, res) => {
       return res.status(400).json({ error: "Invalid bank account" });
     }
     const now = new Date();
+    // When the cash was actually collected — defaults to now, but settable so a payment
+    // received a day or two ago (and only now being entered into the system) is recorded
+    // and posted on the right date instead of today's. Outstanding-interest validation
+    // above still uses the real "now", since that's genuinely what's owed as of this moment.
+    const paymentDate = req.body.paymentDate ? new Date(req.body.paymentDate) : now;
+    if (isNaN(paymentDate.getTime())) return res.status(400).json({ error: "Invalid payment date" });
+    if (paymentDate.getTime() > now.getTime() + 86400000) return res.status(400).json({ error: "Payment date cannot be in the future" });
 
     const settings = await getOrCreateGirviSettings(userId);
     const mappedLoan = mapLoan(loan, now, settings.overdueGraceDays);
@@ -1049,8 +1056,9 @@ router.post("/:id/collect-interest", async (req, res) => {
       const loanUpdates: Record<string, unknown> = {
         totalInterestCollected: newTotalInterestCollected.toFixed(2),
         principalPaid: newPrincipalPaid.toFixed(2),
-        // Reset interest clock so future interest accrues on reduced principal
-        startDate: now,
+        // Reset interest clock so future interest accrues on reduced principal, from
+        // whenever the money actually changed hands rather than today's data-entry time.
+        startDate: paymentDate,
         // Baseline = new totalInterestCollected so outstanding correctly starts at 0 post-reset
         interestBaseline: newTotalInterestCollected.toFixed(2),
       };
@@ -1058,9 +1066,9 @@ router.post("/:id/collect-interest", async (req, res) => {
       let returnVoucherNumber: string | null = null;
       if (remainingPrincipal <= 0) {
         // Loan fully repaid
-        returnVoucherNumber = await nextGirviNumber(userId, "return", settings.returnPrefix, now);
+        returnVoucherNumber = await nextGirviNumber(userId, "return", settings.returnPrefix, paymentDate);
         loanUpdates.status = "redeemed";
-        loanUpdates.redeemedDate = now;
+        loanUpdates.redeemedDate = paymentDate;
         loanUpdates.redeemedAmount = amt.toFixed(2);
         loanUpdates.returnVoucherNumber = returnVoucherNumber;
       }
@@ -1076,7 +1084,7 @@ router.post("/:id/collect-interest", async (req, res) => {
             paymentMode: resolvedMode,
             bankAccountId,
             referenceNumber: resolvedRef,
-            paymentDate: now,
+            paymentDate,
             notes: resolvedNotes ? `${resolvedNotes} [auto: interest portion]` : "Auto: interest portion",
           });
         }
@@ -1088,11 +1096,11 @@ router.post("/:id/collect-interest", async (req, res) => {
           paymentMode: resolvedMode,
           bankAccountId,
           referenceNumber: resolvedRef,
-          paymentDate: now,
+          paymentDate,
           notes: resolvedNotes ? `${resolvedNotes} [auto: principal portion]` : "Auto: principal portion",
         });
         if (remainingPrincipal <= 0) {
-          await closeOutLoanItems(tx, userId, id, "returned", now);
+          await closeOutLoanItems(tx, userId, id, "returned", paymentDate);
         }
         const [u] = await tx.update(girviLoansTable)
           .set(loanUpdates as Partial<typeof girviLoansTable.$inferInsert>)
@@ -1101,7 +1109,7 @@ router.post("/:id/collect-interest", async (req, res) => {
 
         await postJournalEntry(tx, {
           userId,
-          voucherDate: now,
+          voucherDate: paymentDate,
           voucherType: "receipt",
           narration: `Payment collected on girvi loan ${loan.loanNumber}`,
           sourceModule: "girvi",
@@ -1131,7 +1139,7 @@ router.post("/:id/collect-interest", async (req, res) => {
           paymentMode: resolvedMode,
           bankAccountId,
           referenceNumber: resolvedRef,
-          paymentDate: now,
+          paymentDate,
           notes: resolvedNotes,
         });
         const [u] = await tx.update(girviLoansTable)
@@ -1147,7 +1155,7 @@ router.post("/:id/collect-interest", async (req, res) => {
         if (resolvedType !== "waiver") {
           await postJournalEntry(tx, {
             userId,
-            voucherDate: now,
+            voucherDate: paymentDate,
             voucherType: "receipt",
             narration: `${resolvedType === "penalty" ? "Penalty" : "Interest"} collected on girvi loan ${loan.loanNumber}`,
             sourceModule: "girvi",

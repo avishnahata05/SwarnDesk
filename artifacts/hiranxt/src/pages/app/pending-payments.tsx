@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Search, ChevronDown, ChevronUp, CheckCircle2, Clock, IndianRupee, History, Undo2 } from "lucide-react";
+import { Search, ChevronDown, ChevronUp, CheckCircle2, Clock, IndianRupee, History, Undo2, Pencil } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
@@ -29,6 +29,7 @@ interface PendingSale {
   paymentStatus: string;
   paymentMode: string;
   status?: string;
+  notes?: string | null;
 }
 
 interface PaymentTxn {
@@ -98,6 +99,27 @@ function useRecordPayment() {
   });
 }
 
+// Editable fields are deliberately limited to payment mode and notes — the amounts/items on
+// a completed sale aren't editable here (that's what Return exists for), and paymentStatus
+// is derived from paidAmount so it isn't exposed either, to avoid it drifting out of sync
+// with the actual balance.
+function useUpdateSale() {
+  return useMutation({
+    mutationFn: async ({ saleId, paymentMode, notes }: { saleId: number; paymentMode: string; notes: string }) => {
+      const r = await fetch(`/api/sales/${saleId}`, {
+        method: "PATCH",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ paymentMode, notes }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.error ?? "Failed to update sale");
+      }
+      return r.json() as Promise<PendingSale>;
+    },
+  });
+}
+
 export default function PendingPayments() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -112,6 +134,9 @@ export default function PendingPayments() {
   const [returnSale, setReturnSale] = useState<PendingSale | null>(null);
   const [returnNotes, setReturnNotes] = useState("");
   const [pageHelpOpen, setPageHelpOpen] = useState(false);
+  const [editSale, setEditSale] = useState<PendingSale | null>(null);
+  const [editPaymentMode, setEditPaymentMode] = useState("cash");
+  const [editNotes, setEditNotes] = useState("");
 
   const { data: pendingSales = [], isLoading: pendingLoading } = usePendingSales(search);
   const { data: allSales = [], isLoading: allLoading } = useAllSales(search, view === "all");
@@ -119,6 +144,26 @@ export default function PendingPayments() {
   const isLoading = view === "pending" ? pendingLoading : allLoading;
   const { data: history = [] } = usePaymentHistory(expandedId);
   const recordPayment = useRecordPayment();
+  const updateSale = useUpdateSale();
+
+  const openEditSale = (sale: PendingSale) => {
+    setEditSale(sale);
+    setEditPaymentMode(sale.paymentMode);
+    setEditNotes(sale.notes ?? "");
+  };
+
+  const handleUpdateSale = () => {
+    if (!editSale) return;
+    updateSale.mutate({ saleId: editSale.id, paymentMode: editPaymentMode, notes: editNotes }, {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ["pending-sales"] });
+        queryClient.invalidateQueries({ queryKey: ["all-sales"] });
+        setEditSale(null);
+        toast({ title: "Sale updated" });
+      },
+      onError: (e: Error) => toast({ title: e.message, variant: "destructive" }),
+    });
+  };
 
   const returnSaleMutation = useMutation({
     mutationFn: async ({ saleId, notes }: { saleId: number; notes: string }) => {
@@ -285,10 +330,16 @@ export default function PendingPayments() {
                 {sale.status === "returned" ? (
                   <Badge variant="secondary" className="text-[10px]">Returned</Badge>
                 ) : (
-                  <Button size="sm" variant="outline" className="gap-1.5 text-red-600" onClick={() => { setReturnSale(sale); setReturnNotes(""); }} data-testid={`button-return-${sale.id}`}>
-                    <Undo2 className="w-3.5 h-3.5" />
-                    Return
-                  </Button>
+                  <>
+                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openEditSale(sale)} data-testid={`button-edit-sale-${sale.id}`}>
+                      <Pencil className="w-3.5 h-3.5" />
+                      Edit
+                    </Button>
+                    <Button size="sm" variant="outline" className="gap-1.5 text-red-600" onClick={() => { setReturnSale(sale); setReturnNotes(""); }} data-testid={`button-return-${sale.id}`}>
+                      <Undo2 className="w-3.5 h-3.5" />
+                      Return
+                    </Button>
+                  </>
                 )}
                 <button
                   className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors ml-auto"
@@ -448,6 +499,50 @@ export default function PendingPayments() {
               data-testid="button-confirm-return"
             >
               {returnSaleMutation.isPending ? "Returning..." : "Confirm Return"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Sale Dialog */}
+      <Dialog open={!!editSale} onOpenChange={open => { if (!open) setEditSale(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="w-4 h-4 text-primary" />
+              Edit Sale
+            </DialogTitle>
+          </DialogHeader>
+          {editSale && (
+            <div className="space-y-4">
+              <div className="p-3 rounded-lg bg-muted/30 border border-border text-sm space-y-1">
+                <div className="font-semibold">{editSale.customerName}</div>
+                <div className="text-xs text-muted-foreground font-mono">{editSale.invoiceNumber}</div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Amounts and items on a completed sale can't be changed here — use Return if the sale itself needs to be undone. Only payment mode and notes can be corrected.
+              </p>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Payment Mode</label>
+                <Select value={editPaymentMode} onValueChange={setEditPaymentMode}>
+                  <SelectTrigger data-testid="select-edit-sale-mode"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["cash", "upi", "card", "credit", "partial"].map(m => (
+                      <SelectItem key={m} value={m} className="capitalize">{m.toUpperCase()}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Notes</label>
+                <Input value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Optional notes" data-testid="input-edit-sale-notes" />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditSale(null)}>Cancel</Button>
+            <Button onClick={handleUpdateSale} disabled={updateSale.isPending} data-testid="button-confirm-edit-sale">
+              {updateSale.isPending ? "Saving..." : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>

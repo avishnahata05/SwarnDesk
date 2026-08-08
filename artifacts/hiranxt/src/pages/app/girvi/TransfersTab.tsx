@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ArrowLeftRight, RotateCcw, Search, Printer } from "lucide-react";
+import { ArrowLeftRight, RotateCcw, Search, Printer, Pencil } from "lucide-react";
 import { API, getAuthHeaders, authHeader } from "./api";
 import type { Transfer, Branch, Loan, LoanItem, GirviSettings } from "./types";
 import { openTransferVoucher } from "./vouchers";
@@ -26,6 +26,10 @@ export default function TransfersTab({ branches }: { branches: Branch[] }) {
   const [returnNotes, setReturnNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [pageHelpOpen, setPageHelpOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<Transfer | null>(null);
+  const [editReason, setEditReason] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const shopName = appSettings?.businessName ?? "SwarnDesk Jewellers";
   const shopAddress = appSettings?.address ?? "";
@@ -78,6 +82,29 @@ export default function TransfersTab({ branches }: { branches: Branch[] }) {
     } catch (err) {
       toast({ title: (err as Error).message || "Failed", variant: "destructive" });
     } finally { setSubmitting(false); }
+  };
+
+  const openEdit = (t: Transfer) => {
+    setEditTarget(t);
+    setEditReason(t.reason ?? "");
+    setEditNotes(t.notes ?? "");
+  };
+
+  const handleEditSave = async () => {
+    if (!editTarget) return;
+    setSavingEdit(true);
+    try {
+      const r = await fetch(`${API}/transfers/${editTarget.id}`, {
+        method: "PATCH", headers: getAuthHeaders(),
+        body: JSON.stringify({ reason: editReason.trim() || null, notes: editNotes.trim() || null }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Failed");
+      toast({ title: "Transfer updated" });
+      setEditTarget(null);
+      load();
+    } catch (err) {
+      toast({ title: (err as Error).message || "Failed", variant: "destructive" });
+    } finally { setSavingEdit(false); }
   };
 
   const printVoucher = async (t: Transfer) => {
@@ -142,6 +169,9 @@ export default function TransfersTab({ branches }: { branches: Branch[] }) {
                       )}
                     </div>
                     <div className="flex gap-2 flex-shrink-0">
+                      <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openEdit(t)}>
+                        <Pencil className="w-3.5 h-3.5" />Edit
+                      </Button>
                       <Button size="sm" variant="outline" className="gap-1.5" onClick={() => printVoucher(t)}>
                         <Printer className="w-3.5 h-3.5" />Voucher
                       </Button>
@@ -175,6 +205,35 @@ export default function TransfersTab({ branches }: { branches: Branch[] }) {
               <div className="flex gap-2 justify-end">
                 <Button variant="outline" size="sm" onClick={() => setReturnTarget(null)}>Cancel</Button>
                 <Button size="sm" onClick={handleReturn} disabled={submitting}>{submitting ? "Processing..." : "Confirm Return"}</Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editTarget} onOpenChange={v => { if (!v) setEditTarget(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Pencil className="w-4 h-4 text-primary" />Edit Transfer</DialogTitle></DialogHeader>
+          {editTarget && (
+            <div className="space-y-3">
+              <div className="p-3 rounded-lg bg-muted/30 border border-border text-xs">
+                <div className="font-mono font-semibold">{editTarget.transferNumber}</div>
+                <div className="text-muted-foreground mt-1">{branchName(editTarget.fromBranchId)} → {editTarget.toBranchId ? branchName(editTarget.toBranchId) : "—"}</div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Only the reason and notes can be corrected here — the branch/customer and items moved reflect what actually happened and aren't editable after the fact.
+              </p>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Reason</label>
+                <Input value={editReason} onChange={e => setEditReason(e.target.value)} placeholder="e.g. Customer request" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Notes</label>
+                <Textarea value={editNotes} onChange={e => setEditNotes(e.target.value)} rows={2} className="text-sm resize-y" placeholder="Optional" />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" size="sm" onClick={() => setEditTarget(null)}>Cancel</Button>
+                <Button size="sm" onClick={handleEditSave} disabled={savingEdit}>{savingEdit ? "Saving..." : "Save Changes"}</Button>
               </div>
             </div>
           )}

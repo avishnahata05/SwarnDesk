@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import {
   Users, TrendingUp, IndianRupee, Clock, AlertTriangle, CheckCircle2,
   Search, RefreshCw, Trash2, CalendarClock, ShieldOff, ShieldCheck,
-  XCircle, BarChart3, MessageCircle, StickyNote, History, Download, Key, Copy, Check,
+  XCircle, BarChart3, MessageCircle, StickyNote, History, Download, Key, Copy, Check, Pencil,
 } from "lucide-react";
 
 interface AdminUser {
@@ -193,6 +193,15 @@ export default function AdminPage() {
   const [resetError, setResetError] = useState("");
   const [resetResult, setResetResult] = useState<string | null>(null);
   const [resetCopied, setResetCopied] = useState(false);
+
+  // Edit user account details dialog
+  const [editTarget, setEditTarget] = useState<AdminUser | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editShopName, setEditShopName] = useState("");
+  const [editMobile, setEditMobile] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState("");
 
   // Admin's own "change my password" dialog
   const [changePwOpen, setChangePwOpen] = useState(false);
@@ -405,6 +414,37 @@ export default function AdminPage() {
       setResetError(err instanceof Error ? err.message : "Failed to reset password");
     } finally {
       setResetSaving(false);
+    }
+  };
+
+  const openEditDetails = (u: AdminUser) => {
+    setEditTarget(u);
+    setEditName(u.name);
+    setEditShopName(u.shopName);
+    setEditMobile(u.mobile ?? "");
+    setEditEmail(u.email);
+    setEditError("");
+  };
+
+  const handleEditSave = async () => {
+    if (!editTarget) return;
+    setEditError("");
+    if (!editName.trim() || !editShopName.trim() || !editEmail.trim()) {
+      setEditError("Name, shop name, and email are required");
+      return;
+    }
+    setEditSaving(true);
+    try {
+      await apiCall(`/api/admin/users/${editTarget.id}/details`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: editName.trim(), shopName: editShopName.trim(), mobile: editMobile.trim() || null, email: editEmail.trim() }),
+      });
+      setEditTarget(null);
+      fetchAll();
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Failed to save changes");
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -821,6 +861,14 @@ export default function AdminPage() {
                             <td className="px-4 py-3 text-muted-foreground text-xs hidden md:table-cell">{fmt(u.createdAt)}</td>
                             <td className="px-4 py-3">
                               <div className="flex gap-1 flex-wrap">
+                                <button
+                                  onClick={() => openEditDetails(u)}
+                                  className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-border text-muted-foreground hover:bg-muted/40 hover:text-foreground transition-colors"
+                                  title="Edit name, shop name, mobile, or email"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                  Edit
+                                </button>
                                 <button
                                   onClick={() => openNotes(u)}
                                   className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-border text-muted-foreground hover:bg-muted/40 hover:text-foreground transition-colors"
@@ -1288,6 +1336,52 @@ export default function AdminPage() {
                 </Button>
               </>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit user account details dialog ─────────────────────────────── */}
+      <Dialog open={!!editTarget} onOpenChange={v => { if (!v) { setEditTarget(null); setEditError(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="w-5 h-5 text-primary" />
+              Edit Account Details
+            </DialogTitle>
+          </DialogHeader>
+          {editTarget && (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Email is this tenant's login — changing it takes effect immediately and is recorded in the activity log.
+              </p>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Name</label>
+                <Input value={editName} onChange={e => setEditName(e.target.value)} className="h-8 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Shop Name</label>
+                <Input value={editShopName} onChange={e => setEditShopName(e.target.value)} className="h-8 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Mobile</label>
+                <Input value={editMobile} onChange={e => setEditMobile(e.target.value)} className="h-8 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Email (login credential)</label>
+                <Input type="email" value={editEmail} onChange={e => setEditEmail(e.target.value)} className="h-8 text-sm" />
+              </div>
+              {editError && (
+                <div className="rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs px-3 py-2">
+                  {editError}
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => { setEditTarget(null); setEditError(""); }}>Cancel</Button>
+            <Button size="sm" onClick={handleEditSave} disabled={editSaving}>
+              {editSaving ? "Saving..." : "Save Changes"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

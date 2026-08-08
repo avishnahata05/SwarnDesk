@@ -1892,6 +1892,11 @@ components:
           type: ["number", "null"]
         advancePaid:
           type: number
+        paymentMode:
+          type: string
+          description: cash, upi, card, or bank — only relevant when advancePaid is greater than zero
+        bankAccountId:
+          type: ["integer", "null"]
         dueDate:
           type: string
         notes:
@@ -1922,6 +1927,11 @@ components:
           type: ["number", "null"]
         advancePaid:
           type: number
+        paymentMode:
+          type: string
+          description: cash, upi, card, or bank — used only if advancePaid was raised by this edit
+        bankAccountId:
+          type: ["integer", "null"]
         status:
           type: string
         karigarId:

@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Settings as SettingsIcon, Building2, Plus, Ban, Star, AlertTriangle } from "lucide-react";
+import { Settings as SettingsIcon, Building2, Plus, Ban, Star, AlertTriangle, Pencil } from "lucide-react";
 import { API, getAuthHeaders, authHeader } from "./api";
 import type { GirviSettings, Branch } from "./types";
 import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
@@ -23,6 +23,11 @@ export default function SettingsTab({ branches, onBranchesChanged, onDirtyChange
   const [addingBranch, setAddingBranch] = useState(false);
   const [deactivateTarget, setDeactivateTarget] = useState<Branch | null>(null);
   const [pageHelpOpen, setPageHelpOpen] = useState(false);
+  const [editBranch, setEditBranch] = useState<Branch | null>(null);
+  const [editBranchName, setEditBranchName] = useState("");
+  const [editBranchAddress, setEditBranchAddress] = useState("");
+  const [editBranchPhone, setEditBranchPhone] = useState("");
+  const [savingBranch, setSavingBranch] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -107,6 +112,31 @@ export default function SettingsTab({ branches, onBranchesChanged, onDirtyChange
     } catch (err) {
       toast({ title: (err as Error).message || "Failed", variant: "destructive" });
     }
+  };
+
+  const openEditBranch = (b: Branch) => {
+    setEditBranch(b);
+    setEditBranchName(b.name);
+    setEditBranchAddress(b.address ?? "");
+    setEditBranchPhone(b.phone ?? "");
+  };
+
+  const saveEditBranch = async () => {
+    if (!editBranch || !editBranchName.trim()) return;
+    setSavingBranch(true);
+    try {
+      const r = await fetch(`${API}/branches/${editBranch.id}`, {
+        method: "PATCH",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ name: editBranchName.trim(), address: editBranchAddress.trim() || null, phone: editBranchPhone.trim() || null }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Failed");
+      toast({ title: "Branch updated" });
+      setEditBranch(null);
+      onBranchesChanged();
+    } catch (err) {
+      toast({ title: (err as Error).message || "Failed", variant: "destructive" });
+    } finally { setSavingBranch(false); }
   };
 
   const inp = "w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary";
@@ -228,6 +258,9 @@ export default function SettingsTab({ branches, onBranchesChanged, onDirtyChange
                   )}
                 </div>
                 <div className="flex items-center gap-1">
+                  <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => openEditBranch(b)}>
+                    <Pencil className="w-3 h-3" />Edit
+                  </Button>
                   {!b.isDefault && b.isActive && (
                     <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => setDefaultBranch(b)}>
                       <Star className="w-3 h-3" />Set as Default
@@ -265,6 +298,32 @@ export default function SettingsTab({ branches, onBranchesChanged, onDirtyChange
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editBranch} onOpenChange={v => { if (!v) setEditBranch(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Pencil className="w-4 h-4" />Edit Branch</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className={lbl}>Branch Name *</label>
+              <input className={inp} value={editBranchName} onChange={e => setEditBranchName(e.target.value)} />
+            </div>
+            <div>
+              <label className={lbl}>Address</label>
+              <input className={inp} value={editBranchAddress} onChange={e => setEditBranchAddress(e.target.value)} placeholder="Optional" />
+            </div>
+            <div>
+              <label className={lbl}>Phone</label>
+              <input className={inp} value={editBranchPhone} onChange={e => setEditBranchPhone(e.target.value)} placeholder="Optional" />
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end pt-2">
+            <Button variant="outline" size="sm" onClick={() => setEditBranch(null)}>Cancel</Button>
+            <Button size="sm" onClick={saveEditBranch} disabled={savingBranch || !editBranchName.trim()}>
+              {savingBranch ? "Saving..." : "Save Changes"}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
