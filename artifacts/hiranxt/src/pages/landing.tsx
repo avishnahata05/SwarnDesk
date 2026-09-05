@@ -2,9 +2,10 @@ import { Link } from "wouter";
 import {
   Zap, Users, Package, Banknote, ShieldCheck,
   CheckCircle2, XCircle, Star, MessageCircle, ArrowRight, ShoppingCart,
-  BookOpen, FileSpreadsheet, Minus,
+  BookOpen, FileSpreadsheet, Minus, Phone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useSEO, WHATSAPP_URL, SUPPORT_PHONE, SUPPORT_PHONE_INTL } from "@/lib/seo";
 
 // Grouped by the real areas of the app: mirrors the actual nav, not marketing fluff.
 const FEATURE_GROUPS: {
@@ -221,6 +222,15 @@ function ComparisonCell({ value }: { value: boolean | "partial" }) {
 }
 
 export default function LandingPage() {
+  // JSON-LD (SoftwareApplication, Organization, FAQPage) for "/" lives statically in
+  // index.html so it's present for crawlers that don't execute JS. This hook only resets
+  // the title/meta tags when a client-side navigation lands back here from another route.
+  useSEO({
+    title: "SwarnDesk: Jewellery ERP Software with Billing, GST, Girvi & Accounting",
+    description: "SwarnDesk is India's complete jewellery ERP software. Billing, GST returns, full double entry accounting, Girvi gold loan tracking, karigar management, and staff logins in one app. Trusted by 2,400+ jewellers.",
+    path: "/",
+    keywords: "jewellery ERP software India, jewellery billing software, jewellery accounting software, gold shop management software, girvi software, gold loan software, pawn shop software India, karigar tracking software, jewellery GST software, jewellery inventory software, HUID tracking software, SwarnDesk",
+  });
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -238,6 +248,10 @@ export default function LandingPage() {
             <a href="#girvi" className="hover:text-foreground transition-colors">Girvi</a>
             <a href="#pricing" className="hover:text-foreground transition-colors">Pricing</a>
             <a href="#faq" className="hover:text-foreground transition-colors">FAQ</a>
+            <Link href="/blog" className="hover:text-foreground transition-colors">Blog</Link>
+            <a href={`tel:${SUPPORT_PHONE_INTL}`} className="flex items-center gap-1.5 hover:text-foreground transition-colors">
+              <Phone className="w-3.5 h-3.5" /> {SUPPORT_PHONE}
+            </a>
           </div>
           <div className="flex items-center gap-3">
             <Link href="/login">
@@ -282,7 +296,7 @@ export default function LandingPage() {
               </Button>
             </Link>
             <a
-              href="https://wa.me/919424575918?text=I+want+to+know+more+about+SwarnDesk"
+              href={`${WHATSAPP_URL}?text=I+want+to+know+more+about+SwarnDesk`}
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -556,24 +570,37 @@ export default function LandingPage() {
 
       {/* Footer */}
       <footer className="border-t border-border py-10 px-4 sm:px-6">
-        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-full bg-white border border-border flex items-center justify-center overflow-hidden">
-              <img src="/logo.png" alt="SwarnDesk" className="w-5 h-5 object-contain" />
+        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-start justify-between gap-6">
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-7 h-7 rounded-full bg-white border border-border flex items-center justify-center overflow-hidden">
+                <img src="/logo.png" alt="SwarnDesk" className="w-5 h-5 object-contain" />
+              </div>
+              <span className="font-bold">SwarnDesk</span>
+              <span className="text-muted-foreground text-sm ml-2">India's Smartest Jewellery ERP</span>
             </div>
-            <span className="font-bold">SwarnDesk</span>
-            <span className="text-muted-foreground text-sm ml-2">India's Smartest Jewellery ERP</span>
+            <a href={`tel:${SUPPORT_PHONE_INTL}`} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+              <Phone className="w-3.5 h-3.5" /> Call / WhatsApp: {SUPPORT_PHONE}
+            </a>
           </div>
-          <div className="text-xs text-muted-foreground text-center sm:text-right">
-            © 2025 SwarnDesk. Made with love for Indian jewellers.
-            <span className="text-muted-foreground/50"> · by <a href="https://www.tirthontech.com" target="_blank" rel="noopener noreferrer" className="hover:text-muted-foreground hover:underline underline-offset-2">TirthonTech</a></span>
+          <div className="flex flex-col sm:items-end gap-2">
+            <div className="flex items-center gap-4 text-sm text-muted-foreground">
+              <Link href="/blog" className="hover:text-foreground hover:underline">Blog</Link>
+              <a href="#features" className="hover:text-foreground hover:underline">Features</a>
+              <a href="#pricing" className="hover:text-foreground hover:underline">Pricing</a>
+              <a href="#faq" className="hover:text-foreground hover:underline">FAQ</a>
+            </div>
+            <div className="text-xs text-muted-foreground text-center sm:text-right">
+              © 2026 SwarnDesk. Made with love for Indian jewellers.
+              <span className="text-muted-foreground/50"> · by <a href="https://www.tirthontech.com" target="_blank" rel="noopener noreferrer" className="hover:text-muted-foreground hover:underline underline-offset-2">TirthonTech</a></span>
+            </div>
           </div>
         </div>
       </footer>
 
       {/* Floating WhatsApp button */}
       <a
-        href="https://wa.me/919424575918?text=Hello+SwarnDesk+Support"
+        href={`${WHATSAPP_URL}?text=Hello+SwarnDesk+Support`}
         target="_blank"
         rel="noopener noreferrer"
         className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-green-500 hover:bg-green-600 rounded-full flex items-center justify-center shadow-lg shadow-green-500/30 transition-all hover:scale-105"

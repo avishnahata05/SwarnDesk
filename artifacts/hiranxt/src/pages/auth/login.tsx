@@ -5,8 +5,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { useSEO } from "@/lib/seo";
 
-const WHATSAPP_SUPPORT_URL = "https://wa.me/919424575918?text=Hello+SwarnDesk+Support";
+const WHATSAPP_SUPPORT_URL = "https://wa.me/918989496800?text=Hello+SwarnDesk+Support";
 
 function friendlyLoginError(message: string): string {
   const lower = message.toLowerCase();
@@ -17,6 +18,11 @@ function friendlyLoginError(message: string): string {
 }
 
 export default function LoginPage() {
+  useSEO({
+    title: "Sign In",
+    description: "Sign in to your SwarnDesk jewellery ERP account.",
+    path: "/login",
+  });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");

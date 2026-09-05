@@ -1,10 +1,17 @@
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Gem, MessageCircle } from "lucide-react";
+import { useSEO } from "@/lib/seo";
 
-const WHATSAPP_SUPPORT_URL = "https://wa.me/919424575918?text=Hello+SwarnDesk+Support";
+const WHATSAPP_SUPPORT_URL = "https://wa.me/918989496800?text=Hello+SwarnDesk+Support";
 
 export default function NotFound() {
+  useSEO({
+    title: "Page Not Found",
+    description: "This page doesn't exist or the link may be outdated.",
+    path: "/404",
+    noindex: true,
+  });
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="text-center space-y-4 max-w-sm px-4">

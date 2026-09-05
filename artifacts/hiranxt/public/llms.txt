@@ -1,0 +1,25 @@
+# SwarnDesk
+
+> SwarnDesk is jewellery ERP software built for Indian jewellers: billing and POS, full double entry accounting, GST return generation (GSTR-1, GSTR-3B, HSN summary), Girvi gold loan and pawn lending, karigar (goldsmith) metal tracking, HUID hallmark inventory, and role based staff logins, all in one web app. Plans start at ₹2,999/month with a 7 day free trial. Used by 2,400+ Indian jewellers.
+
+Contact: +91 89894 96800 (call or WhatsApp) · Built by TirthonTech (https://www.tirthontech.com)
+
+## Product
+
+- [Homepage](https://swarndesk.in/): Full feature overview, pricing, comparison vs Tally and generic billing apps, and FAQ.
+- [Sign up](https://swarndesk.in/register): Start a 7 day free trial, no credit card required.
+
+## Guides
+
+- [Jewellery ERP Software in India: What to Look for in 2026](https://swarndesk.in/blog/jewellery-erp-software-india-guide): What jewellery ERP software is, its core modules, and how it differs from Tally and generic billing apps.
+- [GST Returns for Jewellers: GSTR-1 and GSTR-3B Explained](https://swarndesk.in/blog/gstr1-gstr3b-jewellers-guide): What goes into GSTR-1 and GSTR-3B for a jewellery shop, and the GST rate on gold jewellery.
+- [What Is Girvi? A Complete Guide to Gold Loan and Pawn Software](https://swarndesk.in/blog/girvi-gold-loan-software-guide): How Girvi (gold loan/pawn lending) works and what software needs to track.
+- [HUID Hallmarking Rules for Jewellers: What You Need to Track](https://swarndesk.in/blog/huid-hallmarking-jewellers-guide): What HUID is and what jewellers need to record per inventory item.
+- [Jewellery Billing Software vs Tally: Which Should You Use?](https://swarndesk.in/blog/jewellery-billing-software-vs-tally): Comparison of Tally, standalone billing software, and combined jewellery ERP.
+- [Karigar Metal Tracking: How to Stop Wastage Disputes](https://swarndesk.in/blog/karigar-metal-tracking-wastage): How to track metal issued to and returned from a karigar to resolve wastage disputes.
+
+## Key facts
+
+- Pricing: ₹2,999/month, ₹7,999/quarter, ₹29,999/year — every plan includes the full feature set.
+- GST on gold jewellery in India: 3% on gold value plus making charges, or 3% on gold + 5% on making charges if billed separately.
+- HUID (Hallmark Unique Identification) is a unique 6-digit alphanumeric code mandatory on hallmarked gold jewellery sold in India since the BIS rollout began in 2021.
