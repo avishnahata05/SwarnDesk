@@ -589,6 +589,7 @@ export default function LandingPage() {
               <a href="#features" className="hover:text-foreground hover:underline">Features</a>
               <a href="#pricing" className="hover:text-foreground hover:underline">Pricing</a>
               <a href="#faq" className="hover:text-foreground hover:underline">FAQ</a>
+              <Link href="/partner/signup" className="hover:text-foreground hover:underline" data-testid="link-partner-program">Become a Partner</Link>
             </div>
             <div className="text-xs text-muted-foreground text-center sm:text-right">
               © 2026 SwarnDesk. Made with love for Indian jewellers.
