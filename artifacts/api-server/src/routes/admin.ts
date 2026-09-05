@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { usersTable, paymentRequestsTable, adminActivityLogTable, userNotesTable } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
+import { usersTable, paymentRequestsTable, adminActivityLogTable, userNotesTable, partnersTable } from "@workspace/db";
+import { eq, desc, and } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import crypto from "node:crypto";
 import { authMiddleware, adminOnly } from "../middleware/auth.js";
@@ -59,7 +59,10 @@ router.get("/users", async (req, res) => {
       trialEndsAt: usersTable.trialEndsAt,
       subscriptionEndsAt: usersTable.subscriptionEndsAt,
       createdAt: usersTable.createdAt,
-    }).from(usersTable).where(eq(usersTable.role, "user")).orderBy(desc(usersTable.createdAt));
+      partnerName: partnersTable.name,
+    }).from(usersTable)
+      .leftJoin(partnersTable, eq(usersTable.partnerId, partnersTable.id))
+      .where(eq(usersTable.role, "user")).orderBy(desc(usersTable.createdAt));
     res.json(users);
   } catch (err) {
     req.log.error({ err }, "Failed to list users");
@@ -115,13 +118,33 @@ router.get("/payment-requests", async (req, res) => {
   }
 });
 
+/** Atomically flips a payment request from "pending" to a new status. A plain
+ * select-then-check-then-update has a TOCTOU race: two concurrent approve requests can
+ * both read status="pending" before either writes, both extend the subscription and
+ * both log an admin action — and since partner commission is computed live off this
+ * status field, that race would double-count commission too. The WHERE clause makes
+ * Postgres the sole arbiter: only the request that actually flips a still-pending row
+ * gets a row back; the loser gets null and must not apply any of its side effects. */
+async function claimPendingPaymentRequest(id: number, set: Record<string, unknown>) {
+  const [claimed] = await db.update(paymentRequestsTable)
+    .set(set)
+    .where(and(eq(paymentRequestsTable.id, id), eq(paymentRequestsTable.status, "pending")))
+    .returning();
+  return claimed ?? null;
+}
+
+/** Builds the 409/404 response when claimPendingPaymentRequest returns null. */
+async function paymentRequestConflictResponse(res: import("express").Response, id: number) {
+  const [existing] = await db.select({ status: paymentRequestsTable.status }).from(paymentRequestsTable).where(eq(paymentRequestsTable.id, id)).limit(1);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  return res.status(409).json({ error: `Payment request already ${existing.status}` });
+}
+
 router.patch("/payment-requests/:id/approve", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [pr] = await db.select().from(paymentRequestsTable).where(eq(paymentRequestsTable.id, id)).limit(1);
-    if (!pr) return res.status(404).json({ error: "Not found" });
-    if (pr.status !== "pending") return res.status(409).json({ error: `Payment request already ${pr.status}` });
-    await db.update(paymentRequestsTable).set({ status: "approved", processedAt: new Date() }).where(eq(paymentRequestsTable.id, id));
+    const pr = await claimPendingPaymentRequest(id, { status: "approved", processedAt: new Date() });
+    if (!pr) return await paymentRequestConflictResponse(res, id);
     // Duration comes from the plan the user actually selected at submission
     // time; requests from before planId/durationDays existed fall back to 30.
     const days = pr.durationDays ?? 30;
@@ -140,10 +163,8 @@ router.patch("/payment-requests/:id/reject", async (req, res) => {
     const id = parseInt(req.params.id);
     const notes = typeof req.body.notes === "string" ? req.body.notes.trim() : "";
     if (!notes) return res.status(400).json({ error: "A rejection reason is required — it is shown to the user." });
-    const [pr] = await db.select().from(paymentRequestsTable).where(eq(paymentRequestsTable.id, id)).limit(1);
-    if (!pr) return res.status(404).json({ error: "Not found" });
-    if (pr.status !== "pending") return res.status(409).json({ error: `Payment request already ${pr.status}` });
-    await db.update(paymentRequestsTable).set({ status: "rejected", processedAt: new Date(), notes }).where(eq(paymentRequestsTable.id, id));
+    const pr = await claimPendingPaymentRequest(id, { status: "rejected", processedAt: new Date(), notes });
+    if (!pr) return await paymentRequestConflictResponse(res, id);
     await logAdminAction(req, "reject_payment", pr.userId, pr.userNameSnapshot ?? pr.userEmailSnapshot, `Rejected ₹${pr.amount} (UTR ${pr.utrNumber ?? "—"}): ${notes}`);
     res.json({ success: true });
   } catch (err) {
@@ -155,13 +176,16 @@ router.patch("/payment-requests/:id/reject", async (req, res) => {
 router.patch("/payment-requests/:id/approve-custom", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [pr] = await db.select().from(paymentRequestsTable).where(eq(paymentRequestsTable.id, id)).limit(1);
-    if (!pr) return res.status(404).json({ error: "Not found" });
-    if (pr.status !== "pending") return res.status(409).json({ error: `Payment request already ${pr.status}` });
-    const days = parsePositiveInt(req.body.days ?? pr.durationDays ?? 31);
+    const [existing] = await db.select().from(paymentRequestsTable).where(eq(paymentRequestsTable.id, id)).limit(1);
+    if (!existing) return res.status(404).json({ error: "Not found" });
+    // Only used to pick a sensible default for `days` below — the actual pending→approved
+    // transition is still an atomic compare-and-swap a few lines down, so a race here
+    // can't cause a double-approval, only (at worst) a slightly stale default.
+    const days = parsePositiveInt(req.body.days ?? existing.durationDays ?? 31);
     if (days === null) return res.status(400).json({ error: "days must be a positive whole number" });
     const notes = req.body.notes ?? null;
-    await db.update(paymentRequestsTable).set({ status: "approved", processedAt: new Date(), notes }).where(eq(paymentRequestsTable.id, id));
+    const pr = await claimPendingPaymentRequest(id, { status: "approved", processedAt: new Date(), notes });
+    if (!pr) return await paymentRequestConflictResponse(res, id);
     if (pr.userId) {
       const [user] = await db.select().from(usersTable).where(eq(usersTable.id, pr.userId)).limit(1);
       const base = user?.subscriptionEndsAt && new Date(user.subscriptionEndsAt) > new Date()

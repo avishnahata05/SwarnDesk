@@ -113,7 +113,7 @@ export default function Dashboard() {
           </p>
           <div className="mt-1"><PageHelpButton onClick={() => setPageHelpOpen(true)} /></div>
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap" data-tour="quick-actions">
           <Link href="/app/billing">
             <Button size="sm" className="gap-1.5 shadow-sm" data-testid="button-new-sale">
               <Plus className="w-4 h-4" />
@@ -145,7 +145,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 md:gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 md:gap-4" data-tour="stat-cards">
         {statCards.map((card) => (
           <Card
             key={card.label}

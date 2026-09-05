@@ -7,9 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { LogOut, MessageCircle, XCircle, Clock, Check } from "lucide-react";
 import { PLANS, PLAN_ORDER, type PlanId } from "@/lib/plans";
+import { useSEO } from "@/lib/seo";
 
 const UPI_VPA = "akshatnahata05@ibl";
-const WHATSAPP_SUPPORT_URL = "https://wa.me/919424575918?text=Hello+SwarnDesk+Support";
+const WHATSAPP_SUPPORT_URL = "https://wa.me/918989496800?text=Hello+SwarnDesk+Support";
 
 interface MyPaymentRequest {
   id: number;
@@ -20,9 +21,16 @@ interface MyPaymentRequest {
 }
 
 export default function PaymentPage() {
+  useSEO({
+    title: "Complete Your Payment",
+    description: "Complete your SwarnDesk subscription payment.",
+    path: "/payment",
+    noindex: true,
+  });
   const { user, logout } = useAuth();
   const [, navigate] = useLocation();
   const [utrNumber, setUtrNumber] = useState("");
+  const [referralCode, setReferralCode] = useState("");
   const [selectedPlan, setSelectedPlan] = useState<PlanId>("monthly");
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -67,7 +75,7 @@ export default function PaymentPage() {
       const res = await fetch("/api/auth/payment-request", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ utrNumber: utrNumber.trim(), planId: selectedPlan }),
+        body: JSON.stringify({ utrNumber: utrNumber.trim(), planId: selectedPlan, referralCode: referralCode.trim() || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to submit");
@@ -236,6 +244,17 @@ export default function PaymentPage() {
                   required
                 />
               </div>
+              {!user?.partnerId && (
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-foreground">Referral Code <span className="text-muted-foreground font-normal">(optional)</span></label>
+                  <Input
+                    placeholder="e.g. SD-AB12CD"
+                    value={referralCode}
+                    onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                    className="font-mono uppercase"
+                  />
+                </div>
+              )}
               <Button type="submit" className="w-full" disabled={submitting}>
                 {submitting ? "Submitting..." : "Submit Payment Reference"}
               </Button>

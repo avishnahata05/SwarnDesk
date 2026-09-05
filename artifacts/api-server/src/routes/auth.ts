@@ -1,15 +1,32 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
-import { db, usersTable, paymentRequestsTable, staffTable } from "@workspace/db";
+import { db, usersTable, paymentRequestsTable, staffTable, partnersTable } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { signToken, verifyToken, authMiddleware } from "../middleware/auth.js";
 import { PLANS, isValidPlanId } from "../lib/plans.js";
+import { normalizeReferralCode } from "../lib/referral-code.js";
+
+// Best-effort referral lookup shared by /register and /payment-request — an invalid,
+// unknown, or not-yet-approved code must never fail the surrounding action. Only an
+// ACTIVE partner's code attributes; pending/inactive partner codes are silently
+// ignored (no error surfaced to the referred signer-upper).
+async function lookupActivePartnerId(rawCode: unknown): Promise<number | null> {
+  if (!rawCode || !String(rawCode).trim()) return null;
+  try {
+    const code = normalizeReferralCode(String(rawCode));
+    const [partner] = await db.select({ id: partnersTable.id, status: partnersTable.status })
+      .from(partnersTable).where(eq(partnersTable.referralCode, code)).limit(1);
+    return partner && partner.status === "active" ? partner.id : null;
+  } catch {
+    return null;
+  }
+}
 
 const router = Router();
 
 router.post("/register", async (req, res) => {
   try {
-    const { email, password, name, shopName, mobile } = req.body;
+    const { email, password, name, shopName, mobile, referralCode } = req.body;
     if (!email || !password || !name || !shopName) {
       return res.status(400).json({ error: "email, password, name, shopName are required" });
     }
@@ -19,6 +36,7 @@ router.post("/register", async (req, res) => {
     }
     const passwordHash = await bcrypt.hash(password, 10);
     const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const partnerId = await lookupActivePartnerId(referralCode);
     const [user] = await db.insert(usersTable).values({
       email: email.toLowerCase(),
       passwordHash,
@@ -28,6 +46,7 @@ router.post("/register", async (req, res) => {
       role: "user",
       plan: "trial",
       trialEndsAt,
+      partnerId,
     }).returning();
     const token = signToken({
       userId: user.id,
@@ -39,8 +58,9 @@ router.post("/register", async (req, res) => {
       shopName: user.shopName,
       staffId: null,
       staffRole: null,
+      partnerId: user.partnerId,
     });
-    res.status(201).json({ token, user: { id: user.id, email: user.email, name: user.name, shopName: user.shopName, role: user.role, plan: user.plan, trialEndsAt: user.trialEndsAt, subscriptionEndsAt: null, staffId: null, staffRole: null } });
+    res.status(201).json({ token, user: { id: user.id, email: user.email, name: user.name, shopName: user.shopName, role: user.role, plan: user.plan, trialEndsAt: user.trialEndsAt, subscriptionEndsAt: null, staffId: null, staffRole: null, partnerId: user.partnerId } });
   } catch (err) {
     req.log.error({ err }, "Register failed");
     res.status(500).json({ error: "Registration failed" });
@@ -75,8 +95,9 @@ router.post("/login", async (req, res) => {
       shopName: user.shopName,
       staffId: null,
       staffRole: null,
+      partnerId: user.partnerId,
     });
-    res.json({ token, user: { id: user.id, email: user.email, name: user.name, shopName: user.shopName, role: user.role, plan, trialEndsAt: user.trialEndsAt, subscriptionEndsAt: user.subscriptionEndsAt ?? null, staffId: null, staffRole: null } });
+    res.json({ token, user: { id: user.id, email: user.email, name: user.name, shopName: user.shopName, role: user.role, plan, trialEndsAt: user.trialEndsAt, subscriptionEndsAt: user.subscriptionEndsAt ?? null, staffId: null, staffRole: null, partnerId: user.partnerId } });
   } catch (err) {
     req.log.error({ err }, "Login failed");
     res.status(500).json({ error: "Login failed" });
@@ -103,13 +124,14 @@ async function loginAsStaff(req: import("express").Request, res: import("express
     shopName: owner.shopName,
     staffId: staff.id,
     staffRole: staff.role,
+    partnerId: owner.partnerId,
   });
   res.json({
     token,
     user: {
       id: owner.id, email: staff.email, name: staff.name, shopName: owner.shopName,
       role: owner.role, plan: owner.plan, trialEndsAt: owner.trialEndsAt, subscriptionEndsAt: owner.subscriptionEndsAt ?? null,
-      staffId: staff.id, staffRole: staff.role,
+      staffId: staff.id, staffRole: staff.role, partnerId: owner.partnerId,
     },
   });
 }
@@ -223,10 +245,11 @@ router.get("/me", async (req, res) => {
       shopName: user.shopName,
       staffId,
       staffRole,
+      partnerId: user.partnerId,
     });
     res.json({
       token: newToken,
-      user: { id: user.id, email, name, shopName: user.shopName, role: user.role, plan, trialEndsAt: user.trialEndsAt, subscriptionEndsAt: user.subscriptionEndsAt ?? null, staffId, staffRole },
+      user: { id: user.id, email, name, shopName: user.shopName, role: user.role, plan, trialEndsAt: user.trialEndsAt, subscriptionEndsAt: user.subscriptionEndsAt ?? null, staffId, staffRole, partnerId: user.partnerId },
     });
   } catch (err) {
     req.log.error({ err }, "/me failed");
@@ -240,7 +263,7 @@ router.get("/me", async (req, res) => {
 // payment requests against another user's account.
 router.post("/payment-request", authMiddleware, async (req, res) => {
   try {
-    const { utrNumber, planId } = req.body;
+    const { utrNumber, planId, referralCode } = req.body;
     if (!utrNumber || !String(utrNumber).trim()) return res.status(400).json({ error: "utrNumber required" });
     // planId picks which row of PLANS to charge — amount/duration are always
     // resolved from that table server-side, never taken from the client, so a
@@ -250,6 +273,17 @@ router.post("/payment-request", authMiddleware, async (req, res) => {
     const userId = req.user!.userId;
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
     if (!user) return res.status(404).json({ error: "User not found" });
+
+    // Fallback attribution — lets someone who signed up organically still credit a
+    // partner at checkout. Best-effort and one-shot: only applies if no partner is
+    // already attributed, and first attribution wins permanently — never overwritten.
+    if (user.partnerId === null) {
+      const partnerId = await lookupActivePartnerId(referralCode);
+      if (partnerId !== null) {
+        await db.update(usersTable).set({ partnerId }).where(eq(usersTable.id, userId));
+      }
+    }
+
     const [pr] = await db.insert(paymentRequestsTable).values({
       userId,
       userNameSnapshot: user.name,

@@ -14,6 +14,11 @@ export interface AuthUser {
   // staff member is actually acting and what they're allowed to do. Null for the owner.
   staffId: number | null;
   staffRole: string | null; // admin | accountant | salesperson — see staffTable
+  // Which partner (if any) referred this shop in — see usersTable.partnerId and
+  // routes/partner.ts. Exposed here purely so the frontend can tell whether an
+  // account is already attributed (e.g. to hide the referral-code field at checkout
+  // once one is set); it grants no partner-side access.
+  partnerId: number | null;
 }
 
 declare global {

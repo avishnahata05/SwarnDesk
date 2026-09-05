@@ -8,13 +8,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboard, Package, ShoppingCart, Users, Hammer, Wrench,
   TruckIcon, BarChart3, Settings, Menu, X, MessageCircle, Globe, Banknote,
-  ChevronRight, Pencil, LogOut, ShieldCheck, Megaphone, Clock, ClipboardList, BookOpen,
+  ChevronRight, Pencil, LogOut, ShieldCheck, Megaphone, Clock, ClipboardList, BookOpen, Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTour } from "@/contexts/TourContext";
+import { TourOverlay } from "@/components/TourOverlay";
 
 // `description` is a one-line "what is this module" hint, shown as a hover
 // tooltip on the nav link — the same native title= pattern already used for
@@ -50,6 +52,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const [location] = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user, logout, isShopAdmin, canAccessAccounting } = useAuth();
+  const tour = useTour();
   const visibleNavItems = navItems.filter(item => {
     if (item.restricted === "settings") return isShopAdmin;
     if (item.restricted === "accounting") return canAccessAccounting;
@@ -120,7 +123,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
         )}
       >
         {/* Logo */}
-        <div className="flex items-center gap-3 px-5 py-5 border-b border-white/10">
+        <div className="flex items-center gap-3 px-5 py-5 border-b border-white/10" data-tour="brand">
           <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center shadow-sm flex-shrink-0 overflow-hidden border border-white/20">
             <img src="/logo.png" alt="SwarnDesk" className="w-7 h-7 object-contain" />
           </div>
@@ -146,6 +149,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 href={href}
                 title={description}
                 data-testid={`nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
+                data-tour={`nav-${href.split("/").pop()}`}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all duration-150 group",
                   isActive
@@ -172,6 +176,16 @@ export default function AppLayout({ children }: AppLayoutProps) {
             </div>
           )}
 
+          {/* Replay the onboarding tour */}
+          <button
+            onClick={() => { setSidebarOpen(false); tour.start(); }}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-white/60 hover:bg-white/10 hover:text-white transition-all text-left"
+            data-testid="button-take-tour"
+          >
+            <Sparkles className="w-4 h-4 flex-shrink-0" />
+            Take a Tour
+          </button>
+
           {/* Admin Panel link */}
           {user?.role === "admin" && (
             <Link
@@ -185,7 +199,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
           )}
 
           <a
-            href="https://wa.me/919424575918?text=Hello+SwarnDesk+Support"
+            href="https://wa.me/918989496800?text=Hello+SwarnDesk+Support"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-white/60 hover:bg-white/10 hover:text-white transition-all"
@@ -228,7 +242,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
           {/* Gold & Silver rate ticker — click to edit */}
           {rates && (
-            <div className="hidden sm:flex items-center gap-2">
+            <div className="hidden sm:flex items-center gap-2" data-tour="rate-ticker">
               <button
                 onClick={openRateDialog}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 hover:bg-amber-100 transition-colors text-xs group"
@@ -353,6 +367,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <TourOverlay />
     </div>
   );
 }

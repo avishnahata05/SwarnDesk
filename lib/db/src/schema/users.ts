@@ -1,6 +1,7 @@
 import { pgTable, serial, text, timestamp, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { partnersTable } from "./partner";
 
 export const usersTable = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -13,6 +14,10 @@ export const usersTable = pgTable("users", {
   plan: text("plan").notNull().default("trial"), // 'trial' | 'active' | 'expired'
   trialEndsAt: timestamp("trial_ends_at").notNull(),
   subscriptionEndsAt: timestamp("subscription_ends_at"),
+  // Which partner (if any) referred this shop in — set once, at whichever comes first
+  // (signup with a ?ref= code, or later crediting a code at checkout), and never
+  // overwritten afterward. Null means organic/unattributed. See partner.ts.
+  partnerId: integer("partner_id").references(() => partnersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -61,6 +66,6 @@ export const userNotesTable = pgTable("user_notes", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-export const insertUserSchema = createInsertSchema(usersTable).omit({ id: true, createdAt: true, passwordHash: true, role: true, plan: true, trialEndsAt: true });
+export const insertUserSchema = createInsertSchema(usersTable).omit({ id: true, createdAt: true, passwordHash: true, role: true, plan: true, trialEndsAt: true, partnerId: true });
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof usersTable.$inferSelect;

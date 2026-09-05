@@ -1,12 +1,21 @@
 import { useState } from "react";
-import { Link, useLocation, Redirect } from "wouter";
+import { Link, useLocation, useSearch, Redirect } from "wouter";
 import { Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { useSEO } from "@/lib/seo";
 
 export default function RegisterPage() {
+  useSEO({
+    title: "Sign Up Free — 7 Day Trial",
+    description: "Start your 7 day free trial of SwarnDesk, India's complete jewellery ERP software. No credit card needed.",
+    path: "/register",
+  });
+  // Pre-fills from a partner's shareable link (/register?ref=CODE) — the only
+  // "referral link" mechanism this app has, no server-side redirect involved.
+  const initialReferralCode = (new URLSearchParams(useSearch()).get("ref") ?? "").toUpperCase();
   const [form, setForm] = useState({
     email: "",
     password: "",
@@ -14,6 +23,7 @@ export default function RegisterPage() {
     name: "",
     shopName: "",
     mobile: "",
+    referralCode: initialReferralCode,
   });
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -46,6 +56,7 @@ export default function RegisterPage() {
         name: form.name,
         shopName: form.shopName,
         mobile: form.mobile || undefined,
+        referralCode: form.referralCode || undefined,
       });
       navigate("/app/dashboard");
     } catch (err: unknown) {
@@ -181,6 +192,16 @@ export default function RegisterPage() {
                     </p>
                   )}
                 </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-foreground">Referral Code <span className="text-muted-foreground font-normal">(optional)</span></label>
+                <Input
+                  placeholder="e.g. SD-AB12CD"
+                  value={form.referralCode}
+                  onChange={(e) => setForm(f => ({ ...f, referralCode: e.target.value.toUpperCase() }))}
+                  className="font-mono uppercase"
+                />
               </div>
 
               <Button type="submit" className="w-full" disabled={isLoading}>

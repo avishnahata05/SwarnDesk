@@ -11,3 +11,4 @@ export * from "./users";
 export * from "./custom-orders";
 export * from "./accounting";
 export * from "./staff";
+export * from "./partner";

@@ -20,6 +20,8 @@ import girviReportsRouter from "./girvi-reports";
 import whatsappRouter from "./whatsapp";
 import authRouter from "./auth";
 import adminRouter from "./admin";
+import partnerRouter from "./partner";
+import partnerAdminRouter from "./partner-admin";
 import customOrdersRouter from "./custom-orders";
 import accountingAccountsRouter from "./accounting-accounts";
 import accountingVouchersRouter from "./accounting-vouchers";
@@ -32,6 +34,7 @@ const router: IRouter = Router();
 // Public routes
 router.use(healthRouter);
 router.use("/auth", authRouter);
+router.use("/partner", partnerRouter); // partner.ts gates its own routes internally (public signup/login; requirePartner/requireActivePartner per-route)
 
 // Protected routes (require valid JWT + active subscription)
 const guard = [authMiddleware, subscriptionCheck] as const;
@@ -62,6 +65,7 @@ router.use("/accounting/vouchers", ...finance, accountingVouchersRouter);
 router.use("/accounting/reports", ...finance, accountingReportsRouter);
 router.use("/accounting/settings", ...finance, accountingSettingsRouter);
 router.use("/whatsapp", ...ownerOrAdmin, whatsappRouter);
+router.use("/admin/partners", partnerAdminRouter); // partner-admin has its own auth inside, like admin.ts — mounted before /admin below
 router.use("/admin", adminRouter); // admin has its own auth inside
 
 export default router;

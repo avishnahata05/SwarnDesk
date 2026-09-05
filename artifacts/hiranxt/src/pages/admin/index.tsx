@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Fragment } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Redirect } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,25 @@ interface AdminUser {
   trialEndsAt: string;
   subscriptionEndsAt: string | null;
   createdAt: string;
+  partnerName: string | null;
+}
+
+interface Partner {
+  id: number;
+  name: string;
+  email: string;
+  phone: string | null;
+  referralCode: string;
+  commissionPercent: number;
+  status: "pending" | "active" | "inactive";
+  createdAt: string;
+  totalReferred: number;
+  totalPaid: number;
+  activeCount: number;
+  trialCount: number;
+  expiredCount: number;
+  totalRevenue: number;
+  commissionOwed: number;
 }
 
 interface PaymentRequest {
@@ -172,6 +191,7 @@ export default function AdminPage() {
   const [revenue, setRevenue] = useState<Revenue | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [payments, setPayments] = useState<PaymentRequest[]>([]);
+  const [partners, setPartners] = useState<Partner[]>([]);
   const [expiring, setExpiring] = useState<ExpiringUser[]>([]);
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -235,6 +255,17 @@ export default function AdminPage() {
   const [planAction, setPlanAction] = useState<"activate" | "extend_trial" | "expire" | null>(null);
   const [planDays, setPlanDays] = useState("30");
 
+  // Partners
+  const [expandedPartnerId, setExpandedPartnerId] = useState<number | null>(null);
+  const [partnerActionLoading, setPartnerActionLoading] = useState<string | null>(null); // "partner-{id}"
+  const [partnerActionError, setPartnerActionError] = useState("");
+  const [deletePartnerTarget, setDeletePartnerTarget] = useState<Partner | null>(null);
+  const [commissionDraft, setCommissionDraft] = useState<Record<number, string>>({});
+  const [createPartnerOpen, setCreatePartnerOpen] = useState(false);
+  const [createPartnerForm, setCreatePartnerForm] = useState({ name: "", email: "", password: "", phone: "", commissionPercent: "10" });
+  const [createPartnerError, setCreatePartnerError] = useState("");
+  const [createPartnerSaving, setCreatePartnerSaving] = useState(false);
+
   const getHeaders = () => {
     const token = localStorage.getItem("swarndesk_token");
     return { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
@@ -255,13 +286,14 @@ export default function AdminPage() {
     setLoading(true);
     setError("");
     try {
-      const [s, u, p, r, e, a] = await Promise.all([
+      const [s, u, p, r, e, a, pt] = await Promise.all([
         apiCall("/api/admin/stats"),
         apiCall("/api/admin/users"),
         apiCall("/api/admin/payment-requests"),
         apiCall("/api/admin/revenue"),
         apiCall("/api/admin/expiring-soon"),
         apiCall("/api/admin/activity-log?limit=50"),
+        apiCall("/api/admin/partners"),
       ]);
       setStats(s);
       setUsers(Array.isArray(u) ? u : []);
@@ -269,6 +301,7 @@ export default function AdminPage() {
       setRevenue(r?.totalRevenue !== undefined ? r : null);
       setExpiring(Array.isArray(e) ? e : []);
       setActivityLog(Array.isArray(a) ? a : []);
+      setPartners(Array.isArray(pt) ? pt : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load admin data");
     } finally {
@@ -356,6 +389,76 @@ export default function AdminPage() {
       await fetchAll();
     } catch (err) { setActionError(err instanceof Error ? err.message : "Failed to delete user"); }
     finally { setActionLoading(null); }
+  };
+
+  // ── Partner actions ────────────────────────────────────────────────────────
+
+  const partnerAction = async (id: number, action: string, extra?: Record<string, unknown>) => {
+    setPartnerActionLoading(`partner-${id}`);
+    setPartnerActionError("");
+    try {
+      await apiCall(`/api/admin/partners/${id}`, { method: "PATCH", body: JSON.stringify({ action, ...extra }) });
+      await fetchAll();
+    } catch (err) {
+      setPartnerActionError(err instanceof Error ? err.message : "Failed to update partner");
+    } finally {
+      setPartnerActionLoading(null);
+    }
+  };
+
+  const handleSaveCommission = async (partner: Partner) => {
+    const raw = commissionDraft[partner.id];
+    const value = raw !== undefined ? parseInt(raw, 10) : partner.commissionPercent;
+    if (!Number.isFinite(value)) { setPartnerActionError("Commission % must be a number"); return; }
+    await partnerAction(partner.id, "__none__", { commissionPercent: value });
+    setCommissionDraft(d => { const next = { ...d }; delete next[partner.id]; return next; });
+  };
+
+  const handleDeletePartner = async () => {
+    if (!deletePartnerTarget) return;
+    setPartnerActionLoading(`partner-${deletePartnerTarget.id}`);
+    setPartnerActionError("");
+    try {
+      await apiCall(`/api/admin/partners/${deletePartnerTarget.id}`, { method: "DELETE" });
+      setDeletePartnerTarget(null);
+      await fetchAll();
+    } catch (err) {
+      setPartnerActionError(err instanceof Error ? err.message : "Failed to delete partner");
+    } finally {
+      setPartnerActionLoading(null);
+    }
+  };
+
+  const handleCreatePartner = async () => {
+    setCreatePartnerError("");
+    if (!createPartnerForm.name.trim() || !createPartnerForm.email.trim() || !createPartnerForm.password) {
+      setCreatePartnerError("Name, email, and password are required");
+      return;
+    }
+    setCreatePartnerSaving(true);
+    try {
+      await apiCall("/api/admin/partners", {
+        method: "POST",
+        body: JSON.stringify({
+          name: createPartnerForm.name.trim(),
+          email: createPartnerForm.email.trim(),
+          password: createPartnerForm.password,
+          phone: createPartnerForm.phone.trim() || undefined,
+          commissionPercent: parseInt(createPartnerForm.commissionPercent, 10) || 10,
+        }),
+      });
+      setCreatePartnerOpen(false);
+      setCreatePartnerForm({ name: "", email: "", password: "", phone: "", commissionPercent: "10" });
+      await fetchAll();
+    } catch (err) {
+      setCreatePartnerError(err instanceof Error ? err.message : "Failed to create partner");
+    } finally {
+      setCreatePartnerSaving(false);
+    }
+  };
+
+  const copyReferralLink = (code: string) => {
+    navigator.clipboard.writeText(`${window.location.origin}/register?ref=${code}`);
   };
 
   // ── Notes ──────────────────────────────────────────────────────────────────
@@ -485,6 +588,7 @@ export default function AdminPage() {
 
   const pendingPayments = payments.filter(p => p.status === "pending");
   const historyPayments = payments.filter(p => p.status !== "pending");
+  const pendingPartners = partners.filter(p => p.status === "pending");
 
   const filteredUsers = users.filter(u => {
     const matchesPlan =
@@ -745,6 +849,162 @@ export default function AdminPage() {
               </Card>
             )}
 
+            {/* ── Pending Partner Approvals ─────────────────────────────── */}
+            {pendingPartners.length > 0 && (
+              <Card className="border-amber-300 bg-amber-50/60">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2 text-amber-800">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                    Pending Partner Applications ({pendingPartners.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {partnerActionError && (
+                    <div className="rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm px-3 py-2 mb-3">{partnerActionError}</div>
+                  )}
+                  <div className="space-y-2">
+                    {pendingPartners.map(p => (
+                      <div key={p.id} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-white border border-amber-200 text-sm flex-wrap">
+                        <div>
+                          <div className="font-medium text-foreground">{p.name}</div>
+                          <div className="text-xs text-muted-foreground">{p.email}{p.phone ? ` · ${p.phone}` : ""}</div>
+                          <div className="text-xs text-muted-foreground font-mono mt-0.5">{p.referralCode}</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            className="bg-green-600 hover:bg-green-700 text-white h-7 text-xs"
+                            onClick={() => partnerAction(p.id, "approve")}
+                            disabled={partnerActionLoading === `partner-${p.id}`}
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="h-7 text-xs"
+                            onClick={() => partnerAction(p.id, "reject")}
+                            disabled={partnerActionLoading === `partner-${p.id}`}
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* ── Partners ───────────────────────────────────────────────── */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <CardTitle className="text-base">Partners ({partners.length})</CardTitle>
+                  <Button size="sm" className="h-8 text-xs" onClick={() => { setCreatePartnerOpen(true); setCreatePartnerError(""); }}>
+                    + Create Partner
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                {partnerActionError && (
+                  <div className="mx-4 mt-2 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm px-3 py-2">{partnerActionError}</div>
+                )}
+                {partners.length === 0 ? (
+                  <p className="text-muted-foreground text-sm p-6 text-center">No partners yet.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border text-left">
+                          <th className="px-4 py-3 font-medium text-muted-foreground text-xs w-8"></th>
+                          <th className="px-4 py-3 font-medium text-muted-foreground text-xs">Partner</th>
+                          <th className="px-4 py-3 font-medium text-muted-foreground text-xs">Referral Code</th>
+                          <th className="px-4 py-3 font-medium text-muted-foreground text-xs">Status</th>
+                          <th className="px-4 py-3 font-medium text-muted-foreground text-xs">Referred / Paid</th>
+                          <th className="px-4 py-3 font-medium text-muted-foreground text-xs">Revenue</th>
+                          <th className="px-4 py-3 font-medium text-muted-foreground text-xs">Commission Owed</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {partners.map(p => {
+                          const isExpanded = expandedPartnerId === p.id;
+                          const busy = partnerActionLoading === `partner-${p.id}`;
+                          return (
+                            <Fragment key={p.id}>
+                              <tr className="hover:bg-muted/10 transition-colors cursor-pointer" onClick={() => setExpandedPartnerId(isExpanded ? null : p.id)}>
+                                <td className="px-4 py-3 text-muted-foreground">{isExpanded ? "▾" : "▸"}</td>
+                                <td className="px-4 py-3">
+                                  <div className="font-medium text-foreground">{p.name}</div>
+                                  <div className="text-xs text-muted-foreground">{p.email}</div>
+                                </td>
+                                <td className="px-4 py-3 font-mono text-xs">{p.referralCode}</td>
+                                <td className="px-4 py-3">
+                                  {p.status === "active" && <Badge className="bg-green-100 text-green-800 border-green-200">Active</Badge>}
+                                  {p.status === "pending" && <Badge className="bg-amber-100 text-amber-800 border-amber-200">Pending</Badge>}
+                                  {p.status === "inactive" && <Badge variant="destructive">Inactive</Badge>}
+                                </td>
+                                <td className="px-4 py-3 text-xs">{p.totalReferred} / {p.totalPaid}</td>
+                                <td className="px-4 py-3 text-xs font-semibold">{fmtMoney(p.totalRevenue)}</td>
+                                <td className="px-4 py-3 text-xs font-semibold text-amber-700">{fmtMoney(p.commissionOwed)}</td>
+                              </tr>
+                              {isExpanded && (
+                                <tr className="bg-muted/20">
+                                  <td colSpan={7} className="px-4 py-4">
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 text-xs">
+                                      <div><div className="text-muted-foreground">Phone</div><div className="font-medium">{p.phone ?? "—"}</div></div>
+                                      <div><div className="text-muted-foreground">Joined</div><div className="font-medium">{fmt(p.createdAt)}</div></div>
+                                      <div><div className="text-muted-foreground">Active / Trial / Expired</div><div className="font-medium">{p.activeCount} / {p.trialCount} / {p.expiredCount}</div></div>
+                                      <div>
+                                        <div className="text-muted-foreground">Commission %</div>
+                                        <div className="flex items-center gap-1.5 mt-0.5">
+                                          <Input
+                                            type="number"
+                                            min={0}
+                                            max={100}
+                                            value={commissionDraft[p.id] ?? String(p.commissionPercent)}
+                                            onChange={e => setCommissionDraft(d => ({ ...d, [p.id]: e.target.value }))}
+                                            className="h-7 w-16 text-xs"
+                                            onClick={e => e.stopPropagation()}
+                                          />
+                                          <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busy} onClick={e => { e.stopPropagation(); handleSaveCommission(p); }}>Save</Button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="flex gap-1.5 flex-wrap" onClick={e => e.stopPropagation()}>
+                                      {p.status === "pending" && (
+                                        <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white h-7 text-xs" disabled={busy} onClick={() => partnerAction(p.id, "approve")}>Approve</Button>
+                                      )}
+                                      {p.status === "pending" && (
+                                        <Button size="sm" variant="destructive" className="h-7 text-xs" disabled={busy} onClick={() => partnerAction(p.id, "reject")}>Reject</Button>
+                                      )}
+                                      {p.status === "active" && (
+                                        <Button size="sm" variant="outline" className="h-7 text-xs border-red-300 text-red-600 hover:bg-red-50" disabled={busy} onClick={() => partnerAction(p.id, "deactivate")}>Deactivate</Button>
+                                      )}
+                                      {p.status === "inactive" && (
+                                        <Button size="sm" variant="outline" className="h-7 text-xs border-green-400/50 text-green-700 hover:bg-green-50" disabled={busy} onClick={() => partnerAction(p.id, "reactivate")}>Reactivate</Button>
+                                      )}
+                                      <Button size="sm" variant="outline" className="h-7 text-xs gap-1" disabled={busy} onClick={() => copyReferralLink(p.referralCode)}>
+                                        <Copy className="w-3 h-3" /> Copy Referral Link
+                                      </Button>
+                                      <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busy} onClick={() => partnerAction(p.id, "regenerate-code")}>Regenerate Code</Button>
+                                      <Button size="sm" variant="outline" className="h-7 text-xs border-red-300/60 text-destructive hover:bg-destructive/5" disabled={busy} onClick={() => setDeletePartnerTarget(p)}>
+                                        <Trash2 className="w-3 h-3" /> Delete
+                                      </Button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             {/* ── Payment History ───────────────────────────────────────── */}
             {historyPayments.length > 0 && (
               <Card>
@@ -852,6 +1112,11 @@ export default function AdminPage() {
                             <td className="px-4 py-3">
                               <div className="font-medium text-foreground">{u.name}</div>
                               <div className="text-xs text-muted-foreground">{u.shopName}</div>
+                              {u.partnerName && (
+                                <Badge variant="outline" className="mt-1 text-[10px] px-1.5 py-0 h-4 border-amber-300 text-amber-700">
+                                  via {u.partnerName}
+                                </Badge>
+                              )}
                             </td>
                             <td className="px-4 py-3 text-muted-foreground text-xs hidden md:table-cell">{u.email}</td>
                             <td className="px-4 py-3 text-muted-foreground text-xs hidden sm:table-cell">{u.mobile ?? "—"}</td>
@@ -1432,6 +1697,75 @@ export default function AdminPage() {
                 </Button>
               </>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Create partner dialog ─────────────────────────────────────────── */}
+      <Dialog open={createPartnerOpen} onOpenChange={v => { if (!v) { setCreatePartnerOpen(false); setCreatePartnerError(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Create Partner</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Admin-created partners are pre-approved and can sign in immediately — no approval step needed.
+            </p>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Name</label>
+              <Input value={createPartnerForm.name} onChange={e => setCreatePartnerForm(f => ({ ...f, name: e.target.value }))} className="h-8 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Email</label>
+              <Input type="email" value={createPartnerForm.email} onChange={e => setCreatePartnerForm(f => ({ ...f, email: e.target.value }))} className="h-8 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Password (min 6 characters)</label>
+              <Input type="text" value={createPartnerForm.password} onChange={e => setCreatePartnerForm(f => ({ ...f, password: e.target.value }))} className="h-8 text-sm font-mono" autoComplete="off" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Phone (optional)</label>
+                <Input value={createPartnerForm.phone} onChange={e => setCreatePartnerForm(f => ({ ...f, phone: e.target.value }))} className="h-8 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Commission %</label>
+                <Input type="number" min={0} max={100} value={createPartnerForm.commissionPercent} onChange={e => setCreatePartnerForm(f => ({ ...f, commissionPercent: e.target.value }))} className="h-8 text-sm" />
+              </div>
+            </div>
+            {createPartnerError && (
+              <div className="rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs px-3 py-2">{createPartnerError}</div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => { setCreatePartnerOpen(false); setCreatePartnerError(""); }}>Cancel</Button>
+            <Button size="sm" onClick={handleCreatePartner} disabled={createPartnerSaving}>
+              {createPartnerSaving ? "Creating..." : "Create Partner"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete partner dialog ─────────────────────────────────────────── */}
+      <Dialog open={!!deletePartnerTarget} onOpenChange={v => { if (!v) setDeletePartnerTarget(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash2 className="w-5 h-5" />
+              Delete Partner
+            </DialogTitle>
+          </DialogHeader>
+          {deletePartnerTarget && (
+            <p className="text-sm text-muted-foreground">
+              Delete <strong className="text-foreground">{deletePartnerTarget.name}</strong> ({deletePartnerTarget.email})?
+              Their {deletePartnerTarget.totalReferred} referred account{deletePartnerTarget.totalReferred !== 1 ? "s" : ""} will be <strong className="text-foreground">unlinked, not deleted</strong> — those shops and their data are unaffected.
+            </p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setDeletePartnerTarget(null)}>Cancel</Button>
+            <Button variant="destructive" size="sm" onClick={handleDeletePartner} disabled={partnerActionLoading === `partner-${deletePartnerTarget?.id}`}>
+              Delete Partner
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

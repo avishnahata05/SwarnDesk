@@ -14,13 +14,17 @@ interface AuthUser {
   // Set only when a staff login (not the shop owner) is signed in.
   staffId: number | null;
   staffRole: string | null; // admin | accountant | salesperson
+  // Which partner (if any) referred this shop in — null means organic/unattributed.
+  // Used only to decide whether to show the referral-code field at checkout; carries
+  // no partner-portal access of its own.
+  partnerId: number | null;
 }
 
 interface AuthContextType {
   user: AuthUser | null;
   token: string | null;
   login: (email: string, password: string) => Promise<void>;
-  register: (data: { email: string; password: string; name: string; shopName: string; mobile?: string }) => Promise<void>;
+  register: (data: { email: string; password: string; name: string; shopName: string; mobile?: string; referralCode?: string }) => Promise<void>;
   logout: () => void;
   isLoading: boolean;
   // True only for the actual shop-owner login (not any staff role).
@@ -37,6 +41,11 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 const TOKEN_KEY = "swarndesk_token";
 const USER_KEY = "swarndesk_user";
+// Owned by PartnerAuthContext — cleared here so a shop-owner/staff/admin login and a
+// partner login are mutually exclusive in this browser: signing into one account type
+// always signs you out of the other, rather than leaving both tokens sitting around.
+const PARTNER_TOKEN_KEY = "swarndesk_partner_token";
+const PARTNER_KEY = "swarndesk_partner";
 
 // Registered at module load — i.e. before React even starts rendering — rather than inside
 // AuthProvider's useEffect. React fires child effects before parent effects, so a query
@@ -84,6 +93,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const saveAuth = (newToken: string, newUser: AuthUser) => {
+    localStorage.removeItem(PARTNER_TOKEN_KEY);
+    localStorage.removeItem(PARTNER_KEY);
     localStorage.setItem(TOKEN_KEY, newToken);
     localStorage.setItem(USER_KEY, JSON.stringify(newUser));
     setToken(newToken);
@@ -106,7 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const register = async (formData: { email: string; password: string; name: string; shopName: string; mobile?: string }) => {
+  const register = async (formData: { email: string; password: string; name: string; shopName: string; mobile?: string; referralCode?: string }) => {
     setIsLoading(true);
     try {
       const data = await customFetch<{ token: string; user: AuthUser }>("/api/auth/register", {

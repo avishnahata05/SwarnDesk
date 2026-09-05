@@ -4,6 +4,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import LandingPage from "@/pages/landing";
+import BlogIndex from "@/pages/blog/index";
+import BlogPost from "@/pages/blog/post";
 import AppLayout from "@/components/AppLayout";
 import Dashboard from "@/pages/app/dashboard";
 import Inventory from "@/pages/app/inventory";
@@ -23,7 +25,12 @@ import LoginPage from "@/pages/auth/login";
 import RegisterPage from "@/pages/auth/register";
 import PaymentPage from "@/pages/auth/payment";
 import AdminPage from "@/pages/admin/index";
+import PartnerLoginPage from "@/pages/partner/login";
+import PartnerSignupPage from "@/pages/partner/signup";
+import PartnerDashboardPage from "@/pages/partner/dashboard";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { TourProvider } from "@/contexts/TourContext";
+import { PartnerAuthProvider, usePartnerAuth } from "@/contexts/PartnerAuthContext";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -43,10 +50,14 @@ function isAccessExpired(user: { plan: string; trialEndsAt: string; subscription
   return false;
 }
 
-/** Wraps a component — redirects to /login if not authenticated, /payment if access expired */
+/** Wraps a component — redirects to /login if not authenticated, /payment if access expired.
+ * A logged-in partner is locked out of every main-app route and bounced to their own
+ * dashboard instead — the two account types' sessions are mutually exclusive. */
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
+  const { partner } = usePartnerAuth();
 
+  if (partner) return <Redirect to="/partner/dashboard" />;
   if (!user) return <Redirect to="/login" />;
   if (user.role !== "admin" && isAccessExpired(user)) return <Redirect to="/payment" />;
 
@@ -56,7 +67,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 /** Admin-only route */
 function AdminRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
+  const { partner } = usePartnerAuth();
 
+  if (partner) return <Redirect to="/partner/dashboard" />;
   if (!user) return <Redirect to="/login" />;
   if (user.role !== "admin") return <Redirect to="/app/dashboard" />;
 
@@ -76,9 +89,14 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={LandingPage} />
+      <Route path="/blog" component={BlogIndex} />
+      <Route path="/blog/:slug" component={BlogPost} />
       <Route path="/login" component={LoginPage} />
       <Route path="/register" component={RegisterPage} />
       <Route path="/payment" component={PaymentPage} />
+      <Route path="/partner/login" component={PartnerLoginPage} />
+      <Route path="/partner/signup" component={PartnerSignupPage} />
+      <Route path="/partner/dashboard" component={PartnerDashboardPage} />
       <Route path="/admin">
         <AdminRoute>
           <AdminPage />
@@ -122,7 +140,11 @@ function App() {
       <TooltipProvider>
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
           <AuthProvider>
-            <Router />
+            <PartnerAuthProvider>
+              <TourProvider>
+                <Router />
+              </TourProvider>
+            </PartnerAuthProvider>
           </AuthProvider>
         </WouterRouter>
         <Toaster />
