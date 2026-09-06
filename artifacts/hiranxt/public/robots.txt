@@ -41,4 +41,4 @@ Allow: /
 User-agent: Bingbot
 Allow: /
 
-Sitemap: https://swarndesk.in/sitemap.xml
+Sitemap: https://swarndesk.tirthontech.com/sitemap.xml

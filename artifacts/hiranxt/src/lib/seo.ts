@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-export const SITE_URL = "https://swarndesk.in";
+export const SITE_URL = "https://swarndesk.tirthontech.com";
 export const SITE_NAME = "SwarnDesk";
 export const SUPPORT_PHONE = "+91 89894 96800";
 export const SUPPORT_PHONE_INTL = "+918989496800";
