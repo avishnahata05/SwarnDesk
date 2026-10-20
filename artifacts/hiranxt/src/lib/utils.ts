@@ -5,6 +5,14 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+// Pulls the server's own explanation ("Insufficient stock for X…", "This barcode is already
+// used…") out of a failed API call, so the user sees what to fix instead of "Failed".
+export function apiErrorMessage(err: unknown, fallback: string): string {
+  const data = (err as { data?: { error?: unknown } } | null)?.data;
+  if (data && typeof data.error === "string" && data.error) return data.error;
+  return fallback;
+}
+
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",

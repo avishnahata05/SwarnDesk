@@ -66,7 +66,7 @@ function mapReturn(r: typeof metalReturnsTable.$inferSelect) {
 router.get("/", async (req, res) => {
   try {
     const userId = req.user!.userId;
-    const karigars = await db.select().from(karigarsTable).where(eq(karigarsTable.userId, userId));
+    const karigars = await db.select().from(karigarsTable).where(eq(karigarsTable.userId, userId)).orderBy(karigarsTable.name);
     res.json(karigars.map(mapKarigar));
   } catch (err) {
     req.log.error({ err }, "Failed to list karigars");
@@ -101,6 +101,7 @@ router.get("/:id", async (req, res) => {
   try {
     const userId = req.user!.userId;
     const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
     const [karigar] = await db.select().from(karigarsTable).where(and(eq(karigarsTable.id, id), eq(karigarsTable.userId, userId)));
     if (!karigar) return res.status(404).json({ error: "Not found" });
     const issues = await db.select().from(metalIssuesTable).where(and(eq(metalIssuesTable.karigarId, id), eq(metalIssuesTable.userId, userId)));
@@ -121,13 +122,18 @@ router.patch("/:id", async (req, res) => {
     const userId = req.user!.userId;
     const data = req.body;
     const updateData: Record<string, unknown> = {};
-    if (data.name !== undefined) updateData.name = data.name;
-    if (data.mobile !== undefined) updateData.mobile = data.mobile;
-    if (data.specialization !== undefined) updateData.specialization = data.specialization;
-    if (data.address !== undefined) updateData.address = data.address;
+    const patchId = parseInt(req.params.id);
+    if (isNaN(patchId)) return res.status(400).json({ error: "Invalid id" });
+    for (const f of ["name", "mobile", "specialization"] as const) {
+      if (data[f] === undefined) continue;
+      const v = String(data[f]).trim();
+      if (!v) return res.status(400).json({ error: `${f.charAt(0).toUpperCase() + f.slice(1)} cannot be empty` });
+      updateData[f] = v;
+    }
+    if (data.address !== undefined) updateData.address = data.address ? String(data.address).trim() || null : null;
     if (data.openingBalance !== undefined) updateData.openingBalance = safeFloat(data.openingBalance, 0).toString();
     if (data.openingBalanceType !== undefined) updateData.openingBalanceType = data.openingBalanceType === "debit" ? "debit" : "credit";
-    const [karigar] = await db.update(karigarsTable).set(updateData).where(and(eq(karigarsTable.id, parseInt(req.params.id)), eq(karigarsTable.userId, userId))).returning();
+    const [karigar] = await db.update(karigarsTable).set(updateData).where(and(eq(karigarsTable.id, patchId), eq(karigarsTable.userId, userId))).returning();
     if (!karigar) return res.status(404).json({ error: "Not found" });
     res.json(mapKarigar(karigar));
   } catch (err) {
@@ -198,10 +204,18 @@ router.post("/:id/return-metal", async (req, res) => {
     if (!["gold", "silver"].includes(data.metalType)) return res.status(400).json({ error: "Invalid metal type" });
 
     // Verify karigar belongs to this user before writing any records
-    const [karigar] = await db.select({ id: karigarsTable.id })
+    const [karigar] = await db.select({ id: karigarsTable.id, pendingGold: karigarsTable.pendingGoldWeight, pendingSilver: karigarsTable.pendingSilverWeight })
       .from(karigarsTable)
       .where(and(eq(karigarsTable.id, karigarId), eq(karigarsTable.userId, userId)));
     if (!karigar) return res.status(404).json({ error: "Karigar not found" });
+
+    // The karigar can only hand back metal they were actually given. The decrement below is
+    // clamped at zero, so an over-entered "issued weight" silently wiped the balance instead
+    // of flagging the typo.
+    const holding = safeFloat(data.metalType === "gold" ? karigar.pendingGold : karigar.pendingSilver);
+    if (issuedWeight > holding + 0.0005) {
+      return res.status(400).json({ error: `This karigar only has ${holding.toFixed(3)}g of ${data.metalType} issued to them` });
+    }
 
     const ret = await db.transaction(async (tx) => {
       const [newReturn] = await tx.insert(metalReturnsTable).values({
@@ -402,6 +416,12 @@ router.delete("/:id", async (req, res) => {
     const userId = req.user!.userId;
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const [k] = await db.select().from(karigarsTable).where(and(eq(karigarsTable.id, id), eq(karigarsTable.userId, userId)));
+    if (!k) return res.status(404).json({ error: "Not found" });
+    // Removing a karigar who still holds the shop's gold/silver would erase the only record of it.
+    if (safeFloat(k.pendingGoldWeight) > 0.0005 || safeFloat(k.pendingSilverWeight) > 0.0005) {
+      return res.status(409).json({ error: "This karigar still holds your metal. Record the return of all issued gold/silver before deleting." });
+    }
     const result = await db.delete(karigarsTable).where(and(eq(karigarsTable.id, id), eq(karigarsTable.userId, userId))).returning({ id: karigarsTable.id });
     if (result.length === 0) return res.status(404).json({ error: "Not found" });
     res.status(204).send();

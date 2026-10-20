@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, apiErrorMessage } from "@/lib/utils";
 import {
   useListRepairs, useCreateRepair, useUpdateRepair, useDeleteRepair, useGetSettings, useListKarigars,
   getListRepairsQueryKey,
@@ -278,7 +278,7 @@ export default function Repairs() {
         setAddOpen(false);
         setForm(EMPTY_FORM);
       },
-      onError: () => toast({ title: "Failed to log repair", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to log repair"), variant: "destructive" }),
       onSettled: () => setSubmitting(false),
     });
   };
@@ -329,7 +329,7 @@ export default function Repairs() {
         toast({ title: "Repair updated" });
         setEditRepair(null);
       },
-      onError: () => toast({ title: "Failed to update repair", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to update repair"), variant: "destructive" }),
     });
   };
 
@@ -341,7 +341,7 @@ export default function Repairs() {
         toast({ title: "Repair deleted" });
         setDeleteTarget(null);
       },
-      onError: () => toast({ title: "Failed to delete repair", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to delete repair"), variant: "destructive" }),
     });
   };
 
@@ -369,7 +369,7 @@ export default function Repairs() {
         toast({ title: `Status set to "${STATUS_LABELS[newStatus]}"` });
         setStatusRepair(null);
       },
-      onError: () => toast({ title: "Failed to update status", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to update status"), variant: "destructive" }),
     });
   };
 

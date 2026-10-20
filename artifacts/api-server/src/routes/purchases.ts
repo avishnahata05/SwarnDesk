@@ -81,7 +81,7 @@ function generateInvoice() {
 router.get("/", async (req, res) => {
   try {
     const userId = req.user!.userId;
-    const purchases = await db.select().from(purchasesTable).where(eq(purchasesTable.userId, userId));
+    const purchases = await db.select().from(purchasesTable).where(eq(purchasesTable.userId, userId)).orderBy(desc(purchasesTable.purchaseDate), desc(purchasesTable.id));
     res.json(purchases.map(mapPurchase));
   } catch (err) {
     req.log.error({ err }, "Failed to list purchases");
@@ -94,14 +94,24 @@ router.post("/", async (req, res) => {
     const userId = req.user!.userId;
     const data = req.body;
     const totalAmount = safeFloat(data.totalAmount, 0);
+    if (!String(data.supplierName ?? "").trim()) return res.status(400).json({ error: "Supplier name is required" });
+    if (!["gold", "silver", "bullion", "platinum", "other"].includes(String(data.metalType))) return res.status(400).json({ error: "Select the metal type" });
+    if (totalAmount <= 0) return res.status(400).json({ error: "Total amount must be more than zero" });
+    for (const f of ["grossWeight", "netWeight", "fineWeight", "ratePerGram", "makingCharges"] as const) {
+      if (data[f] !== undefined && data[f] !== null && data[f] !== "" && safeFloat(data[f], -1) < 0) {
+        return res.status(400).json({ error: `${f} cannot be negative` });
+      }
+    }
     const allowedModes = ["cash", "bank", "upi", "fine", "credit", "partial"];
     const paymentMode = allowedModes.includes(data.paymentMode) ? data.paymentMode : "cash";
     const rawPaid = data.paidAmount;
     const paidAmount = rawPaid !== undefined && rawPaid !== null && rawPaid !== ""
       ? Math.max(0, Math.min(totalAmount, safeFloat(rawPaid, totalAmount)))
-      : totalAmount; // default: fully paid, matching pre-existing behavior
+      // Blank paid amount: fully paid — except "credit (unpaid)", which by definition owes
+      // everything. It used to default to fully paid too, hiding the supplier's dues.
+      : paymentMode === "credit" ? 0 : totalAmount;
     const invoiceNumber = data.invoiceNumber ?? generateInvoice();
-    const supplierName = data.supplierName;
+    const supplierName = String(data.supplierName).trim();
     const supplierId = data.supplierId ?? null;
     const metalType = data.metalType;
     const purchaseDate = data.purchaseDate ? new Date(data.purchaseDate) : new Date();
@@ -180,7 +190,9 @@ router.post("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const userId = req.user!.userId;
-    const [purchase] = await db.select().from(purchasesTable).where(and(eq(purchasesTable.id, parseInt(req.params.id)), eq(purchasesTable.userId, userId)));
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const [purchase] = await db.select().from(purchasesTable).where(and(eq(purchasesTable.id, id), eq(purchasesTable.userId, userId)));
     if (!purchase) return res.status(404).json({ error: "Not found" });
     res.json(mapPurchase(purchase));
   } catch (err) {
@@ -388,12 +400,19 @@ router.post("/:id/payments", async (req, res) => {
     const accts = await getOrCreateDefaultAccounts(userId);
 
     const updated = await db.transaction(async (tx) => {
+      // FOR UPDATE so two simultaneous payments can't both read the same paidAmount.
       const [purchase] = await tx.select().from(purchasesTable)
-        .where(and(eq(purchasesTable.id, id), eq(purchasesTable.userId, userId)));
+        .where(and(eq(purchasesTable.id, id), eq(purchasesTable.userId, userId)))
+        .for("update");
       if (!purchase) throw Object.assign(new Error("Purchase not found"), { statusCode: 404 });
+      if (purchase.cancelledAt) throw Object.assign(new Error("This purchase was cancelled — no payment can be made against it"), { statusCode: 400 });
 
       const total = safeFloat(purchase.totalAmount);
       const alreadyPaid = purchase.paidAmount === null ? total : safeFloat(purchase.paidAmount);
+      const balance = Math.round((total - alreadyPaid) * 100) / 100;
+      if (balance <= 0) throw Object.assign(new Error("This purchase is already fully paid"), { statusCode: 400 });
+      // Paying more than is owed would debit Accounts Payable below what was ever credited.
+      if (amount > balance + 0.01) throw Object.assign(new Error(`Amount exceeds the balance due of ₹${balance.toLocaleString("en-IN")}`), { statusCode: 400 });
       const newPaid = Math.min(total, alreadyPaid + amount);
 
       await tx.insert(purchasePaymentTransactionsTable).values({
@@ -430,7 +449,7 @@ router.post("/:id/payments", async (req, res) => {
     res.json(mapPurchase(updated));
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
-    if (e.statusCode === 404) return res.status(404).json({ error: e.message });
+    if (e.statusCode === 404 || e.statusCode === 400) return res.status(e.statusCode).json({ error: e.message });
     req.log.error({ err }, "Failed to record purchase payment");
     res.status(500).json({ error: "Internal server error" });
   }

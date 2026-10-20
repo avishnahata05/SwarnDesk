@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Search, ChevronDown, ChevronUp, CheckCircle2, Clock, IndianRupee, History, Undo2, Pencil } from "lucide-react";
+import { Search, ChevronDown, ChevronUp, CheckCircle2, Clock, IndianRupee, History, Undo2, Pencil, MessageCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
@@ -22,6 +22,7 @@ interface PendingSale {
   invoiceNumber: string;
   customerName: string;
   customerId: number | null;
+  customerMobile?: string | null;
   saleDate: string;
   totalAmount: number;
   paidAmount: number;
@@ -325,6 +326,21 @@ export default function PendingPayments() {
                   <Button size="sm" onClick={() => openPayDialog(sale)} className="gap-1.5" data-testid={`button-pay-${sale.id}`}>
                     <IndianRupee className="w-3.5 h-3.5" />
                     Collect Payment
+                  </Button>
+                )}
+                {sale.status !== "returned" && sale.balanceAmount > 0 && sale.customerMobile && (
+                  <Button
+                    size="sm" variant="outline" className="gap-1.5 text-green-700 border-green-300 hover:bg-green-50"
+                    onClick={() => {
+                      const digits = sale.customerMobile!.replace(/\D/g, "");
+                      const num = digits.length === 10 ? `91${digits}` : digits;
+                      const msg = `Namaste ${sale.customerName}, a gentle reminder: a balance of ${formatCurrency(sale.balanceAmount)} is pending on invoice ${sale.invoiceNumber}. Kindly pay at your convenience. Thank you!`;
+                      window.open(`https://wa.me/${num}?text=${encodeURIComponent(msg)}`, "_blank");
+                    }}
+                    data-testid={`button-remind-${sale.id}`}
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" />
+                    Remind
                   </Button>
                 )}
                 {sale.status === "returned" ? (

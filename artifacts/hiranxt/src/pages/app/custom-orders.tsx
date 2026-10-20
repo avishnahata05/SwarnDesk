@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, apiErrorMessage } from "@/lib/utils";
 import {
   useListCustomOrders, useCreateCustomOrder, useUpdateCustomOrder, useDeleteCustomOrder,
   useListKarigars, useGetSettings, getListCustomOrdersQueryKey,
@@ -284,7 +284,7 @@ export default function CustomOrders() {
     };
     createOrder.mutate({ data: createPayload }, {
       onSuccess: () => { invalidate(); toast({ title: "Custom order created" }); setAddOpen(false); setForm(EMPTY_CREATE); setBankAccountId(null); },
-      onError: () => toast({ title: "Failed to create order", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to create order"), variant: "destructive" }),
     });
   };
 
@@ -332,7 +332,7 @@ export default function CustomOrders() {
       data: editPayload
     }, {
       onSuccess: () => { invalidate(); toast({ title: "Order updated" }); setEditOrder(null); setEditBankAccountId(null); },
-      onError: () => toast({ title: "Failed to update", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to update"), variant: "destructive" }),
     });
   };
 
@@ -364,7 +364,7 @@ export default function CustomOrders() {
         toast({ title: isIssuingMetal ? `Metal issued to ${karigar?.name}` : `Order assigned to ${karigar?.name}` });
         setAssignOrder(null);
       },
-      onError: () => toast({ title: "Failed to assign", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to assign"), variant: "destructive" }),
     });
   };
 
@@ -392,7 +392,7 @@ export default function CustomOrders() {
       }
     }, {
       onSuccess: () => { invalidate(); toast({ title: "Karigar return recorded" }); setReturnOrder(null); },
-      onError: () => toast({ title: "Failed to record return", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to record return"), variant: "destructive" }),
     });
   };
 
@@ -425,7 +425,7 @@ export default function CustomOrders() {
       }
     }, {
       onSuccess: () => { invalidate(); toast({ title: "Order delivered" }); setDeliverOrder(null); },
-      onError: () => toast({ title: "Failed to update", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to update"), variant: "destructive" }),
     });
   };
 
@@ -433,7 +433,7 @@ export default function CustomOrders() {
     if (!deleteTarget) return;
     deleteOrder.mutate({ id: deleteTarget.id }, {
       onSuccess: () => { invalidate(); toast({ title: "Order deleted" }); setDeleteTarget(null); },
-      onError: () => toast({ title: "Failed to delete", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to delete"), variant: "destructive" }),
     });
   };
 

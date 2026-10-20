@@ -24,6 +24,28 @@ async function lookupActivePartnerId(rawCode: unknown): Promise<number | null> {
 
 const router = Router();
 
+// Brute-force guard for /login: 10 failed attempts per email+IP per 15 minutes. In-process
+// (like the other caches here) — enough to stop password guessing against one instance.
+const loginFailures = new Map<string, { count: number; resetAt: number }>();
+const LOGIN_MAX_FAILS = 10;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+function loginKey(req: import("express").Request, email: string) {
+  return `${req.ip}|${email}`;
+}
+function loginBlocked(key: string): boolean {
+  const e = loginFailures.get(key);
+  if (!e) return false;
+  if (e.resetAt <= Date.now()) { loginFailures.delete(key); return false; }
+  return e.count >= LOGIN_MAX_FAILS;
+}
+function noteLoginFailure(key: string) {
+  const now = Date.now();
+  if (loginFailures.size > 10_000) loginFailures.clear();
+  const e = loginFailures.get(key);
+  if (!e || e.resetAt <= now) loginFailures.set(key, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+  else e.count += 1;
+}
+
 router.post("/register", async (req, res) => {
   try {
     const { password, name, shopName, mobile, referralCode } = req.body;
@@ -78,12 +100,22 @@ router.post("/register", async (req, res) => {
 
 router.post("/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
+    // Coerced and trimmed: a pasted trailing space or a non-string body used to throw on
+    // .toLowerCase() (a 500) or silently fail to match the stored email.
+    const email = String(req.body.email ?? "").trim().toLowerCase();
+    const password = String(req.body.password ?? "");
     if (!email || !password) return res.status(400).json({ error: "Email and password required" });
-    const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email.toLowerCase())).limit(1);
-    if (!user) return loginAsStaff(req, res, email, password);
+    const key = loginKey(req, email);
+    if (loginBlocked(key)) return res.status(429).json({ error: "Too many failed attempts. Please wait 15 minutes and try again." });
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+    if (!user) {
+      const ok = await loginAsStaff(req, res, email, password);
+      if (!ok) noteLoginFailure(key); else loginFailures.delete(key);
+      return;
+    }
     const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) return res.status(401).json({ error: "Invalid email or password" });
+    if (!valid) { noteLoginFailure(key); return res.status(401).json({ error: "Invalid email or password" }); }
+    loginFailures.delete(key);
     // Refresh plan status on login
     let plan = user.plan;
     const now = new Date();
@@ -116,13 +148,14 @@ router.post("/login", async (req, res) => {
 // Falls back here when the email doesn't match a shop-owner account — checks staff logins
 // instead. The resulting token/user carries the OWNER's userId (so every other route's
 // data scoping keeps working unchanged) plus staffId/staffRole for permission checks.
-async function loginAsStaff(req: import("express").Request, res: import("express").Response, email: string, password: string) {
+// Returns true on a successful login (response already sent either way).
+async function loginAsStaff(req: import("express").Request, res: import("express").Response, email: string, password: string): Promise<boolean> {
   const [staff] = await db.select().from(staffTable).where(eq(staffTable.email, email.toLowerCase())).limit(1);
-  if (!staff || !staff.isActive) return res.status(401).json({ error: "Invalid email or password" });
+  if (!staff || !staff.isActive) { res.status(401).json({ error: "Invalid email or password" }); return false; }
   const valid = await bcrypt.compare(password, staff.passwordHash);
-  if (!valid) return res.status(401).json({ error: "Invalid email or password" });
+  if (!valid) { res.status(401).json({ error: "Invalid email or password" }); return false; }
   const [owner] = await db.select().from(usersTable).where(eq(usersTable.id, staff.ownerUserId)).limit(1);
-  if (!owner) return res.status(401).json({ error: "Invalid email or password" });
+  if (!owner) { res.status(401).json({ error: "Invalid email or password" }); return false; }
   const token = signToken({
     userId: owner.id,
     email: staff.email,
@@ -143,6 +176,7 @@ async function loginAsStaff(req: import("express").Request, res: import("express
       staffId: staff.id, staffRole: staff.role, partnerId: owner.partnerId,
     },
   });
+  return true;
 }
 
 // One-time admin setup — protected by ADMIN_SETUP_SECRET

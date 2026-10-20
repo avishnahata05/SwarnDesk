@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { customOrdersTable, customOrderPaymentTransactionsTable } from "@workspace/db";
 import { eq, and, desc, sql } from "drizzle-orm";
+import { karigarsTable } from "@workspace/db";
 import { postJournalEntry, getOrCreateDefaultAccounts, resolveMoneyAccountId, isValidBankAccount, safeFloat, nextVoucherNumber, type DefaultAccountKey } from "./accounting-helpers";
 
 const router = Router();
@@ -223,8 +224,16 @@ router.patch("/:id", async (req, res) => {
     if (d.estimatedPrice !== undefined) update.estimatedPrice = d.estimatedPrice != null ? String(d.estimatedPrice) : null;
     if (d.agreedPrice !== undefined) update.agreedPrice = d.agreedPrice != null ? String(d.agreedPrice) : null;
     if (d.bookingMetalRate !== undefined) update.bookingMetalRate = d.bookingMetalRate != null ? String(d.bookingMetalRate) : null;
-    if (d.orderDate !== undefined) update.orderDate = new Date(d.orderDate);
-    if (d.dueDate !== undefined) update.dueDate = new Date(d.dueDate);
+    if (d.orderDate !== undefined) {
+      const od = new Date(d.orderDate);
+      if (isNaN(od.getTime())) return res.status(400).json({ error: "Invalid order date" });
+      update.orderDate = od;
+    }
+    if (d.dueDate !== undefined) {
+      const dd = new Date(d.dueDate);
+      if (isNaN(dd.getTime())) return res.status(400).json({ error: "Invalid due date" });
+      update.dueDate = dd;
+    }
     if (d.notes !== undefined) update.notes = d.notes?.trim() || null;
 
     // Status
@@ -234,8 +243,20 @@ router.patch("/:id", async (req, res) => {
     }
 
     // Karigar assignment
-    if (d.karigarId !== undefined) update.karigarId = d.karigarId;
-    if (d.karigarName !== undefined) update.karigarName = d.karigarName;
+    // The karigar must belong to this shop; the name is taken from the record, not the client.
+    if (d.karigarId !== undefined) {
+      if (d.karigarId === null) {
+        update.karigarId = null;
+        update.karigarName = null;
+      } else {
+        const kid = parseInt(d.karigarId);
+        const [k] = await db.select({ id: karigarsTable.id, name: karigarsTable.name }).from(karigarsTable)
+          .where(and(eq(karigarsTable.id, kid), eq(karigarsTable.userId, userId)));
+        if (!k) return res.status(404).json({ error: "Karigar not found" });
+        update.karigarId = k.id;
+        update.karigarName = k.name;
+      }
+    }
 
     // Metal issued
     if (d.metalIssuedWeight !== undefined) update.metalIssuedWeight = d.metalIssuedWeight != null ? String(d.metalIssuedWeight) : null;
@@ -262,6 +283,7 @@ router.patch("/:id", async (req, res) => {
     }
 
     const orderId = parseInt(req.params.id);
+    if (isNaN(orderId)) return res.status(400).json({ error: "Invalid id" });
     const updated = await db.transaction(async (tx) => {
       // Locks the row for the duration of this transaction so two concurrent PATCHes to the
       // same order can't both read the same pre-update status/karigar and double- or
@@ -388,9 +410,15 @@ router.post("/:id/payments", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const userId = req.user!.userId;
+    const delId = parseInt(req.params.id);
+    if (isNaN(delId)) return res.status(400).json({ error: "Invalid id" });
+    // Advance money already posted to the books must not be orphaned by deleting the order.
+    const [paid] = await db.select({ id: customOrderPaymentTransactionsTable.id }).from(customOrderPaymentTransactionsTable)
+      .where(and(eq(customOrderPaymentTransactionsTable.customOrderId, delId), eq(customOrderPaymentTransactionsTable.userId, userId))).limit(1);
+    if (paid) return res.status(409).json({ error: "Advance/payments were collected on this order, so it can't be deleted. Mark it cancelled instead." });
     const deleted = await db.transaction(async (tx) => {
       const [d] = await tx.delete(customOrdersTable)
-        .where(and(eq(customOrdersTable.id, parseInt(req.params.id)), eq(customOrdersTable.userId, userId)))
+        .where(and(eq(customOrdersTable.id, delId), eq(customOrdersTable.userId, userId)))
         .returning();
       if (d && isActiveWithKarigar(d.karigarId, d.status)) {
         await adjustPendingOrders(tx, userId, d.karigarId!, -1);

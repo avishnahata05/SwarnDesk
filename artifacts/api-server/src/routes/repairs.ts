@@ -149,6 +149,7 @@ router.patch("/:id", async (req, res) => {
   try {
     const userId = req.user!.userId;
     const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
     const data = req.body;
     const VALID_STATUSES = ["received", "in_progress", "ready", "delivered"];
 
@@ -157,8 +158,16 @@ router.patch("/:id", async (req, res) => {
       if (!VALID_STATUSES.includes(data.status)) return res.status(400).json({ error: "Invalid status value" });
       updateData.status = data.status;
     }
-    if (data.actualCost !== undefined) updateData.actualCost = data.actualCost?.toString() ?? null;
-    if (data.deliveredDate !== undefined) updateData.deliveredDate = data.deliveredDate ? new Date(data.deliveredDate) : null;
+    if (data.actualCost !== undefined) {
+      const n = data.actualCost === null || data.actualCost === "" ? null : Number(data.actualCost);
+      if (n !== null && (!isFinite(n) || n < 0)) return res.status(400).json({ error: "Final cost must be a non-negative number" });
+      updateData.actualCost = n === null ? null : n.toString();
+    }
+    if (data.deliveredDate !== undefined) {
+      const d = data.deliveredDate ? new Date(data.deliveredDate) : null;
+      if (d && isNaN(d.getTime())) return res.status(400).json({ error: "Invalid delivered date" });
+      updateData.deliveredDate = d;
+    }
     if (data.notes !== undefined) updateData.notes = data.notes ? String(data.notes).slice(0, 500) : null;
     if (data.customerName !== undefined) updateData.customerName = String(data.customerName).trim();
     if (data.customerMobile !== undefined) updateData.customerMobile = String(data.customerMobile).trim();
@@ -166,9 +175,21 @@ router.patch("/:id", async (req, res) => {
     if (data.issue !== undefined) updateData.issue = String(data.issue).trim();
     if (data.grossWeight !== undefined) updateData.grossWeight = data.grossWeight ? safeFloat(data.grossWeight).toString() : null;
     if (data.netWeight !== undefined) updateData.netWeight = data.netWeight ? safeFloat(data.netWeight).toString() : null;
-    if (data.estimatedCost !== undefined) updateData.estimatedCost = parseFloat(String(data.estimatedCost)).toString();
-    if (data.promisedDate !== undefined) updateData.promisedDate = new Date(data.promisedDate);
-    if (data.receivedDate !== undefined) updateData.receivedDate = new Date(data.receivedDate);
+    if (data.estimatedCost !== undefined) {
+      const n = parseFloat(String(data.estimatedCost));
+      if (!isFinite(n) || n < 0) return res.status(400).json({ error: "Valid estimated cost is required" });
+      updateData.estimatedCost = n.toString();
+    }
+    if (data.promisedDate !== undefined) {
+      const d = new Date(data.promisedDate);
+      if (isNaN(d.getTime())) return res.status(400).json({ error: "Invalid promised date" });
+      updateData.promisedDate = d;
+    }
+    if (data.receivedDate !== undefined) {
+      const d = new Date(data.receivedDate);
+      if (isNaN(d.getTime())) return res.status(400).json({ error: "Invalid received date" });
+      updateData.receivedDate = d;
+    }
 
     if (data.karigarId !== undefined) {
       if (data.karigarId === null) {
@@ -195,6 +216,14 @@ router.patch("/:id", async (req, res) => {
 
       const newKarigarId = (data.karigarId !== undefined ? updateData.karigarId : existing.karigarId) as number | null;
       const newStatus = (updateData.status as string | undefined) ?? existing.status;
+
+      // Handing the item back stamps the delivery date automatically; moving it back out of
+      // "delivered" clears it. Otherwise delivered jobs show no delivery date and a job
+      // reopened by mistake keeps a stale one.
+      if (updateData.status !== undefined && data.deliveredDate === undefined) {
+        if (newStatus === "delivered" && !existing.deliveredDate) updateData.deliveredDate = new Date();
+        else if (newStatus !== "delivered" && existing.deliveredDate) updateData.deliveredDate = null;
+      }
       const wasActive = isActiveWithKarigar(existing.karigarId, existing.status);
       const isActive = isActiveWithKarigar(newKarigarId, newStatus);
 
@@ -298,9 +327,16 @@ router.post("/:id/payments", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const userId = req.user!.userId;
+    const repairId = parseInt(req.params.id);
+    if (isNaN(repairId)) return res.status(400).json({ error: "Invalid id" });
+    // Payments already collected are posted to the books; deleting the job would orphan
+    // that money with nothing to explain it.
+    const [hasPayments] = await db.select({ id: repairPaymentTransactionsTable.id }).from(repairPaymentTransactionsTable)
+      .where(and(eq(repairPaymentTransactionsTable.repairJobId, repairId), eq(repairPaymentTransactionsTable.userId, userId))).limit(1);
+    if (hasPayments) return res.status(409).json({ error: "Payments have been collected on this repair, so it can't be deleted. Mark it delivered instead." });
     const deleted = await db.transaction(async (tx) => {
       const [d] = await tx.delete(repairJobsTable)
-        .where(and(eq(repairJobsTable.id, parseInt(req.params.id)), eq(repairJobsTable.userId, userId)))
+        .where(and(eq(repairJobsTable.id, repairId), eq(repairJobsTable.userId, userId)))
         .returning();
       if (d && isActiveWithKarigar(d.karigarId, d.status)) {
         await adjustPendingOrders(tx, userId, d.karigarId!, -1);

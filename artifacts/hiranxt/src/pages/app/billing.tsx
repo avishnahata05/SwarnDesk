@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, apiErrorMessage } from "@/lib/utils";
 import {
   useListInventoryItems, useListCustomers, useCreateSale, useGetCurrentRates,
   useGetSettings, useCreateCustomer, useGetCustomer, useUpdateRates, useListStaff,
@@ -55,6 +55,9 @@ interface SaleComplete {
   gstAmount: number;
   paymentMode: string;
   paymentStatus: string;
+  paidAmount: number;
+  roundOff: number;
+  gstRatePct: number;
 }
 
 // Escape user-entered text (item names, customer names, shop settings) before it lands
@@ -85,10 +88,15 @@ function openPrintWindow(params: {
   gstAmount: number;
   totalAmount: number;
   paymentMode: string;
+  paidAmount: number;
+  roundOff: number;
+  gstRatePct: number;
 }) {
   const { isEstimate, invoiceNumber, date, shop, customer, items,
     subTotal, discountAmount, exchangeGoldWeight, exchangeGoldValue,
-    taxableBase, gstAmount, totalAmount, paymentMode } = params;
+    taxableBase, gstAmount, totalAmount, paymentMode, paidAmount, roundOff, gstRatePct } = params;
+  const balanceDue = Math.max(0, totalAmount - paidAmount);
+  const halfRate = +(gstRatePct / 2).toFixed(2);
 
   const fmt = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -215,7 +223,7 @@ ${isEstimate ? `<div class="watermark">${escapeHtml(shop.name)}</div>` : ""}
       <div class="doc-label">${isEstimate ? "Estimate / Quotation" : "Tax Invoice"}</div>
       <div class="doc-num">${isEstimate ? "Est. Ref" : "Invoice"}: ${escapeHtml(invoiceNumber)}</div>
       <div class="doc-date">Date: ${escapeHtml(date)}</div>
-      <div class="doc-date">HSN: 7113 · GST: 3%${isEstimate ? " (estimated)" : ""}</div>
+      <div class="doc-date">HSN: 7113 · GST: ${gstRatePct}%${isEstimate ? " (estimated)" : ""}</div>
     </div>
   </div>
 
@@ -261,8 +269,9 @@ ${isEstimate ? `<div class="watermark">${escapeHtml(shop.name)}</div>` : ""}
       ${discountAmount > 0 ? `<div class="sum-row discount"><span>Discount</span><span>− ${fmt(discountAmount)}</span></div>` : ""}
       ${exchangeGoldWeight > 0 ? `<div class="sum-row exchange"><span>Exchange Gold (${exchangeGoldWeight.toFixed(3)}g)</span><span>− ${fmt(exchangeGoldValue)}</span></div>` : ""}
       <div class="sum-row light"><span>Taxable Value</span><span>${fmt(taxableBase)}</span></div>
-      <div class="sum-row light"><span>CGST @ 1.5%${isEstimate ? " (est.)" : ""}</span><span>${fmt(cgst)}</span></div>
-      <div class="sum-row light"><span>SGST @ 1.5%${isEstimate ? " (est.)" : ""}</span><span>${fmt(sgst)}</span></div>
+      <div class="sum-row light"><span>CGST @ ${halfRate}%${isEstimate ? " (est.)" : ""}</span><span>${fmt(cgst)}</span></div>
+      <div class="sum-row light"><span>SGST @ ${halfRate}%${isEstimate ? " (est.)" : ""}</span><span>${fmt(sgst)}</span></div>
+      ${Math.abs(roundOff) >= 0.005 ? `<div class="sum-row light"><span>Round Off</span><span>${roundOff > 0 ? "+" : "−"} ${fmt(Math.abs(roundOff))}</span></div>` : ""}
       <div class="sum-row total">
         <span>${isEstimate ? "Estimated Total" : "Grand Total"}</span>
         <span>${fmt(totalAmount)}</span>
@@ -271,7 +280,11 @@ ${isEstimate ? `<div class="watermark">${escapeHtml(shop.name)}</div>` : ""}
   </div>
   <div class="gst-note">${isEstimate ? "Estimated amount in words" : "Amount in words"}: ${amountToWords(totalAmount)}</div>
 
-  ${!isEstimate ? `<div class="payment-badge">✓ ${escapeHtml(paymentMode.toUpperCase())} Payment</div>` : `<div class="payment-badge">⏳ Estimate Valid for 7 Days</div>`}
+  ${isEstimate
+    ? `<div class="payment-badge">⏳ Estimate Valid for 7 Days</div>`
+    : balanceDue > 0.005
+      ? `<div class="payment-badge" style="background:#fee2e2;color:#b91c1c;border-color:#fca5a5">Paid ${fmt(paidAmount)} · Balance Due ${fmt(balanceDue)}</div>`
+      : `<div class="payment-badge">✓ ${escapeHtml(paymentMode.toUpperCase())} Payment — Paid in full</div>`}
 
   <!-- Footer -->
   <div class="footer">
@@ -352,6 +365,8 @@ export default function Billing() {
   const [paidNow, setPaidNow] = useState<string>("");
   const [discount, setDiscount] = useState(0);
   const [exchangeGoldWeight, setExchangeGoldWeight] = useState(0);
+  // Old gold is rarely 22K — valuing it all at the 22K rate over- or under-paid the customer.
+  const [exchangePurity, setExchangePurity] = useState("22K");
   const [saleComplete, setSaleComplete] = useState<SaleComplete | null>(null);
   const [confirmSaleOpen, setConfirmSaleOpen] = useState(false);
 
@@ -547,6 +562,9 @@ export default function Billing() {
       toast({ title: "Enter item name and weight", variant: "destructive" }); return;
     }
     const qty = parseInt(quickQty || "1");
+    if (!isFinite(qty) || qty < 1) {
+      toast({ title: "Quantity must be at least 1", variant: "destructive" }); return;
+    }
     const tempId = -(Date.now());
     setCart(prev => [...prev, {
       inventoryItemId: tempId,
@@ -567,12 +585,16 @@ export default function Billing() {
   };
 
   const subTotal = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity - item.discount, 0);
-  const exchangeGoldValue = exchangeGoldWeight * goldRate22k;
+  const exchangeGoldValue = Math.round(exchangeGoldWeight * getLiveRate("gold", exchangePurity));
   const taxableBase = Math.max(0, subTotal - discount - (gstOnExchangeEnabled ? exchangeGoldValue : 0));
   const gstAmount = taxableBase * GST_RATE;
   // The exchange value is still deducted from what the customer owes even when it isn't
   // netted out of the *taxable* base — it's always a real reduction in cash due.
-  const totalAmount = Math.max(0, subTotal - discount - exchangeGoldValue) + gstAmount;
+  const rawTotal = Math.max(0, subTotal - discount - exchangeGoldValue) + gstAmount;
+  // Bills are settled in whole rupees: round the payable total and show the difference as a
+  // "Round Off" line, the way Indian invoices do, instead of asking for Rs 54,321.37.
+  const totalAmount = Math.round(rawTotal);
+  const roundOff = totalAmount - rawTotal;
 
   const handleScanEnter = useCallback(() => {
     const q = scanInput.trim();
@@ -631,6 +653,9 @@ export default function Billing() {
     const gst = s?.gstAmount ?? gstAmount;
     const total = s?.total ?? totalAmount;
     const pMode = s?.paymentMode ?? paymentMode;
+    const paid = s?.paidAmount ?? total;
+    const rOff = s?.roundOff ?? roundOff;
+    const gstPct = s?.gstRatePct ?? GST_RATE * 100;
 
     openPrintWindow({
       isEstimate,
@@ -647,6 +672,9 @@ export default function Billing() {
       gstAmount: gst,
       totalAmount: total,
       paymentMode: pMode,
+      paidAmount: paid,
+      roundOff: rOff,
+      gstRatePct: gstPct,
     });
   };
 
@@ -661,7 +689,7 @@ export default function Billing() {
         setCustomerSearch("");
         toast({ title: `${newCust.name} added and selected` });
       },
-      onError: () => toast({ title: "Failed to add customer", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to add customer"), variant: "destructive" }),
     });
   };
 
@@ -686,6 +714,13 @@ export default function Billing() {
       }
     }
 
+    // Money still owed needs someone to collect it from: a walk-in has no phone number or
+    // record, so the dues would be lost.
+    if (paymentStatus !== "paid" && !(selectedCustomer && selectedCustomer.id > 0)) {
+      toast({ title: "Select or add a customer first. Dues can't be tracked on a walk-in bill.", variant: "destructive" });
+      return;
+    }
+
     setConfirmSaleOpen(true);
   };
 
@@ -696,7 +731,10 @@ export default function Billing() {
     } else if (paymentStatus === "partial") {
       paidAmount = parseFloat(paidNow);
     } else {
-      paidAmount = paidNow !== "" ? parseFloat(paidNow) || 0 : totalAmount;
+      // "Paid" always means paid in full. Reading the leftover "amount paid now" box here
+      // meant: pick Partial, type 5000, switch back to Paid, and the bill silently saved
+      // as Rs 5,000 received while the screen said Paid.
+      paidAmount = totalAmount;
     }
 
     let salespersonId: number | null = null;
@@ -716,7 +754,7 @@ export default function Billing() {
         customerId: selectedCustomer?.id && selectedCustomer.id > 0 ? selectedCustomer.id : null,
         customerName: selectedCustomer?.name ?? "Walk-in Customer",
         totalAmount, gstAmount, discountAmount: discount,
-        exchangeGoldWeight, exchangeGoldValue, paymentMode, bankAccountId, salespersonId, salespersonName, paymentStatus,
+        exchangeGoldWeight, exchangeGoldValue, exchangePurity, paymentMode, bankAccountId, salespersonId, salespersonName, paymentStatus,
         paidAmount,
         notes: null,
         items: cart.map(c => ({
@@ -738,18 +776,26 @@ export default function Billing() {
           subTotal, discountAmount: discount,
           exchangeGoldWeight, exchangeGoldValue,
           taxableBase, gstAmount, paymentMode, paymentStatus,
+          paidAmount, roundOff, gstRatePct: GST_RATE * 100,
         });
         setCart([]);
         setSelectedCustomer(null);
         setDiscount(0);
         setExchangeGoldWeight(0);
+        setExchangePurity("22K");
         setPaidNow("");
+        // Start the next bill clean: a leftover Partial/Pending would carry over to it.
+        setPaymentStatus("paid");
+        setPaymentMode("cash");
+        setBankAccountId(null);
         queryClient.invalidateQueries({ queryKey: getListInventoryItemsQueryKey() });
         toast({ title: "Sale completed!", description: `Invoice: ${sale.invoiceNumber}` });
       },
-      onError: () => {
+      onError: (e) => {
         setConfirmSaleOpen(false);
-        toast({ title: "Sale failed", variant: "destructive" });
+        toast({ title: apiErrorMessage(e, "Sale failed. Please try again."), variant: "destructive" });
+        // Stock may have changed under us (another counter sold it): refresh so cart limits are real.
+        queryClient.invalidateQueries({ queryKey: getListInventoryItemsQueryKey() });
       },
     });
   };
@@ -1366,7 +1412,7 @@ export default function Billing() {
                 </div>
                 <div className="flex justify-between items-center gap-2">
                   <span className="text-muted-foreground shrink-0">Discount (₹)</span>
-                  <input type="number" value={discount} onChange={e => setDiscount(parseFloat(e.target.value) || 0)}
+                  <input type="number" value={discount} onChange={e => setDiscount(Math.max(0, parseFloat(e.target.value) || 0))} min={0}
                     className="w-24 text-right bg-background border border-border rounded px-2 py-1 text-sm focus:border-primary outline-none" data-testid="input-discount" />
                 </div>
                 <div className="flex justify-between items-center gap-2">
@@ -1374,13 +1420,24 @@ export default function Billing() {
                     Exchange Gold (g)
                     <InfoTooltip text="Old gold the customer is trading in as part-payment. Its value (at today's rate) is deducted from what they owe on this sale." />
                   </span>
-                  <input type="number" step="0.001" value={exchangeGoldWeight} onChange={e => setExchangeGoldWeight(parseFloat(e.target.value) || 0)}
+                  <input type="number" step="0.001" value={exchangeGoldWeight} onChange={e => setExchangeGoldWeight(Math.max(0, parseFloat(e.target.value) || 0))} min={0}
                     className="w-24 text-right bg-background border border-border rounded px-2 py-1 text-sm focus:border-primary outline-none" data-testid="input-exchange-gold" />
                 </div>
                 {exchangeGoldWeight > 0 && (
-                  <div className="flex justify-between text-green-600">
-                    <span>Exchange Value</span><span>-{formatCurrency(exchangeGoldValue)}</span>
-                  </div>
+                  <>
+                    <div className="flex justify-between items-center gap-2">
+                      <span className="text-muted-foreground shrink-0">Old gold purity</span>
+                      <Select value={exchangePurity} onValueChange={setExchangePurity}>
+                        <SelectTrigger className="w-24 h-8" data-testid="select-exchange-purity"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex justify-between text-green-600">
+                      <span>Exchange Value</span><span>-{formatCurrency(exchangeGoldValue)}</span>
+                    </div>
+                  </>
                 )}
                 <div className="flex justify-between text-muted-foreground">
                   <span>Taxable Base</span><span>{formatCurrency(taxableBase)}</span>
@@ -1391,6 +1448,11 @@ export default function Billing() {
                 <div className="flex justify-between text-muted-foreground">
                   <span>SGST {(GST_RATE * 50).toFixed(2)}%</span><span>{formatCurrency(gstAmount / 2)}</span>
                 </div>
+                {Math.abs(roundOff) >= 0.005 && (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Round Off</span><span>{roundOff > 0 ? "+" : "-"}&#8377;{Math.abs(roundOff).toFixed(2)}</span>
+                  </div>
+                )}
                 <div className="border-t border-border pt-2 flex justify-between font-bold text-lg">
                   <span>Total</span>
                   <span className="text-primary">{formatCurrency(totalAmount)}</span>
@@ -1400,10 +1462,10 @@ export default function Billing() {
               <div className="space-y-3">
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">Payment Mode</label>
-                  <Select value={paymentMode} onValueChange={v => { setPaymentMode(v); setBankAccountId(null); if (v === "partial") { setPaidNow(""); } }}>
+                  <Select value={paymentMode} onValueChange={v => { setPaymentMode(v); setBankAccountId(null); }}>
                     <SelectTrigger data-testid="select-payment-mode"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {["cash", "upi", "card", "bank", "credit", "partial"].map(m => (
+                      {["cash", "upi", "card", "bank"].map(m => (
                         <SelectItem key={m} value={m} className="capitalize">{m.charAt(0).toUpperCase() + m.slice(1)}</SelectItem>
                       ))}
                     </SelectContent>
@@ -1424,7 +1486,7 @@ export default function Billing() {
                   </div>
                 )}
 
-                {(paymentMode === "partial" || paymentStatus === "partial" || paymentStatus === "pending") && (
+                {paymentStatus === "partial" && (
                   <div className="space-y-2 p-3 rounded-lg bg-orange-50 border border-orange-200">
                     <div>
                       <label className="text-xs font-medium text-orange-800 mb-1 block">Amount Paid Now (₹)</label>
@@ -1457,7 +1519,7 @@ export default function Billing() {
                     <SelectContent>
                       <SelectItem value="paid">Paid</SelectItem>
                       <SelectItem value="partial">Partial</SelectItem>
-                      <SelectItem value="pending">Pending (₹0 now)</SelectItem>
+                      <SelectItem value="pending">Pending (nothing paid now)</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-[10px] text-muted-foreground mt-1">Payment Status decides what gets saved (Payment Mode is just how they paid).</p>

@@ -69,6 +69,11 @@ function mapRepair(r: typeof repairJobsTable.$inferSelect) {
   };
 }
 
+// Last 10 digits — makes "98765 43210", "+91-9876543210" and "09876543210" compare equal.
+function mobileKey(raw: string): string {
+  return raw.replace(/\D/g, "").slice(-10);
+}
+
 function parseMmDd(dateStr: string | null | undefined): { month: number; day: number } | null {
   if (!dateStr) return null;
   try {
@@ -138,6 +143,15 @@ router.post("/", async (req, res) => {
     const data = req.body;
     if (!data.name?.trim()) return res.status(400).json({ error: "Customer name is required" });
     if (!data.mobile?.trim()) return res.status(400).json({ error: "Mobile number is required" });
+    const digits = String(data.mobile).replace(/\D/g, "");
+    if (digits.length < 10 || digits.length > 13) return res.status(400).json({ error: "Enter a valid 10-digit mobile number" });
+
+    // One person, one record: a second entry for the same number splits their purchase
+    // history, loyalty points and dues across two customers.
+    const [sameMobile] = await db.select({ name: customersTable.name }).from(customersTable)
+      .where(and(eq(customersTable.userId, userId), sql`right(regexp_replace(${customersTable.mobile}, '[^0-9]', '', 'g'), 10) = ${mobileKey(String(data.mobile))}`))
+      .limit(1);
+    if (sameMobile) return res.status(409).json({ error: `A customer with this mobile number already exists (${sameMobile.name})` });
 
     // Validate birthday/anniversary format if provided
     if (data.birthday && !parseMmDd(data.birthday)) {
@@ -180,7 +194,7 @@ router.get("/history", async (req, res) => {
 
     // Digit-normalized substring match, pushed into SQL so a lookup only pulls the
     // handful of matching rows instead of every customer/loan this shop has ever had.
-    const digitsMatch = (col: any) => sql`regexp_replace(${col}, '\D', '', 'g') LIKE ${`%${digits}%`}`;
+    const digitsMatch = (col: any) => sql`regexp_replace(${col}, '[^0-9]', '', 'g') LIKE ${`%${digits}%`}`;
 
     const [customer] = await db.select().from(customersTable)
       .where(and(eq(customersTable.userId, userId), digitsMatch(customersTable.mobile)))
@@ -248,6 +262,12 @@ router.patch("/:id", async (req, res) => {
     if (data.mobile !== undefined) {
       const trimmedMobile = String(data.mobile).trim();
       if (!trimmedMobile) return res.status(400).json({ error: "Mobile cannot be empty" });
+      const mobileDigits = trimmedMobile.replace(/\D/g, "");
+      if (mobileDigits.length < 10 || mobileDigits.length > 13) return res.status(400).json({ error: "Enter a valid 10-digit mobile number" });
+      const [sameMobile] = await db.select({ name: customersTable.name }).from(customersTable)
+        .where(and(eq(customersTable.userId, userId), sql`${customersTable.id} <> ${id}`, sql`right(regexp_replace(${customersTable.mobile}, '[^0-9]', '', 'g'), 10) = ${mobileKey(trimmedMobile)}`))
+        .limit(1);
+      if (sameMobile) return res.status(409).json({ error: `Another customer already has this mobile number (${sameMobile.name})` });
       updateData.mobile = trimmedMobile;
     }
     if (data.email !== undefined) updateData.email = String(data.email).trim() || null;
@@ -281,6 +301,13 @@ router.delete("/:id", async (req, res) => {
     const userId = req.user!.userId;
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    // Deleting a customer who still owes money would erase the only record of that debt.
+    const [owed] = await db.select({ total: sql<number>`coalesce(sum(${salesTable.totalAmount} - ${salesTable.paidAmount}), 0)::numeric` })
+      .from(salesTable)
+      .where(and(eq(salesTable.userId, userId), eq(salesTable.customerId, id), sql`${salesTable.status} <> 'returned'`, sql`${salesTable.paymentStatus} IN ('partial', 'pending')`));
+    if ((parseFloat(String(owed?.total)) || 0) > 0.005) {
+      return res.status(409).json({ error: "This customer still has unpaid bills. Collect the pending payment first, then delete." });
+    }
     const result = await db.delete(customersTable).where(and(eq(customersTable.id, id), eq(customersTable.userId, userId))).returning({ id: customersTable.id });
     if (result.length === 0) return res.status(404).json({ error: "Not found" });
     res.status(204).send();

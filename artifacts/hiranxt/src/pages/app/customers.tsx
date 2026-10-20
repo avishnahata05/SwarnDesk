@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useSearch as useQueryString, useLocation } from "wouter";
 import { useBackClose } from "@/hooks/use-back-close";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, apiErrorMessage } from "@/lib/utils";
 import {
   useListCustomers, useCreateCustomer, useUpdateCustomer, useGetUpcomingOccasions,
   useGetCustomer, useGetSettings,
@@ -524,7 +524,7 @@ export default function Customers() {
         toast({ title: "Customer updated" });
         setEditingCustomer(null);
       },
-      onError: () => toast({ title: "Failed to update customer", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to update customer"), variant: "destructive" }),
     });
   };
 
@@ -553,7 +553,7 @@ export default function Customers() {
         setAddOpen(false);
         reset();
       },
-      onError: () => toast({ title: "Failed to add customer", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to add customer"), variant: "destructive" }),
     });
   };
 

@@ -1,17 +1,20 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { salesTable, saleLineItemsTable, inventoryItemsTable, customersTable, repairJobsTable } from "@workspace/db";
-import { sql, gte, lt, eq, and } from "drizzle-orm";
+import { sql, gte, lt, eq, ne, and } from "drizzle-orm";
 
 const router = Router();
 
 router.get("/summary", async (req, res) => {
   try {
     const userId = req.user!.userId;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    // "Today" is the shop's day in India. setHours(0,0,0,0) used the server's clock — on a
+    // UTC host the day rolled over at 5:30 AM IST, so every evening's sales landed on the
+    // wrong day's dashboard.
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    const istNow = new Date(Date.now() + IST_OFFSET_MS);
+    const today = new Date(Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate()) - IST_OFFSET_MS);
+    const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
 
     const [
       [todaySalesResult],
@@ -19,27 +22,32 @@ router.get("/summary", async (req, res) => {
       [totalCustomers],
       [totalInventory],
       [pendingRepairs],
+      [pendingDues],
     ] = await Promise.all([
       db.select({ total: sql<number>`coalesce(sum(${salesTable.totalAmount}), 0)::numeric` })
         .from(salesTable)
-        .where(and(eq(salesTable.userId, userId), gte(salesTable.saleDate, today), lt(salesTable.saleDate, tomorrow))),
+        .where(and(eq(salesTable.userId, userId), ne(salesTable.status, "returned"), gte(salesTable.saleDate, today), lt(salesTable.saleDate, tomorrow))),
       // Profit proxy: sum of making charges on today's bills (labour/crafting margin)
-      db.select({ total: sql<number>`coalesce(sum(${saleLineItemsTable.makingCharges}), 0)::numeric` })
+      db.select({ total: sql<number>`coalesce(sum(${saleLineItemsTable.makingCharges} * ${saleLineItemsTable.quantity}), 0)::numeric` })
         .from(saleLineItemsTable)
         .innerJoin(salesTable, and(eq(saleLineItemsTable.saleId, salesTable.id), eq(salesTable.userId, userId)))
-        .where(and(eq(saleLineItemsTable.userId, userId), gte(salesTable.saleDate, today), lt(salesTable.saleDate, tomorrow))),
+        .where(and(eq(saleLineItemsTable.userId, userId), ne(salesTable.status, "returned"), gte(salesTable.saleDate, today), lt(salesTable.saleDate, tomorrow))),
       db.select({ count: sql<number>`count(*)::int` })
         .from(customersTable)
         .where(eq(customersTable.userId, userId)),
       db.select({
         count: sql<number>`count(*)::int`,
-        value: sql<number>`coalesce(sum(${inventoryItemsTable.totalValue}), 0)::numeric`,
+        value: sql<number>`coalesce(sum(${inventoryItemsTable.totalValue} * ${inventoryItemsTable.quantity}), 0)::numeric`,
       })
         .from(inventoryItemsTable)
         .where(eq(inventoryItemsTable.userId, userId)),
       db.select({ count: sql<number>`count(*)::int` })
         .from(repairJobsTable)
         .where(and(eq(repairJobsTable.userId, userId), sql`${repairJobsTable.status} IN ('received', 'in_progress', 'ready')`)),
+      // Money customers still owe on unpaid / part-paid bills (cancelled bills owe nothing).
+      db.select({ total: sql<number>`coalesce(sum(${salesTable.totalAmount} - ${salesTable.paidAmount}), 0)::numeric` })
+        .from(salesTable)
+        .where(and(eq(salesTable.userId, userId), ne(salesTable.status, "returned"), sql`${salesTable.paymentStatus} IN ('partial', 'pending')`)),
     ]);
 
     const todaySales = parseFloat(String(todaySalesResult.total)) || 0;
@@ -54,6 +62,7 @@ router.get("/summary", async (req, res) => {
       totalInventoryItems: totalInventory.count || 0,
       totalInventoryValue: parseFloat(String(totalInventory.value)) || 0,
       pendingRepairs: pendingRepairs.count || 0,
+      pendingPaymentsTotal: Math.max(0, parseFloat(String(pendingDues.total)) || 0),
     });
   } catch (err) {
     req.log.error({ err }, "Failed to get dashboard summary");
@@ -98,6 +107,8 @@ router.get("/low-stock", async (req, res) => {
     const items = await db.select().from(inventoryItemsTable)
       .where(and(
         eq(inventoryItemsTable.userId, userId),
+        // Old gold taken in exchange is scrap awaiting melting, not a product line to restock.
+        ne(inventoryItemsTable.category, "old_gold"),
         sql`${inventoryItemsTable.quantity} <= ${inventoryItemsTable.lowStockThreshold}`
       ))
       .orderBy(inventoryItemsTable.quantity)

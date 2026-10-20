@@ -40,6 +40,8 @@ export interface DashboardSummary {
   totalInventoryItems: number;
   totalInventoryValue: number;
   pendingRepairs: number;
+  /** Total money customers still owe on unpaid / part-paid bills */
+  pendingPaymentsTotal?: number;
 }
 
 export interface InventoryItem {
@@ -299,6 +301,8 @@ export interface SaleInput {
   discountAmount: number;
   exchangeGoldWeight: number;
   exchangeGoldValue: number;
+  /** Purity of the old gold taken in exchange, e.g. "22K" */
+  exchangePurity?: string;
   paymentMode: string;
   /** @nullable */
   bankAccountId?: number | null;

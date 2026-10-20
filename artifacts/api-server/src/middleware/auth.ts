@@ -1,5 +1,8 @@
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { db, staffTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
+import { TtlCache } from "../lib/cache";
 
 export interface AuthUser {
   userId: number;
@@ -29,7 +32,16 @@ declare global {
   }
 }
 
+// A hardcoded fallback secret in production means anyone who has read this source can mint
+// a valid token for any shop. Refuse to start rather than run that way.
+if (!process.env.JWT_SECRET && process.env.NODE_ENV === "production") {
+  throw new Error("JWT_SECRET must be set in production");
+}
 const JWT_SECRET = process.env.JWT_SECRET ?? "swarndesk-dev-secret-change-in-prod";
+
+// A staff token lasts 30 days, but the owner must be able to cut access off NOW (employee
+// leaves, role changed). Re-check the staff row on each request, cached 30s to spare the DB.
+const staffStateCache = new TtlCache<{ isActive: boolean; role: string; ownerUserId: number } | null>(30_000);
 
 export function signToken(payload: AuthUser): string {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: "30d" });
@@ -39,18 +51,38 @@ export function verifyToken(token: string): AuthUser {
   return jwt.verify(token, JWT_SECRET) as AuthUser;
 }
 
-export function authMiddleware(req: Request, res: Response, next: NextFunction) {
+export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   if (!header?.startsWith("Bearer ")) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   const token = header.slice(7);
+  let user: AuthUser;
   try {
-    req.user = jwt.verify(token, JWT_SECRET) as AuthUser;
-    next();
+    user = jwt.verify(token, JWT_SECRET) as AuthUser;
   } catch {
     return res.status(401).json({ error: "Invalid or expired token" });
   }
+  if (user.staffId !== null && user.staffId !== undefined) {
+    try {
+      const key = String(user.staffId);
+      let state = staffStateCache.get(key);
+      if (state === undefined) {
+        const [row] = await db.select({ isActive: staffTable.isActive, role: staffTable.role, ownerUserId: staffTable.ownerUserId })
+          .from(staffTable).where(eq(staffTable.id, user.staffId)).limit(1);
+        state = row ?? null;
+        staffStateCache.set(key, state);
+      }
+      if (!state || !state.isActive || state.ownerUserId !== user.userId) {
+        return res.status(401).json({ error: "Your access has been revoked" });
+      }
+      user = { ...user, staffRole: state.role };
+    } catch {
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+  req.user = user;
+  next();
 }
 
 export function adminOnly(req: Request, res: Response, next: NextFunction) {

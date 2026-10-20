@@ -37,6 +37,17 @@ router.put("/current", async (req, res) => {
     const userId = req.user!.userId;
     const { gold22k, gold24k, gold18k, silver } = req.body;
 
+    // Rates drive every price on every bill, so a typo here is expensive. Reject anything
+    // that isn't a sane positive number instead of storing it ("abc" crashed the insert,
+    // and 0 or a negative rate would quietly price every item at nothing).
+    for (const [label, value] of [["22K gold", gold22k], ["24K gold", gold24k], ["18K gold", gold18k], ["Silver", silver]] as const) {
+      if (value === undefined || value === null || value === "") continue;
+      const n = Number(value);
+      if (!isFinite(n) || n <= 0 || n > 10_000_000) {
+        return res.status(400).json({ error: `${label} rate must be a positive number` });
+      }
+    }
+
     const updated = await db.transaction(async (tx) => {
       // Serialize concurrent rate saves for this user. Without this lock, two
       // near-simultaneous updates (e.g. two form fields saved back-to-back, or
@@ -100,7 +111,10 @@ router.put("/current", async (req, res) => {
 router.get("/history", async (req, res) => {
   try {
     const userId = req.user!.userId;
-    const history = await db.select().from(rateHistoryTable).where(eq(rateHistoryTable.userId, userId)).orderBy(asc(rateHistoryTable.timestamp)).limit(50);
+    // Latest 50 changes, returned oldest-first for charting. Selecting ascending + LIMIT
+    // returned the shop's very first 50 rates forever, so the chart froze after 50 updates.
+    const latest = await db.select().from(rateHistoryTable).where(eq(rateHistoryTable.userId, userId)).orderBy(desc(rateHistoryTable.timestamp)).limit(50);
+    const history = latest.reverse();
     res.json(history.map(h => ({
       timestamp: h.timestamp.toISOString(),
       gold22k: parseFloat(h.gold22k),

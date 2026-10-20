@@ -1,6 +1,6 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
-import { db, staffTable } from "@workspace/db";
+import { db, staffTable, usersTable } from "@workspace/db";
 import { eq, and, ne } from "drizzle-orm";
 import { requireShopRole } from "../middleware/auth.js";
 
@@ -49,9 +49,11 @@ router.post("/", async (req, res) => {
     if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
     const role = VALID_ROLES.has(data.role) ? data.role : "salesperson";
 
-    const [existing] = await db.select({ id: staffTable.id }).from(staffTable)
-      .where(and(eq(staffTable.ownerUserId, ownerUserId), eq(staffTable.email, email)));
-    if (existing) return res.status(409).json({ error: "A staff member with this email already exists" });
+    // Login looks the email up globally (owner accounts first, then staff), so it must be
+    // unique across ALL shops — otherwise two shops' staff collide and one logs into the other's.
+    const [existing] = await db.select({ id: staffTable.id }).from(staffTable).where(eq(staffTable.email, email));
+    const [ownerWithEmail] = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.email, email));
+    if (existing || ownerWithEmail) return res.status(409).json({ error: "This email is already in use. Use a different email for this staff member." });
 
     const passwordHash = await bcrypt.hash(password, 10);
     const [created] = await db.insert(staffTable).values({

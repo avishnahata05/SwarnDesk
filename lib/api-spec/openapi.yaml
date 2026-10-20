@@ -1137,6 +1137,8 @@ components:
           type: number
         pendingRepairs:
           type: integer
+        pendingPaymentsTotal:
+          type: number
 
     InventoryItem:
       type: object
@@ -1458,6 +1460,8 @@ components:
           type: number
         exchangeGoldValue:
           type: number
+        exchangePurity:
+          type: string
         paymentMode:
           type: string
         bankAccountId:

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, apiErrorMessage } from "@/lib/utils";
 import { PageHelpButton, PageHelpDialog } from "@/components/PageHelp";
 import { InfoTooltip } from "@/components/InfoTooltip";
 import {
@@ -517,7 +517,7 @@ export default function Inventory() {
         toast({ title: "Item added successfully" });
         setAddOpen(false);
       },
-      onError: () => toast({ title: "Failed to add item", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to add item"), variant: "destructive" }),
     });
   };
 

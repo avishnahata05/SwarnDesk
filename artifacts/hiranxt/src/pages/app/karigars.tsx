@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { formatCurrency, formatWeight, formatDate } from "@/lib/utils";
+import { formatCurrency, formatWeight, formatDate, apiErrorMessage } from "@/lib/utils";
 import {
   useListKarigars, useCreateKarigar, useUpdateKarigar, useIssueMetalToKarigar, useReturnMetalFromKarigar, useGetKarigar, useDeleteKarigar,
   getListKarigarsQueryKey
@@ -125,7 +125,7 @@ export default function Karigars() {
     if (!confirm("Delete this karigar? This cannot be undone.")) return;
     deleteKarigar.mutate({ id }, {
       onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListKarigarsQueryKey() }); toast({ title: "Karigar deleted" }); },
-      onError: () => toast({ title: "Failed to delete karigar", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to delete karigar"), variant: "destructive" }),
     });
   };
 
@@ -151,7 +151,7 @@ export default function Karigars() {
         setAddOpen(false);
         addForm.reset();
       },
-      onError: () => toast({ title: "Failed to add karigar", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to add karigar"), variant: "destructive" }),
     });
   };
 
@@ -174,7 +174,7 @@ export default function Karigars() {
         toast({ title: "Karigar updated" });
         setEditKarigar(null);
       },
-      onError: () => toast({ title: "Failed to update karigar", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to update karigar"), variant: "destructive" }),
     });
   };
 
@@ -190,7 +190,7 @@ export default function Karigars() {
         setIssueOpen(null);
         issueForm.reset();
       },
-      onError: () => toast({ title: "Failed to issue metal", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to issue metal"), variant: "destructive" }),
     });
   };
 
@@ -218,7 +218,7 @@ export default function Karigars() {
         setReturnOpen(null);
         returnForm.reset();
       },
-      onError: () => toast({ title: "Failed to record return", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to record return"), variant: "destructive" }),
     });
   };
 

@@ -45,6 +45,16 @@ const statCards = [
     accent: "text-green-600",
   },
   {
+    label: "Money to Collect",
+    hint: "Unpaid balance from customers (see Pending Payments)",
+    key: "pendingPaymentsTotal" as const,
+    format: "currency",
+    icon: IndianRupee,
+    iconBg: "bg-orange-50",
+    iconColor: "text-orange-600",
+    accent: "text-orange-600",
+  },
+  {
     label: "Inventory Value",
     hint: "Total stock worth",
     key: "totalInventoryValue" as const,

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { formatCurrency, formatDate, formatWeight } from "@/lib/utils";
+import { formatCurrency, formatDate, formatWeight, apiErrorMessage } from "@/lib/utils";
 import {
   useListPurchases, useCreatePurchase, useUpdatePurchase, useCancelPurchase,
   useListSuppliers, useCreateSupplier, useUpdateSupplier, useDeleteSupplier,
@@ -117,7 +117,7 @@ export default function Purchases() {
       ratePerGram: parseFloat(String(data.ratePerGram)),
       makingCharges,
       totalAmount: total,
-      paidAmount: data.paidAmount !== undefined && String(data.paidAmount) !== "" ? parseFloat(String(data.paidAmount)) : total,
+      paidAmount: data.paidAmount !== undefined && String(data.paidAmount) !== "" ? parseFloat(String(data.paidAmount)) : data.paymentMode === "credit" ? 0 : total,
       paymentMode: data.paymentMode,
       bankAccountId,
       gstRate: data.gstRate ? parseFloat(data.gstRate) : undefined,
@@ -136,7 +136,7 @@ export default function Purchases() {
         setBankAccountId(null);
         reset();
       },
-      onError: () => toast({ title: "Failed to record purchase", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to record purchase"), variant: "destructive" }),
     });
   };
 
@@ -225,12 +225,12 @@ export default function Purchases() {
     if (supplierForm.id > 0) {
       updateSupplier.mutate({ id: supplierForm.id, data: payload }, {
         onSuccess: () => { invalidateSuppliers(); toast({ title: "Supplier updated" }); setSupplierDialogOpen(false); },
-        onError: () => toast({ title: "Failed to update supplier", variant: "destructive" }),
+        onError: (e) => toast({ title: apiErrorMessage(e, "Failed to update supplier"), variant: "destructive" }),
       });
     } else {
       createSupplier.mutate({ data: payload }, {
         onSuccess: () => { invalidateSuppliers(); toast({ title: "Supplier added" }); setSupplierDialogOpen(false); },
-        onError: () => toast({ title: "Failed to add supplier", variant: "destructive" }),
+        onError: (e) => toast({ title: apiErrorMessage(e, "Failed to add supplier"), variant: "destructive" }),
       });
     }
   };
@@ -239,7 +239,7 @@ export default function Purchases() {
     if (!confirm("Delete this supplier?")) return;
     deleteSupplier.mutate({ id }, {
       onSuccess: () => { invalidateSuppliers(); toast({ title: "Supplier deleted" }); },
-      onError: () => toast({ title: "Failed to delete supplier", variant: "destructive" }),
+      onError: (e) => toast({ title: apiErrorMessage(e, "Failed to delete supplier"), variant: "destructive" }),
     });
   };
 

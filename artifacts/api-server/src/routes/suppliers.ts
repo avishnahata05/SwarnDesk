@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { suppliersTable } from "@workspace/db";
+import { suppliersTable, purchasesTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 
 const router = Router();
@@ -27,7 +27,7 @@ function mapSupplier(s: typeof suppliersTable.$inferSelect) {
 router.get("/", async (req, res) => {
   try {
     const userId = req.user!.userId;
-    const suppliers = await db.select().from(suppliersTable).where(eq(suppliersTable.userId, userId));
+    const suppliers = await db.select().from(suppliersTable).where(eq(suppliersTable.userId, userId)).orderBy(suppliersTable.name);
     res.json(suppliers.map(mapSupplier));
   } catch (err) {
     req.log.error({ err }, "Failed to list suppliers");
@@ -39,13 +39,17 @@ router.post("/", async (req, res) => {
   try {
     const userId = req.user!.userId;
     const data = req.body;
+    const name = String(data.name ?? "").trim();
+    const mobile = String(data.mobile ?? "").trim();
+    if (!name) return res.status(400).json({ error: "Supplier name is required" });
+    if (!mobile) return res.status(400).json({ error: "Mobile number is required" });
     const [supplier] = await db.insert(suppliersTable).values({
       userId,
-      name: data.name,
-      mobile: data.mobile,
-      address: data.address,
-      gstin: data.gstin,
-      email: data.email,
+      name,
+      mobile,
+      address: data.address ? String(data.address).trim() || null : null,
+      gstin: data.gstin ? String(data.gstin).trim().toUpperCase() || null : null,
+      email: data.email ? String(data.email).trim() || null : null,
       openingBalance: safeFloat(data.openingBalance, 0).toString(),
       openingBalanceType: data.openingBalanceType === "debit" ? "debit" : "credit",
     }).returning();
@@ -94,6 +98,11 @@ router.delete("/:id", async (req, res) => {
     const userId = req.user!.userId;
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    // A supplier with recorded purchases is part of the books — deleting leaves those
+    // purchases pointing at nobody.
+    const [used] = await db.select({ id: purchasesTable.id }).from(purchasesTable)
+      .where(and(eq(purchasesTable.supplierId, id), eq(purchasesTable.userId, userId))).limit(1);
+    if (used) return res.status(409).json({ error: "This supplier has purchases recorded against them, so it can't be deleted." });
     const result = await db.delete(suppliersTable).where(and(eq(suppliersTable.id, id), eq(suppliersTable.userId, userId))).returning({ id: suppliersTable.id });
     if (result.length === 0) return res.status(404).json({ error: "Not found" });
     res.status(204).send();

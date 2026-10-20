@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { inventoryItemsTable, saleLineItemsTable } from "@workspace/db";
-import { eq, ilike, and, or, sql } from "drizzle-orm";
+import { eq, ilike, and, or, sql, desc, ne } from "drizzle-orm";
 
 const router = Router();
 
@@ -55,7 +55,9 @@ router.get("/", async (req, res) => {
     }
 
     const where = conditions.length === 1 ? conditions[0] : and(...conditions);
-    const items = await db.select().from(inventoryItemsTable).where(where).limit(limitNum);
+    // Newest first — without an ORDER BY, Postgres returns rows in arbitrary order, so once
+    // a shop passed the limit the LIMIT cut off a random slice of stock instead of the oldest.
+    const items = await db.select().from(inventoryItemsTable).where(where).orderBy(desc(inventoryItemsTable.id)).limit(limitNum);
     res.json(items.map(mapItem));
   } catch (err) {
     req.log.error({ err }, "Failed to list inventory");
@@ -76,11 +78,25 @@ router.post("/", async (req, res) => {
     const makingCharges = safeFloat(data.makingCharges);
     const metalRate = safeFloat(data.metalRate);
     const totalValue = safeFloat(data.totalValue);
-    const quantity = Math.max(0, parseInt(data.quantity) || 1);
+    // `|| 1` would turn a deliberate 0 (e.g. an out-of-stock placeholder) into 1.
+    const parsedQty = parseInt(data.quantity);
+    const quantity = isNaN(parsedQty) ? 1 : Math.max(0, parsedQty);
 
+    if (netWeight < 0 || stoneWeight < 0 || totalValue < 0) return res.status(400).json({ error: "Weights and values cannot be negative" });
+    if (netWeight > grossWeight + 0.0005) return res.status(400).json({ error: "Net weight cannot be more than gross weight" });
     if (grossWeight < 0) return res.status(400).json({ error: "Gross weight cannot be negative" });
     if (metalRate < 0) return res.status(400).json({ error: "Metal rate cannot be negative" });
     if (makingCharges < 0) return res.status(400).json({ error: "Making charges cannot be negative" });
+
+    // A barcode or HUID identifies exactly one piece. Duplicates make a scan at the counter
+    // pick the wrong item — and so bill the wrong price — so reject them up front.
+    for (const [col, label, raw] of [[inventoryItemsTable.barcode, "barcode", data.barcode], [inventoryItemsTable.huid, "HUID", data.huid]] as const) {
+      const v = raw ? String(raw).trim() : "";
+      if (!v) continue;
+      const [dupe] = await db.select({ name: inventoryItemsTable.name }).from(inventoryItemsTable)
+        .where(and(eq(inventoryItemsTable.userId, userId), eq(col, v))).limit(1);
+      if (dupe) return res.status(409).json({ error: `This ${label} is already used by "${dupe.name}"` });
+    }
 
     const [item] = await db.insert(inventoryItemsTable).values({
       userId,
@@ -116,7 +132,8 @@ router.get("/stats/by-category", async (req, res) => {
       .select({
         category: inventoryItemsTable.category,
         count: sql<number>`count(*)::int`,
-        value: sql<number>`sum(${inventoryItemsTable.totalValue})::numeric`,
+        // totalValue is the value of ONE piece — stock on hand is that times quantity.
+        value: sql<number>`coalesce(sum(${inventoryItemsTable.totalValue} * ${inventoryItemsTable.quantity}), 0)::numeric`,
       })
       .from(inventoryItemsTable)
       .where(eq(inventoryItemsTable.userId, userId))
@@ -158,19 +175,39 @@ router.patch("/:id", async (req, res) => {
       if (!trimmedName) return res.status(400).json({ error: "Name cannot be empty" });
       updateData.name = trimmedName;
     }
-    if (data.category !== undefined) updateData.category = data.category;
+    if (data.category !== undefined) {
+      const category = String(data.category).trim();
+      if (!category) return res.status(400).json({ error: "Category cannot be empty" });
+      updateData.category = category;
+    }
     if (data.purity !== undefined) updateData.purity = data.purity;
-    if (data.grossWeight !== undefined) updateData.grossWeight = safeFloat(data.grossWeight).toString();
-    if (data.netWeight !== undefined) updateData.netWeight = safeFloat(data.netWeight).toString();
-    if (data.stoneWeight !== undefined) updateData.stoneWeight = safeFloat(data.stoneWeight).toString();
-    if (data.stoneValue !== undefined) updateData.stoneValue = data.stoneValue != null ? safeFloat(data.stoneValue).toString() : null;
-    if (data.makingCharges !== undefined) updateData.makingCharges = safeFloat(data.makingCharges).toString();
-    if (data.metalRate !== undefined) updateData.metalRate = safeFloat(data.metalRate).toString();
-    if (data.totalValue !== undefined) updateData.totalValue = safeFloat(data.totalValue).toString();
-    if (data.quantity !== undefined) updateData.quantity = Math.max(0, parseInt(data.quantity) || 0);
+    for (const f of ["grossWeight", "netWeight", "stoneWeight", "makingCharges", "metalRate", "totalValue"] as const) {
+      if (data[f] === undefined) continue;
+      const n = safeFloat(data[f], NaN);
+      if (!isFinite(n) || n < 0) return res.status(400).json({ error: `${f} must be a non-negative number` });
+      updateData[f] = n.toString();
+    }
+    if (data.stoneValue !== undefined) {
+      const n = data.stoneValue != null && data.stoneValue !== "" ? safeFloat(data.stoneValue, NaN) : null;
+      if (n !== null && (!isFinite(n) || n < 0)) return res.status(400).json({ error: "stoneValue must be a non-negative number" });
+      updateData.stoneValue = n === null ? null : n.toString();
+    }
+    if (data.quantity !== undefined) {
+      const q = parseInt(data.quantity);
+      if (isNaN(q) || q < 0) return res.status(400).json({ error: "Quantity must be 0 or more" });
+      updateData.quantity = q;
+    }
     if (data.branch !== undefined) updateData.branch = data.branch;
-    if (data.huid !== undefined) updateData.huid = data.huid || null;
-    if (data.barcode !== undefined) updateData.barcode = data.barcode || null;
+    if (data.huid !== undefined) updateData.huid = data.huid ? String(data.huid).trim() || null : null;
+    if (data.barcode !== undefined) updateData.barcode = data.barcode ? String(data.barcode).trim() || null : null;
+    for (const [col, label, key] of [[inventoryItemsTable.barcode, "barcode", "barcode"], [inventoryItemsTable.huid, "HUID", "huid"]] as const) {
+      const v = updateData[key] as string | null | undefined;
+      if (!v) continue;
+      const [dupe] = await db.select({ name: inventoryItemsTable.name }).from(inventoryItemsTable)
+        .where(and(eq(inventoryItemsTable.userId, userId), eq(col, v), ne(inventoryItemsTable.id, id))).limit(1);
+      if (dupe) return res.status(409).json({ error: `This ${label} is already used by "${dupe.name}"` });
+    }
+    if (Object.keys(updateData).length === 0) return res.status(400).json({ error: "Nothing to update" });
     if (data.karigarId !== undefined) updateData.karigarId = data.karigarId || null;
     if (data.karigarName !== undefined) updateData.karigarName = data.karigarName || null;
     if (data.lowStockThreshold !== undefined) updateData.lowStockThreshold = Math.max(0, parseInt(data.lowStockThreshold) || 2);
